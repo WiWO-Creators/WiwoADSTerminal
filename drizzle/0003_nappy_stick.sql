@@ -1,0 +1,1 @@
+ALTER TABLE `integration_accounts` ADD `metrics_last_attempted_at` integer;
