@@ -1,11 +1,10 @@
 import { getRawDb } from "@/db";
+import type { RangoId } from "@/lib/rangos";
 import {
-  initialAudit,
-  initialDecisions,
   type AuditEvent,
   type Decision,
 } from "@/app/data";
-import type { ChatGPTUser } from "@/app/chatgpt-auth";
+import type { Actor } from "@/lib/permisos";
 import {
   getPerformanceSnapshot,
   type PerformanceSnapshot,
@@ -72,7 +71,6 @@ export type DashboardSnapshot = {
   user: DashboardUser;
   decisions: Decision[];
   auditEvents: AuditEvent[];
-  dataMode: "pilot";
   dataUpdatedAt: number | null;
   performance: PerformanceSnapshot;
 };
@@ -105,10 +103,11 @@ const DECISION_SELECT = `
 `;
 
 export async function getDashboardSnapshot(
-  identity: ChatGPTUser,
+  identity: Actor,
+  /** Periodo de las métricas. Las decisiones y la bitácora no dependen de él. */
+  rango?: RangoId,
 ): Promise<DashboardSnapshot> {
   const db = getRawDb();
-  await ensurePilotSeed(db);
   const user = await upsertUser(db, identity);
   const now = Date.now();
 
@@ -137,7 +136,7 @@ export async function getDashboardSnapshot(
          LIMIT 100`,
       )
       .all<AuditRow>(),
-    getPerformanceSnapshot(identity.id),
+    getPerformanceSnapshot(identity, new Date(), { rango }),
   ]);
 
   const dataUpdatedAt = Math.max(
@@ -150,18 +149,16 @@ export async function getDashboardSnapshot(
     user,
     decisions: decisionResult.results.map(toDecision),
     auditEvents: auditResult.results.map(toAuditEvent),
-    dataMode: "pilot",
     dataUpdatedAt: dataUpdatedAt || null,
     performance,
   };
 }
 
 export async function applyDecisionAction(
-  identity: ChatGPTUser,
+  identity: Actor,
   input: DecisionAction,
 ): Promise<DashboardSnapshot> {
   const db = getRawDb();
-  await ensurePilotSeed(db);
   const user = await upsertUser(db, identity);
   validateMutationInput(input);
 
@@ -379,7 +376,7 @@ export async function applyDecisionAction(
 }
 
 export async function approveDecisionBatch(
-  identity: ChatGPTUser,
+  identity: Actor,
   items: Array<{ id: string; expectedVersion: number }>,
   idempotencyKey: string,
 ): Promise<DashboardSnapshot> {
@@ -401,7 +398,6 @@ export async function approveDecisionBatch(
   }
 
   const db = getRawDb();
-  await ensurePilotSeed(db);
   const user = await upsertUser(db, identity);
   const duplicate = await db
     .prepare(
@@ -482,29 +478,18 @@ export async function approveDecisionBatch(
 
 async function upsertUser(
   db: D1Database,
-  identity: ChatGPTUser,
+  identity: Actor,
 ): Promise<DashboardUser> {
-  const now = Date.now();
-  const email = identity.email.trim().toLowerCase();
-  await db
-    .prepare(
-      `INSERT INTO users (id, email, display_name, role, is_active, created_at, last_seen_at)
-       VALUES (?, ?, ?, 'buyer', 1, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         email = excluded.email,
-         display_name = excluded.display_name,
-         last_seen_at = excluded.last_seen_at`,
-    )
-    .bind(identity.id, email, identity.displayName, now, now)
-    .run();
-
+  // La ficha ya existe: resolveActor la crea o la actualiza al abrir sesión.
+  // Acá solo se lee, para no reintroducir un alta implícita que saltaría el
+  // control de quién pertenece al equipo.
   const row = await db
     .prepare(
       "SELECT id, email, display_name, role FROM users WHERE id = ? LIMIT 1",
     )
     .bind(identity.id)
     .first<UserRow>();
-  if (!row) throw new DashboardStoreError("No se pudo crear la sesión", 500);
+  if (!row) throw new DashboardStoreError("No se pudo cargar la sesión", 500);
 
   return {
     id: row.id,
@@ -512,92 +497,6 @@ async function upsertUser(
     displayName: row.display_name,
     role: row.role,
   };
-}
-
-async function ensurePilotSeed(db: D1Database) {
-  const seeded = await db
-    .prepare("SELECT value FROM app_meta WHERE key = 'pilot_seed_v1' LIMIT 1")
-    .first<{ value: string }>();
-  if (seeded) return;
-
-  const now = Date.now();
-  const ages = [18 * 60, 60 * 60, 3 * 60 * 60, 7 * 60 * 60, 11 * 60 * 60];
-  const expiryHours = [53, 49, 46, 39, 28];
-  const statements: D1PreparedStatement[] = initialDecisions.map(
-    (decision, index) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO decisions (
-            id, status, severity, client, platform, owner_label, autonomy,
-            title, diagnosis, proposed_action, impact, confidence, agent, rule,
-            age_label, expires_label, before_value, after_value, guardrail,
-            metric, delta, primary_label, generated_at, expires_at,
-            execution_status, version, created_at, updated_at
-          ) VALUES (
-            ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, 'not_requested', 1, ?, ?
-          )`,
-        )
-        .bind(
-          decision.id,
-          decision.severity,
-          decision.client,
-          decision.platform,
-          decision.owner,
-          decision.autonomy,
-          decision.title,
-          decision.diagnosis,
-          decision.proposedAction,
-          decision.impact,
-          decision.confidence,
-          decision.agent,
-          decision.rule,
-          decision.age,
-          decision.expires,
-          decision.before,
-          decision.after,
-          decision.guardrail,
-          decision.metric,
-          decision.delta,
-          decision.primaryLabel,
-          now - ages[index],
-          now + expiryHours[index] * 60 * 60 * 1000,
-          now,
-          now,
-        ),
-  );
-
-  initialAudit.forEach((event, index) => {
-    statements.push(
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO audit_events (
-            id, actor_name_snapshot, event_type, action_label, result,
-            client_snapshot, origin_snapshot, changes_json,
-            idempotency_key, created_at
-          ) VALUES (?, ?, 'seeded', ?, ?, ?, ?, '{}', ?, ?)`,
-        )
-        .bind(
-          event.id,
-          event.user,
-          event.action,
-          event.result,
-          event.client,
-          event.origin,
-          `seed:${event.id}`,
-          now - (index + 2) * 70 * 60 * 1000,
-        ),
-    );
-  });
-
-  statements.push(
-    db
-      .prepare(
-        "INSERT OR IGNORE INTO app_meta (key, value, updated_at) VALUES ('pilot_seed_v1', 'complete', ?)",
-      )
-      .bind(now),
-  );
-  await db.batch(statements);
 }
 
 function validateMutationInput(input: DecisionAction) {
@@ -679,7 +578,6 @@ function toAuditEvent(row: AuditRow): AuditEvent {
     client: row.client_snapshot,
     origin: row.origin_snapshot,
     result: row.result,
-    dataOrigin: row.event_type === "seeded" ? "pilot" : "recorded_action",
   };
 }
 

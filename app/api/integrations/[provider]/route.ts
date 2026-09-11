@@ -1,7 +1,4 @@
-import {
-  getChatGPTUser,
-  isAuthorizedChatGPTUser,
-} from "@/app/chatgpt-auth";
+import { getSession } from "@/app/sesion";
 import {
   disconnectIntegration,
   IntegrationError,
@@ -39,11 +36,9 @@ async function mutate(
   context: { params: Promise<{ provider: string }> },
   action: "sync" | "select" | "disconnect",
 ) {
-  const user = await getChatGPTUser();
+  const session = await getSession();
+  const user = session?.actor ?? null;
   if (!user) return responseError("Inicia sesión para continuar", 401);
-  if (!isAuthorizedChatGPTUser(user)) {
-    return responseError("Tu cuenta no tiene acceso a WiWO.ADS", 403);
-  }
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) {
     return responseError("Origen no permitido", 403);

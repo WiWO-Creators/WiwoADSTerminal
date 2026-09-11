@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSession } from "@/app/sesion";
 import {
   createAuthorizationUrl,
   IntegrationError,
@@ -11,7 +11,8 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) {
-  const user = await getChatGPTUser();
+  const session = await getSession();
+  const user = session?.actor ?? null;
   if (!user) return backToIntegrations(request, "signin_required");
 
   const { provider } = await context.params;

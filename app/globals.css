@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Tomorrow:wght@400;500;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
@@ -24,38 +24,38 @@
 
 :root {
   color-scheme: dark;
-  --background: #080808;
-  --foreground: #F5F3FF;
-  --card: #121218;
-  --card-foreground: #F5F3FF;
-  --popover: #16161d;
-  --popover-foreground: #F5F3FF;
-  --primary: #42ff00;
-  --primary-foreground: #080808;
-  --secondary: #16161d;
-  --secondary-foreground: #F5F3FF;
+  --background: #292929;
+  --foreground: #F8FAD7;
+  --card: #252624;
+  --card-foreground: #F8FAD7;
+  --popover: #323330;
+  --popover-foreground: #F8FAD7;
+  --primary: #3bff00;
+  --primary-foreground: #292929;
+  --secondary: #323330;
+  --secondary-foreground: #F8FAD7;
   --muted: #1b1b24;
   --muted-foreground: #a2a0af;
   --accent: rgba(74, 67, 255, 0.18);
-  --accent-foreground: #4a43ff;
+  --accent-foreground: #4242ff;
   --destructive: #d93d43;
   --border: rgba(245, 243, 255, 0.14);
   --input: rgba(245, 243, 255, 0.22);
-  --ring: #4a43ff;
-  --chart-1: #4a43ff;
-  --chart-2: #42ff00;
-  --chart-3: #42ff00;
+  --ring: #4242ff;
+  --chart-1: #4242ff;
+  --chart-2: #3bff00;
+  --chart-3: #3bff00;
   --chart-4: #f2a934;
   --chart-5: #d93d43;
   --radius: 1rem;
   --sidebar: #0f0f14;
-  --sidebar-foreground: #F5F3FF;
-  --sidebar-primary: #4a43ff;
-  --sidebar-primary-foreground: #080808;
+  --sidebar-foreground: #F8FAD7;
+  --sidebar-primary: #4242ff;
+  --sidebar-primary-foreground: #292929;
   --sidebar-accent: rgba(74, 67, 255, 0.18);
-  --sidebar-accent-foreground: #4a43ff;
+  --sidebar-accent-foreground: #4242ff;
   --sidebar-border: rgba(245, 243, 255, 0.12);
-  --sidebar-ring: #4a43ff;
+  --sidebar-ring: #4242ff;
 }
 
 @theme inline {
@@ -94,8 +94,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Archivo", Arial, Helvetica, sans-serif;
-  --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+  --font-sans: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+  --font-mono: "Tomorrow", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, monospace;
 }
 
@@ -111,20 +111,20 @@ body {
   min-width: 320px;
   background: var(--background);
   color: var(--foreground);
-  font-family: "Archivo", Arial, Helvetica, sans-serif;
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
   font-feature-settings: "tnum" 1, "ss01" 1;
   line-height: 1.55;
 }
 
 .theme-shell {
   min-height: 100svh;
-  background: #080808;
-  color: #f5f3ff;
+  background: #292929;
+  color: #f8fad7;
 }
 
 .theme-shell[data-theme="light"] {
-  --background: #f7f7fa;
-  --foreground: #17161c;
+  --background: #F8FAD7;
+  --foreground: #292929;
   --card: #ffffff;
   --card-foreground: #17161c;
   --popover: #ffffff;
@@ -138,24 +138,24 @@ body {
   --sidebar: #ffffff;
   --sidebar-foreground: #17161c;
   --sidebar-border: rgba(23, 22, 28, 0.12);
-  background: #f7f7fa;
-  color: #17161c;
+  background: #F8FAD7;
+  color: #292929;
 }
 
-.theme-shell[data-theme="light"] [class*="bg-[#080808]"] {
-  background-color: #f7f7fa !important;
+.theme-shell[data-theme="light"] [class*="bg-[#292929]"] {
+  background-color: #F8FAD7 !important;
 }
 
-.theme-shell[data-theme="light"] [class*="bg-[#16161d]"],
-.theme-shell[data-theme="light"] [class*="bg-[#121218]"] {
-  background-color: #ffffff !important;
+.theme-shell[data-theme="light"] [class*="bg-[#323330]"],
+.theme-shell[data-theme="light"] [class*="bg-[#252624]"] {
+  background-color: #FBFBEA !important;
 }
 
-.theme-shell[data-theme="light"] [class*="text-[#F5F3FF]"] {
-  color: #17161c !important;
+.theme-shell[data-theme="light"] [class*="text-[#F8FAD7]"] {
+  color: #292929 !important;
 }
 
-.theme-shell[data-theme="light"] [class*="border-[#F5F3FF]"] {
+.theme-shell[data-theme="light"] [class*="border-[#F8FAD7]"] {
   border-color: rgba(23, 22, 28, 0.14) !important;
 }
 
@@ -174,8 +174,8 @@ textarea {
 }
 
 ::selection {
-  background: #42ff00;
-  color: #080808;
+  background: #3bff00;
+  color: #292929;
 }
 
 .neo-canvas,
@@ -198,20 +198,21 @@ textarea {
   height: 2px;
   content: "";
   pointer-events: none;
-  background: linear-gradient(90deg, #42ff00 0%, #42ff00 34%, #4a43ff 72%, transparent 100%);
+  background: linear-gradient(90deg, #3bff00 0%, #3bff00 34%, #4242ff 72%, transparent 100%);
 }
 
 .font-editorial {
-  font-family: "Archivo", Arial, sans-serif;
+  /* "Serif como voz": Neo usa Fraunces para los títulos editoriales. */
+  font-family: "Fraunces", "Instrument Serif", Georgia, serif;
   font-weight: 800;
 }
 
 .font-brand {
-  font-family: "Archivo", Arial, sans-serif;
+  font-family: "Plus Jakarta Sans", Arial, sans-serif;
 }
 
 .font-micro {
-  font-family: "Space Mono", ui-monospace, monospace;
+  font-family: "Tomorrow", ui-monospace, monospace;
   font-weight: 400;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -223,7 +224,7 @@ textarea {
   height: 0.9rem;
   flex: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, #42ff00 10%, #4a43ff 78%);
+  background: linear-gradient(135deg, #3bff00 10%, #4242ff 78%);
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.42);
 }
 
@@ -240,17 +241,17 @@ textarea {
 [data-slot="input"],
 [data-slot="textarea"] {
   border-color: rgba(245, 243, 255, 0.16);
-  background: #16161d;
+  background: #323330;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 [data-slot="table-header"] [data-slot="table-row"] {
-  background: #16161d !important;
+  background: #323330 !important;
 }
 
 [data-slot="table-header"] [data-slot="table-head"] {
-  color: #42ff00 !important;
-  font-family: "Space Mono", ui-monospace, monospace;
+  color: #3bff00 !important;
+  font-family: "Tomorrow", ui-monospace, monospace;
   font-size: 0.72rem;
   font-weight: 500;
   letter-spacing: 0.055em;
@@ -259,6 +260,81 @@ textarea {
 
 [data-slot="table-row"] {
   border-color: rgba(245, 243, 255, 0.1);
+}
+
+/* Tema claro: las tres reglas de arriba fijan colores oscuros sin mirar el
+   tema. Sin estos ajustes la cabecera de tabla queda como una banda negra con
+   texto oscuro encima, y los campos de formulario salen negros sobre blanco. */
+.theme-shell[data-theme="light"] [data-slot="table-header"] [data-slot="table-row"] {
+  background: #eeeef4 !important;
+}
+.theme-shell[data-theme="light"] [data-slot="table-header"] [data-slot="table-head"] {
+  /* El verde de marca sobre blanco no se lee; se oscurece manteniendo el tono. */
+  color: #2a7500 !important;
+}
+.theme-shell[data-theme="light"] [data-slot="input"],
+.theme-shell[data-theme="light"] [data-slot="textarea"] {
+  background: #ffffff;
+  border-color: rgba(23, 22, 28, 0.18);
+  box-shadow: inset 0 1px 0 rgba(23, 22, 28, 0.04);
+}
+.theme-shell[data-theme="light"] [data-slot="table-row"] {
+  border-color: rgba(23, 22, 28, 0.1);
+}
+
+/* El verde de marca (#3BFF00) está pensado para fondo oscuro: sobre blanco
+   queda en 1.4:1 y es ilegible. En tema claro se oscurece manteniendo el tono,
+   igual que en las cabeceras de tabla. */
+.theme-shell[data-theme="light"] [class*="text-[#3BFF00]"] {
+  color: #2a7500 !important;
+}
+
+/* ── Tokens del sistema Neo (neo.wiwo.me) ────────────────────────────────────
+   Se declaran acá para que el resto del proyecto deje de escribir valores
+   sueltos. Los colores ya están aplicados; forma y espaciado quedan
+   disponibles para lo que venga. */
+:root {
+  --wiwo-beige: #f8fad7;
+  --wiwo-ink: #292929;
+  --wiwo-blue: #4242ff;
+  --wiwo-blue-700: #2525c8;
+  --wiwo-green: #3bff00;
+  --wiwo-lime: #8af84f;
+  --wiwo-gradient-primary: linear-gradient(103deg, #3bff00, #4242ff);
+  --wiwo-gradient-soft: linear-gradient(
+    135deg,
+    rgba(59, 255, 0, 0.12),
+    rgba(66, 66, 255, 0.12)
+  );
+  --radius-card: 1rem;
+  --radius-control: 999px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+}
+
+/* "Tech en microdosis": los controles de Neo son pastillas. */
+[data-slot="button"],
+[data-slot="badge"],
+[data-slot="select-trigger"],
+[data-slot="input"] {
+  border-radius: var(--radius-control);
+}
+
+/* El logotipo usa la fuente de marca. */
+.font-brand {
+  font-family: "Outfit", "Plus Jakarta Sans", Arial, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Acento de marca para el elemento activo de navegación. */
+.neo-accent {
+  background-image: var(--wiwo-gradient-primary);
 }
 
 @keyframes neo-breathe {
@@ -286,4 +362,99 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/*
+ * Vista previa de anuncios: colores reales de Google y de Meta, no los de
+ * Neo. A propósito no usa las variables de marca del sistema — el punto es
+ * que se reconozca como "así se ve en Google" o "así se ve en Meta", y eso
+ * significa copiar el modo oscuro real de cada uno, no el de WiWO.ADS.
+ *
+ * Por default (sin `data-theme="light"` heredado del `.theme-shell`) se ve
+ * el modo oscuro de cada plataforma, porque el sistema arranca en oscuro.
+ */
+.wa-preview-google {
+  background: #202124;
+}
+.wa-preview-google .wa-g-label {
+  border-color: #9aa0a6;
+  color: #9aa0a6;
+}
+.wa-preview-google .wa-g-domain {
+  color: #bdc1c6;
+}
+.wa-preview-google .wa-g-title {
+  color: #8ab4f8;
+}
+.wa-preview-google .wa-g-desc {
+  color: #bdc1c6;
+}
+
+.theme-shell[data-theme="light"] .wa-preview-google {
+  background: #ffffff;
+}
+.theme-shell[data-theme="light"] .wa-preview-google .wa-g-label {
+  border-color: #4d5156;
+  color: #4d5156;
+}
+.theme-shell[data-theme="light"] .wa-preview-google .wa-g-domain {
+  color: #4d5156;
+}
+.theme-shell[data-theme="light"] .wa-preview-google .wa-g-title {
+  color: #1a0dab;
+}
+.theme-shell[data-theme="light"] .wa-preview-google .wa-g-desc {
+  color: #4d5156;
+}
+
+.wa-preview-meta {
+  background: #242526;
+  color: #e4e6eb;
+}
+.wa-preview-meta .wa-m-avatar {
+  background: #3a3b3c;
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-sub {
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-media {
+  background: #3a3b3c;
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-footer {
+  background: #3a3b3c;
+}
+.wa-preview-meta .wa-m-domain {
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-cta {
+  background: #4e4f50;
+  color: #e4e6eb;
+}
+
+.theme-shell[data-theme="light"] .wa-preview-meta {
+  background: #ffffff;
+  color: #050505;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-avatar {
+  background: #e4e6eb;
+  color: #65676b;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-sub {
+  color: #65676b;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-media {
+  background: #e4e6eb;
+  color: #65676b;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-footer {
+  background: #f0f2f5;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-domain {
+  color: #65676b;
+}
+.theme-shell[data-theme="light"] .wa-preview-meta .wa-m-cta {
+  background: #e4e6eb;
+  color: #050505;
 }

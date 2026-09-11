@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   ArrowRight,
   BadgeCheck,
   Bell,
+  Building2,
+  CalendarRange,
+  LoaderCircle,
   Bot,
   ChevronRight,
   Clock3,
@@ -16,7 +18,9 @@ import {
   HeartPulse,
   Inbox,
   LayoutDashboard,
+  LayoutList,
   LockKeyhole,
+  LogOut,
   MoreHorizontal,
   PlugZap,
   Search,
@@ -31,7 +35,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -67,12 +70,27 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import type {
   PerformanceAccountSummary,
   PerformanceSnapshot,
 } from "@/lib/performance-store";
+import { platformLabel } from "@/lib/plataformas";
+import {
+  RANGOS,
+  RANGO_LABELS,
+  RANGO_POR_DEFECTO,
+  type RangoId,
+} from "@/lib/rangos";
 import { cn } from "@/lib/utils";
 import {
   type AuditEvent,
@@ -80,6 +98,13 @@ import {
   type HealthCheck,
   type ViewKey,
 } from "./data";
+import type { AttachToCampana, AttachToConjunto } from "./anuncios-view";
+import { ClientesView } from "./clientes-view";
+import {
+  ConstructorView,
+  type ConstructorAttachTo as ConstructorViewAttachTo,
+} from "./constructor-view";
+import { EquipoView } from "./equipo-view";
 import { IntegrationsView } from "./integrations-view";
 import {
   AuditView,
@@ -97,14 +122,45 @@ const navItems: Array<{
   key: ViewKey;
   label: string;
   icon: typeof LayoutDashboard;
-  count?: number;
+  /** Solo visible para quien administra el equipo. */
+  adminOnly?: boolean;
+  /** Roles que pueden ver la entrada. Vacío: todos. */
+  roles?: string[];
+  /**
+   * true: la pantalla existe y funciona, pero todavía no tiene de dónde sacar
+   * contenido, así que baja a "Próxima fase" en vez de ocupar un lugar de
+   * primera fila. No se elimina: el día que haya motor de reglas o escrituras
+   * que registrar, vuelve arriba cambiando esta marca.
+   */
+  proximaFase?: boolean;
 }> = [
-  { key: "decisions", label: "Decisiones", icon: Inbox, count: 5 },
+  { key: "decisions", label: "Decisiones", icon: Inbox, proximaFase: true },
+  {
+    // Antes "Anuncios" era una entrada aparte: elegir un cliente acá y ver
+    // sus campañas obligaba a saltar de sección. Ahora la ficha del cliente
+    // trae su tabla de anuncios embebida, así que es una sola entrada.
+    key: "clients",
+    label: "Clientes",
+    icon: Building2,
+    roles: ["admin", "lead", "buyer"],
+  },
+  {
+    key: "builder",
+    label: "Constructor",
+    icon: WandSparkles,
+    roles: ["admin", "lead", "buyer"],
+  },
   { key: "control", label: "Sala de control", icon: LayoutDashboard },
-  { key: "health", label: "Salud de medición", icon: HeartPulse },
   { key: "pacing", label: "Inversión", icon: Gauge },
-  { key: "audit", label: "Bitácora", icon: FileChartColumnIncreasing },
-  { key: "integrations", label: "Integraciones", icon: PlugZap },
+  { key: "health", label: "Salud de medición", icon: HeartPulse },
+  {
+    key: "audit",
+    label: "Bitácora",
+    icon: FileChartColumnIncreasing,
+    proximaFase: true,
+  },
+  { key: "integrations", label: "Cuentas", icon: PlugZap },
+  { key: "team", label: "Equipo", icon: ShieldCheck, adminOnly: true },
 ];
 
 const viewMeta: Record<ViewKey, { eyebrow: string; title: string }> = {
@@ -114,12 +170,15 @@ const viewMeta: Record<ViewKey, { eyebrow: string; title: string }> = {
   pacing: { eyebrow: "Rendimiento", title: "Inversión real" },
   audit: { eyebrow: "Gobierno", title: "Bitácora" },
   integrations: { eyebrow: "Configuración", title: "Cuentas conectadas" },
+  team: { eyebrow: "Configuración", title: "Equipo y permisos" },
+  builder: { eyebrow: "Creación", title: "Constructor de campañas" },
+  clients: { eyebrow: "Cartera", title: "Clientes" },
 };
 
 const roleLabels: Record<string, string> = {
   direction: "Dirección",
   lead: "Lead",
-  buyer: "Buyer · Piloto",
+  buyer: "Buyer",
   analyst: "Analista",
 };
 
@@ -130,15 +189,49 @@ export type DashboardIdentity = {
   role: string;
 };
 
+/** A qué abrir el Constructor cuando se navega hacia él desde Clientes. */
+type BuilderContexto =
+  | { modo: "nueva"; portfolioId: string }
+  | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto };
+
+/** Fuerza a que el Constructor se reinicie al cambiar de contexto de destino. */
+function builderConstructorKey(contexto: BuilderContexto | null): string {
+  if (!contexto) return "nuevo";
+  if (contexto.modo === "nueva") return contexto.portfolioId;
+  const attachTo = contexto.attachTo;
+  const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";
+  return `${attachTo.campaignId}:${adsetId}`;
+}
+
+function builderConstructorAttachTo(
+  contexto: BuilderContexto | null,
+): ConstructorViewAttachTo | undefined {
+  if (!contexto) return undefined;
+  if (contexto.modo === "nueva") {
+    return {
+      portfolioId: contexto.portfolioId,
+      platform: "google",
+      accountId: "",
+      campaignId: "",
+      campaignName: "",
+    };
+  }
+  const attachTo = contexto.attachTo;
+  return "adsetId" in attachTo
+    ? attachTo
+    : { ...attachTo, adsetId: undefined, adsetName: undefined };
+}
+
 export default function WiwoDashboard({
+  signOutPath,
   initialSnapshot,
-  initialView = "decisions",
+  initialView = "control",
 }: {
+  signOutPath: string;
   initialSnapshot: {
     user: DashboardIdentity;
     decisions: Decision[];
     auditEvents: AuditEvent[];
-    dataMode: "pilot";
     dataUpdatedAt: number | null;
     performance: PerformanceSnapshot;
   };
@@ -153,9 +246,11 @@ export default function WiwoDashboard({
   const [accountFilter, setAccountFilter] = useState("all");
   const [platformFilter, setPlatformFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
-  const [healthClient, setHealthClient] = useState(
-    initialSnapshot.performance.accounts[0]?.id ?? "",
-  );
+  // Vacío a propósito: la salud se mira por cliente, no por cuenta suelta —
+  // antes el selector abría directo con la primera cuenta del listado
+  // completo de la agencia, sin relación con la cartera que el resto del
+  // sistema usa para organizarse.
+  const [healthClient, setHealthClient] = useState("");
   const [discardOpen, setDiscardOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [discardReason, setDiscardReason] = useState("");
@@ -164,8 +259,18 @@ export default function WiwoDashboard({
   const [auditEvents, setAuditEvents] =
     useState<AuditEvent[]>(initialSnapshot.auditEvents);
   const [performance, setPerformance] = useState(initialSnapshot.performance);
+  const [rango, setRango] = useState<RangoId>(
+    initialSnapshot.performance.rango?.id ?? RANGO_POR_DEFECTO,
+  );
+  const [cambiandoRango, setCambiandoRango] = useState(false);
+  // Cuenta la petición de rango más reciente: si dos llegan a destiempo, solo
+  // se aplica la última. Sin esto, elegir "Últimos 90 días" y arrepentirse a
+  // los 5 segundos por "Año en curso" podía terminar mostrando los datos del
+  // rango equivocado si la primera respuesta (más lenta) llegaba después.
+  const rangoSolicitadoRef = useRef(0);
   const [saving, setSaving] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [builderContexto, setBuilderContexto] = useState<BuilderContexto | null>(null);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("wiwo-ads-theme");
@@ -195,23 +300,43 @@ export default function WiwoDashboard({
     filteredDecisions[0] ??
     null;
 
-  const healthAccount =
-    performance.accounts.find((account) => account.id === healthClient) ??
-    performance.accounts[0] ??
-    null;
-  const healthChecks = performanceHealthChecks(
-    healthAccount,
-    performance.generatedAt,
-  );
+  const healthPortfolio =
+    performance.portfolios.find((item) => item.id === healthClient) ?? null;
+  // Todas las cuentas del cliente, no una sola: antes elegir "Amipass" en
+  // realidad elegía una de sus cuentas de Windsor al azar y las demás no
+  // aparecían en ningún lado.
+  const healthChecks = healthPortfolio
+    ? healthPortfolio.accounts.flatMap((account) =>
+        performanceHealthChecks(account, performance.generatedAt),
+      )
+    : [];
   const healthCritical = healthChecks.filter(
     (check) => check.state === "critical",
   ).length;
   const healthWarnings = healthChecks.filter(
     (check) => check.state === "warning",
   ).length;
-  const healthScore = healthAccount
-    ? Math.max(0, 100 - healthCritical * 22 - healthWarnings * 7)
+  const healthOk = healthChecks.filter(
+    (check) => check.state === "healthy",
+  ).length;
+  const healthScore = healthChecks.length
+    ? Math.round((healthOk / healthChecks.length) * 100)
     : 0;
+
+  async function cambiarRango(siguiente: RangoId) {
+    if (siguiente === rango) return;
+    const solicitud = ++rangoSolicitadoRef.current;
+    setRango(siguiente);
+    setCambiandoRango(true);
+    try {
+      await refreshOperationalData(siguiente, solicitud);
+    } finally {
+      // Si mientras se esperaba llegó un cambio de rango más nuevo, ese es el
+      // que manda el indicador de carga: apagarlo acá lo daría por terminado
+      // aunque la petición real todavía siga en vuelo.
+      if (solicitud === rangoSolicitadoRef.current) setCambiandoRango(false);
+    }
+  }
 
   function applySnapshot(snapshot: {
     decisions: Decision[];
@@ -228,16 +353,23 @@ export default function WiwoDashboard({
     );
   }
 
-  async function refreshOperationalData() {
+  async function refreshOperationalData(
+    periodo: RangoId = rango,
+    solicitud: number = ++rangoSolicitadoRef.current,
+  ) {
     try {
-      const response = await fetch("/api/dashboard", {
-        headers: { accept: "application/json" },
-      });
+      const response = await fetch(
+        `/api/dashboard?rango=${encodeURIComponent(periodo)}`,
+        { headers: { accept: "application/json" } },
+      );
       const body = (await response.json()) as {
         decisions?: Decision[];
         auditEvents?: AuditEvent[];
         performance?: PerformanceSnapshot;
       };
+      // Llegó una petición de periodo más nueva mientras esta seguía en
+      // vuelo: se descarta, aunque haya respondido bien.
+      if (solicitud !== rangoSolicitadoRef.current) return;
       if (
         !response.ok ||
         !body.decisions ||
@@ -251,10 +383,13 @@ export default function WiwoDashboard({
         auditEvents: body.auditEvents,
         performance: body.performance,
       });
+      // Si el cliente elegido deja de existir en la lectura nueva, se vuelve
+      // a pedir uno en vez de caer de vuelta en un "todos" que esta pantalla
+      // ya no ofrece.
       setHealthClient((current) =>
-        body.performance!.accounts.some((account) => account.id === current)
+        body.performance!.portfolios.some((item) => item.id === current)
           ? current
-          : (body.performance!.accounts[0]?.id ?? ""),
+          : "",
       );
     } catch {
       // The integration surface already reports provider errors.
@@ -447,21 +582,27 @@ export default function WiwoDashboard({
         view={view}
         decisionsCount={decisions.length}
         currentUser={initialSnapshot.user}
+        signOutPath={signOutPath}
         onNavigate={setView}
       />
 
-      <SidebarInset className="min-w-0 bg-[#080808]">
+      <SidebarInset className="min-w-0 bg-[#292929]">
         <AppHeader
           view={view}
           currentUser={initialSnapshot.user}
+          signOutPath={signOutPath}
           performance={performance}
           theme={theme}
           onThemeChange={changeTheme}
+          rango={rango}
+          cambiandoRango={cambiandoRango}
+          onRangoChange={(valor) => void cambiarRango(valor)}
         />
         <div className="telemetry-grid min-h-[calc(100svh-4rem)]">
           {view === "decisions" && (
             <DecisionsView
               decisions={filteredDecisions}
+              allDecisions={decisions}
               selectedDecision={selectedDecision}
               selectedRows={selectedRows}
               accountFilter={accountFilter}
@@ -505,9 +646,11 @@ export default function WiwoDashboard({
             <HealthView
               client={healthClient}
               onClient={setHealthClient}
-              accounts={performance.accounts}
+              portfolios={performance.portfolios}
               onOpenIntegrations={() => setView("integrations")}
               checks={healthChecks}
+              okCount={healthOk}
+              totalCount={healthChecks.length}
               score={healthScore}
               critical={healthCritical}
               warnings={healthWarnings}
@@ -520,8 +663,44 @@ export default function WiwoDashboard({
             />
           )}
           {view === "audit" && <AuditView events={auditEvents} />}
+          {view === "clients" && (
+            <ClientesView
+              performance={performance}
+              onCrearCampana={(portfolioId) => {
+                setBuilderContexto({ modo: "nueva", portfolioId });
+                setView("builder");
+              }}
+              onAgregarConjunto={(attachTo) => {
+                setBuilderContexto({ modo: "adjuntar", attachTo });
+                setView("builder");
+              }}
+              onAgregarAnuncio={(attachTo) => {
+                setBuilderContexto({ modo: "adjuntar", attachTo });
+                setView("builder");
+              }}
+            />
+          )}
+          {view === "builder" && (
+            <ConstructorView
+              // Cada contexto nuevo es un constructor nuevo: reiniciar el
+              // formulario al cambiar de cliente o de campaña de destino, no
+              // arrastrar lo que se había escrito para otra cosa.
+              key={builderConstructorKey(builderContexto)}
+              attachTo={builderConstructorAttachTo(builderContexto)}
+            />
+          )}
+          {view === "team" && (
+            <EquipoView
+              portfolios={performance.portfolios.map((item) => ({
+                id: item.id,
+                name: item.name,
+              }))}
+            />
+          )}
           {view === "integrations" && (
             <IntegrationsView
+              currentUser={initialSnapshot.user}
+              signOutPath={signOutPath}
               onPerformanceUpdated={() => void refreshOperationalData()}
             />
           )}
@@ -556,19 +735,21 @@ function AppSidebar({
   view,
   decisionsCount,
   currentUser,
+  signOutPath,
   onNavigate,
 }: {
   view: ViewKey;
   decisionsCount: number;
   currentUser: DashboardIdentity;
+  signOutPath: string;
   onNavigate: (view: ViewKey) => void;
 }) {
   return (
     <Sidebar
       collapsible="icon"
-      className="border-r border-[#F5F3FF]/10 bg-[#080808] [&_[data-sidebar=sidebar]]:bg-[#16161d]/45 [&_[data-sidebar=sidebar]]:backdrop-blur-xl"
+      className="border-r border-[#F8FAD7]/10 bg-[#292929] [&_[data-sidebar=sidebar]]:bg-[#323330]/45 [&_[data-sidebar=sidebar]]:backdrop-blur-xl"
     >
-      <SidebarHeader className="border-b border-[#F5F3FF]/10 px-3 py-4">
+      <SidebarHeader className="border-b border-[#F8FAD7]/10 px-3 py-4">
         <div className="flex min-h-10 items-center gap-3 overflow-hidden px-1">
           <img
             src="/wiwo-ads-electric.png"
@@ -580,12 +761,19 @@ function AppSidebar({
 
       <SidebarContent className="px-1.5 py-3">
         <SidebarGroup>
-          <SidebarGroupLabel className="font-micro text-[0.62rem] text-[#F5F3FF]/42">
+          <SidebarGroupLabel className="font-micro text-[0.62rem] text-[#F8FAD7]/42">
             Operación
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1.5">
-              {navItems.map((item) => {
+              {navItems
+                .filter(
+                  (item) =>
+                    !item.proximaFase &&
+                    (!item.adminOnly || currentUser.role === "admin") &&
+                    (!item.roles || item.roles.includes(currentUser.role)),
+                )
+                .map((item) => {
                 const Icon = item.icon;
                 return (
                   <SidebarMenuItem key={item.key}>
@@ -594,23 +782,21 @@ function AppSidebar({
                       tooltip={item.label}
                       onClick={() => onNavigate(item.key)}
                       className={cn(
-                        "h-10 rounded-xl text-[#F5F3FF]/62 hover:bg-[#16161d]/60 hover:text-[#F5F3FF] data-[active=true]:border data-[active=true]:border-[#4A43FF]/15 data-[active=true]:bg-gradient-to-r data-[active=true]:from-[#4A43FF]/10 data-[active=true]:to-[#42FF00]/10 data-[active=true]:text-[#4A43FF] data-[active=true]:shadow-sm",
+                        "h-10 rounded-xl text-[#F8FAD7]/62 hover:bg-[#323330]/60 hover:text-[#F8FAD7] data-[active=true]:border data-[active=true]:border-[#4242FF]/15 data-[active=true]:bg-gradient-to-r data-[active=true]:from-[#4242FF]/10 data-[active=true]:to-[#3BFF00]/10 data-[active=true]:text-[#4242FF] data-[active=true]:shadow-sm",
                         view === item.key && "font-bold",
                       )}
                     >
                       <Icon />
                       <span>{item.label}</span>
-                      {item.count ? (
+                      {item.key === "decisions" && decisionsCount > 0 ? (
                         <span
                           className={cn(
-                            "ml-auto rounded-full bg-[#F5F3FF]/6 px-1.5 py-0.5 text-[0.65rem] font-bold text-[#F5F3FF]/55",
+                            "ml-auto rounded-full bg-[#F8FAD7]/6 px-1.5 py-0.5 text-[0.65rem] font-bold text-[#F8FAD7]/55",
                             view === item.key &&
-                              "bg-[#4A43FF]/10 text-[#4A43FF]",
+                              "bg-[#4242FF]/10 text-[#4242FF]",
                           )}
                         >
-                          {item.key === "decisions"
-                            ? decisionsCount
-                            : item.count}
+                          {decisionsCount}
                         </span>
                       ) : null}
                     </SidebarMenuButton>
@@ -622,27 +808,47 @@ function AppSidebar({
         </SidebarGroup>
 
         <SidebarGroup className="mt-1">
-          <SidebarGroupLabel className="font-micro text-[0.62rem] text-[#F5F3FF]/42">
+          <SidebarGroupLabel className="font-micro text-[0.62rem] text-[#F8FAD7]/42">
             Próxima fase
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  disabled
-                  tooltip="Constructor · Fase 4"
-                  className="h-9 text-[#F5F3FF]/30"
-                >
-                  <WandSparkles />
-                  <span>Constructor</span>
-                  <LockKeyhole className="ml-auto size-3" />
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {navItems
+                .filter(
+                  (item) =>
+                    item.proximaFase &&
+                    (!item.adminOnly || currentUser.role === "admin") &&
+                    (!item.roles || item.roles.includes(currentUser.role)),
+                )
+                .map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <SidebarMenuItem key={item.key}>
+                      <SidebarMenuButton
+                        isActive={view === item.key}
+                        tooltip={`${item.label} · sin contenido todavía`}
+                        onClick={() => onNavigate(item.key)}
+                        className={cn(
+                          "h-9 text-[#F8FAD7]/38 hover:bg-[#323330]/60 hover:text-[#F8FAD7]/75 data-[active=true]:bg-[#323330]/70 data-[active=true]:text-[#4242FF]",
+                          view === item.key && "font-bold",
+                        )}
+                      >
+                        <Icon />
+                        <span>{item.label}</span>
+                        {item.key === "decisions" && decisionsCount > 0 ? (
+                          <span className="ml-auto rounded-full bg-[#4242FF]/12 px-1.5 py-0.5 text-[0.65rem] font-bold text-[#4242FF]">
+                            {decisionsCount}
+                          </span>
+                        ) : null}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   disabled
                   tooltip="Laboratorio · Fase 4"
-                  className="h-9 text-[#F5F3FF]/30"
+                  className="h-9 text-[#F8FAD7]/30"
                 >
                   <FlaskConical />
                   <span>Laboratorio</span>
@@ -654,21 +860,33 @@ function AppSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-[#F5F3FF]/10 p-3">
-        <div className="flex items-center gap-3 overflow-hidden rounded-xl border border-[#F5F3FF]/10 bg-[#16161d]/55 p-2 shadow-sm">
-          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#4A43FF] text-xs font-extrabold text-[#080808]">
-            {initials(currentUser.displayName)}
-          </div>
-          <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-xs font-bold text-[#F5F3FF]">
-              {currentUser.displayName}
-            </p>
-            <p className="truncate text-[0.65rem] text-[#F5F3FF]/45">
-              {roleLabels[currentUser.role] ?? currentUser.role}
-            </p>
-          </div>
-          <MoreHorizontal className="size-4 text-[#F5F3FF]/35 group-data-[collapsible=icon]:hidden" />
-        </div>
+      <SidebarFooter className="border-t border-[#F8FAD7]/10 p-3">
+        <UserMenu currentUser={currentUser} signOutPath={signOutPath} side="right">
+          <button
+            type="button"
+            className="flex w-full items-center gap-3 overflow-hidden rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/55 p-2 text-left shadow-sm transition-colors hover:border-[#4242FF]/30 hover:bg-[#323330]/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4242FF]"
+          >
+            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#4242FF] text-xs font-extrabold text-[#292929]">
+              {initials(currentUser.displayName)}
+            </div>
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+              <p className="truncate text-xs font-bold text-[#F8FAD7]">
+                {currentUser.displayName}
+              </p>
+              <p className="truncate text-[0.65rem] text-[#F8FAD7]/45">
+                {roleLabels[currentUser.role] ?? currentUser.role}
+              </p>
+            </div>
+            <MoreHorizontal className="size-4 text-[#F8FAD7]/35 group-data-[collapsible=icon]:hidden" />
+          </button>
+        </UserMenu>
+        <a
+          href={signOutPath}
+          className="mt-2 flex h-9 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-[#F8FAD7]/55 transition-colors hover:bg-red-500/10 hover:text-red-300 group-data-[collapsible=icon]:hidden"
+        >
+          <LogOut className="size-3.5" />
+          Cerrar sesión
+        </a>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -678,78 +896,150 @@ function AppSidebar({
 function AppHeader({
   view,
   currentUser,
+  signOutPath,
   performance,
   theme,
   onThemeChange,
+  rango,
+  cambiandoRango,
+  onRangoChange,
 }: {
   view: ViewKey;
   currentUser: DashboardIdentity;
+  signOutPath: string;
   performance: PerformanceSnapshot;
   theme: "dark" | "light";
   onThemeChange: (checked: boolean) => void;
+  rango: RangoId;
+  cambiandoRango: boolean;
+  onRangoChange: (valor: RangoId) => void;
 }) {
   const isLive = performance.mode === "live";
+  // El periodo solo se ofrece donde cambia lo que se ve. En Equipo o Cuentas
+  // sería un control que no hace nada, y eso enseña a desconfiar de los
+  // controles.
+  const conPeriodo = ["control", "pacing", "health", "ads"].includes(view);
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-[#F5F3FF]/10 bg-[#080808]/85 px-4 backdrop-blur-xl md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-[#F8FAD7]/10 bg-[#292929]/85 px-4 backdrop-blur-xl md:px-6">
       <div className="flex min-w-0 items-center gap-3">
-        <SidebarTrigger className="size-8 text-[#F5F3FF]/55 hover:bg-[#16161d]/60" />
-        <div className="h-5 w-px bg-[#F5F3FF]/12" />
+        <SidebarTrigger className="size-8 text-[#F8FAD7]/55 hover:bg-[#323330]/60" />
+        <div className="h-5 w-px bg-[#F8FAD7]/12" />
         <div className="min-w-0">
-          <p className="font-micro truncate text-[0.6rem] text-[#4A43FF]">
+          <p className="font-micro truncate text-[0.6rem] text-[#4242FF]">
             {viewMeta[view].eyebrow}
           </p>
-          <h1 className="truncate text-sm font-bold text-[#F5F3FF] md:text-base">
+          <h1 className="truncate text-sm font-bold text-[#F8FAD7] md:text-base">
             {viewMeta[view].title}
           </h1>
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <div className="hidden items-center gap-2 rounded-full border border-[#F5F3FF]/10 bg-[#16161d]/55 px-2.5 py-1.5 sm:flex">
-          <Moon className="size-3.5 text-[#4A43FF]" aria-hidden="true" />
+        {conPeriodo && (
+          <div className="hidden items-center gap-2 sm:flex">
+            <Select
+              value={rango}
+              disabled={cambiandoRango}
+              onValueChange={(valor) => onRangoChange(valor as RangoId)}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-[9.5rem] border-[#F8FAD7]/10 bg-[#323330]/55"
+              >
+                {/*
+                  Un rango amplio (90 días, año en curso) puede tardar más de
+                  un minuto en frío: Windsor recorre esas fechas para cada
+                  cuenta. El giro reemplaza el ícono fijo para que la espera se
+                  lea como "trabajando", no como una pantalla congelada.
+                */}
+                {cambiandoRango ? (
+                  <LoaderCircle className="size-3.5 animate-spin text-[#4242FF]" />
+                ) : (
+                  <CalendarRange className="size-3.5 text-[#4242FF]" />
+                )}
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RANGOS.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {RANGO_LABELS[id]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span
+              className={cn(
+                "font-micro whitespace-nowrap text-[0.58rem]",
+                cambiandoRango ? "text-[#4242FF]" : "text-[#F8FAD7]/40",
+              )}
+            >
+              {cambiandoRango ? (
+                "LEYENDO WINDSOR…"
+              ) : (
+                <>
+                  {performance.rangeStart} A {performance.rangeEnd}
+                  {/*
+                    Un periodo abierto se marca: comparar un mes a medias con
+                    uno cerrado y leerlo como caída es el error clásico de los
+                    reportes de medios.
+                  */}
+                  {performance.rango?.enCurso ? " · EN CURSO" : ""}
+                </>
+              )}
+            </span>
+          </div>
+        )}
+        <div className="hidden items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-2.5 py-1.5 sm:flex">
+          <Moon className="size-3.5 text-[#4242FF]" aria-hidden="true" />
           <Switch
             size="sm"
             checked={theme === "light"}
             onCheckedChange={onThemeChange}
             aria-label="Activar modo claro"
           />
-          <Sun className="size-3.5 text-[#42FF00]" aria-hidden="true" />
+          <Sun className="size-3.5 text-[#3BFF00]" aria-hidden="true" />
         </div>
-        <div className="hidden items-center gap-2 rounded-full border border-[#F5F3FF]/10 bg-[#16161d]/55 px-3 py-1.5 text-xs font-medium text-[#F5F3FF]/65 shadow-sm lg:flex">
+        <div className="hidden items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-xs font-medium text-[#F8FAD7]/65 shadow-sm lg:flex">
           <span
             className={cn(
               "size-2.5 rounded-full",
               view === "integrations"
-                ? "bg-[#4A43FF]"
+                ? "bg-[#4242FF]"
                 : isLive
                   ? "bg-emerald-500"
                   : "bg-amber-500",
             )}
           />
-          <DatabaseZap className="size-3.5 text-[#4A43FF]" />
+          <DatabaseZap className="size-3.5 text-[#4242FF]" />
           {view === "integrations"
             ? "Gestión de conexiones · lectura controlada"
             : isLive
-              ? "Métricas reales · recomendaciones piloto"
+              ? "Métricas reales · sincronizadas"
               : performance.mode === "stale"
-                ? "Métricas reales desactualizadas · recomendaciones piloto"
-                : "Modo preparación · recomendaciones piloto"}
+                ? "Métricas reales · desactualizadas"
+                : "Modo preparación · sin métricas"}
         </div>
         <Button
           variant="ghost"
           size="icon-sm"
           aria-label="Notificaciones"
-          className="relative text-[#F5F3FF]/55"
+          className="relative text-[#F8FAD7]/55"
         >
           <Bell className="size-4" />
         </Button>
-        <div className="hidden h-8 items-center gap-2 rounded-full border border-[#F5F3FF]/10 bg-[#16161d]/55 px-2 pr-3 shadow-sm sm:flex">
-          <span className="grid size-6 place-items-center rounded-full bg-[#4A43FF] text-[0.6rem] font-bold text-[#080808]">
-            {initials(currentUser.displayName)}
-          </span>
-          <span className="text-xs font-semibold text-[#F5F3FF]/75">
-            {roleLabels[currentUser.role] ?? currentUser.role}
-          </span>
-        </div>
+        <UserMenu currentUser={currentUser} signOutPath={signOutPath} side="bottom">
+          <button
+            type="button"
+            aria-label="Cuenta y sesión"
+            className="hidden h-8 items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-2 pr-3 shadow-sm transition-colors hover:border-[#4242FF]/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4242FF] sm:flex"
+          >
+            <span className="grid size-6 place-items-center rounded-full bg-[#4242FF] text-[0.6rem] font-bold text-[#292929]">
+              {initials(currentUser.displayName)}
+            </span>
+            <span className="text-xs font-semibold text-[#F8FAD7]/75">
+              {roleLabels[currentUser.role] ?? currentUser.role}
+            </span>
+          </button>
+        </UserMenu>
       </div>
     </header>
   );
@@ -757,6 +1047,7 @@ function AppHeader({
 
 function DecisionsView({
   decisions,
+  allDecisions,
   selectedDecision,
   selectedRows,
   accountFilter,
@@ -777,6 +1068,7 @@ function DecisionsView({
   onClearFilters,
 }: {
   decisions: Decision[];
+  allDecisions: Decision[];
   selectedDecision: Decision | null;
   selectedRows: string[];
   accountFilter: string;
@@ -807,14 +1099,10 @@ function DecisionsView({
     <div className="mx-auto w-full max-w-[1680px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F5F3FF]/10 bg-[#16161d]/55 px-3 py-1.5 text-[0.62rem] text-[#F5F3FF]/60 shadow-sm backdrop-blur-md">
-            <span className="size-2 rounded-full bg-amber-500" />
-            Modo piloto · recomendaciones de muestra
-          </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F5F3FF] md:text-[2.8rem]">
+          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
             {decisions.length} decisiones requieren firma
           </h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#F5F3FF]/58">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#F8FAD7]/58">
             <span className="font-semibold text-red-600">
               {critical} crítica
             </span>
@@ -825,20 +1113,13 @@ function DecisionsView({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge
-            variant="outline"
-            className="h-8 border-[#F5F3FF]/10 bg-[#16161d]/55 text-[#F5F3FF]/65"
-          >
-            <Clock3 />
-            SLA piloto · 41 h
-          </Badge>
           {selectedRows.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               onClick={onBatch}
               disabled={saving}
-              className="border-[#4A43FF]/25 bg-[#16161d]/60 font-bold text-[#4A43FF]"
+              className="border-[#4242FF]/25 bg-[#323330]/60 font-bold text-[#4242FF]"
             >
               <BadgeCheck />
               Firmar propuestas · {selectedRows.length}
@@ -847,23 +1128,8 @@ function DecisionsView({
         </div>
       </div>
 
-      {critical > 0 && (
-        <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-red-200 bg-red-50/90 px-4 py-3 text-red-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
-            <p className="text-sm leading-6">
-              <strong>La medición de amiPASS está comprometida.</strong>{" "}
-              Cualquier cambio de optimización queda bloqueado hasta resolver
-              el evento Purchase.
-            </p>
-          </div>
-          <span className="shrink-0 text-xs font-bold uppercase tracking-[0.08em] text-red-700">
-            Baranda activa
-          </span>
-        </div>
-      )}
-
       <DecisionFilters
+        source={allDecisions}
         accountFilter={accountFilter}
         platformFilter={platformFilter}
         agentFilter={agentFilter}
@@ -876,22 +1142,28 @@ function DecisionsView({
         <div className="space-y-3">
           {decisions.length === 0 ? (
             <Surface className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-              <span className="mb-4 grid size-12 place-items-center rounded-full bg-emerald-50 text-emerald-600">
+              <span className="mb-4 grid size-12 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
                 <BadgeCheck className="size-6" />
               </span>
-              <h3 className="text-lg font-bold text-[#F5F3FF]">
-                Cola despejada
+              <h3 className="text-lg font-bold text-[#F8FAD7]">
+                {allDecisions.length === 0
+                  ? "Sin decisiones"
+                  : "Cola despejada"}
               </h3>
-              <p className="mt-2 max-w-sm text-sm leading-6 text-[#F5F3FF]/58">
-                No quedan decisiones con los filtros actuales.
+              <p className="mt-2 max-w-sm text-sm leading-6 text-[#F8FAD7]/58">
+                {allDecisions.length === 0
+                  ? "El motor de reglas todavía no está conectado. Cuando lo esté, las decisiones aparecerán acá."
+                  : "No quedan decisiones con los filtros actuales."}
               </p>
-              <Button
-                variant="link"
-                onClick={onClearFilters}
-                className="mt-2 text-[#4A43FF]"
-              >
-                Limpiar filtros
-              </Button>
+              {allDecisions.length > 0 && (
+                <Button
+                  variant="link"
+                  onClick={onClearFilters}
+                  className="mt-2 text-[#4242FF]"
+                >
+                  Limpiar filtros
+                </Button>
+              )}
             </Surface>
           ) : (
             decisions.map((decision) => (
@@ -922,6 +1194,7 @@ function DecisionsView({
 }
 
 function DecisionFilters({
+  source,
   accountFilter,
   platformFilter,
   agentFilter,
@@ -929,6 +1202,7 @@ function DecisionFilters({
   onPlatformFilter,
   onAgentFilter,
 }: {
+  source: Decision[];
   accountFilter: string;
   platformFilter: string;
   agentFilter: string;
@@ -936,52 +1210,56 @@ function DecisionFilters({
   onPlatformFilter: (value: string) => void;
   onAgentFilter: (value: string) => void;
 }) {
+  const clients = uniqueSorted(source.map((decision) => decision.client));
+  const platforms = uniqueSorted(source.map((decision) => decision.platform));
+  const agents = uniqueSorted(source.map((decision) => decision.agent));
+
   return (
     <Surface className="mb-4 flex flex-col gap-3 p-3 md:flex-row md:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <Search className="ml-1 size-4 shrink-0 text-[#4A43FF]" />
-        <span className="text-sm font-semibold text-[#F5F3FF]/78">
+        <Search className="ml-1 size-4 shrink-0 text-[#4242FF]" />
+        <span className="text-sm font-semibold text-[#F8FAD7]/78">
           Filtros de cola
         </span>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <Select value={accountFilter} onValueChange={onAccountFilter}>
-          <SelectTrigger size="sm" className="w-full bg-[#16161d]/65 sm:w-44">
+          <SelectTrigger size="sm" className="w-full bg-[#323330]/65 sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todas las cuentas</SelectItem>
-            {["amiPASS", "Bodenor Flexcenter", "Açaí Berry", "ProAndes", "FlixBus"].map(
-              (client) => (
-                <SelectItem key={client} value={client}>
-                  {client}
-                </SelectItem>
-              ),
-            )}
+            {clients.map((client) => (
+              <SelectItem key={client} value={client}>
+                {client}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={platformFilter} onValueChange={onPlatformFilter}>
-          <SelectTrigger size="sm" className="w-full bg-[#16161d]/65 sm:w-40">
+          <SelectTrigger size="sm" className="w-full bg-[#323330]/65 sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Toda plataforma</SelectItem>
-            <SelectItem value="Meta">Meta</SelectItem>
-            <SelectItem value="Google Ads">Google Ads</SelectItem>
-            <SelectItem value="TikTok">TikTok</SelectItem>
+            {platforms.map((platform) => (
+              <SelectItem key={platform} value={platform}>
+                {platform}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={agentFilter} onValueChange={onAgentFilter}>
-          <SelectTrigger size="sm" className="w-full bg-[#16161d]/65 sm:w-44">
+          <SelectTrigger size="sm" className="w-full bg-[#323330]/65 sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos los agentes</SelectItem>
-            <SelectItem value="Agente Salud">Salud</SelectItem>
-            <SelectItem value="Agente Pacing">Pacing</SelectItem>
-            <SelectItem value="Agente Creativo">Creativo</SelectItem>
-            <SelectItem value="Agente Búsqueda">Búsqueda</SelectItem>
-            <SelectItem value="Agente Audiencia">Audiencia</SelectItem>
+            {agents.map((agent) => (
+              <SelectItem key={agent} value={agent}>
+                {agent}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -1007,8 +1285,8 @@ function DecisionCard({
       className={cn(
         "relative overflow-hidden transition-all",
         selected
-          ? "border-[#4A43FF] bg-[linear-gradient(115deg,rgba(255,255,255,0.76),rgba(66,255,0,0.08),rgba(74,67,255,0.06))] shadow-[0_0_0_1px_#4A43FF,0_18px_50px_rgba(74,67,255,0.10)]"
-          : "hover:border-[#F5F3FF]/25",
+          ? "border-[#4242FF] bg-[linear-gradient(115deg,rgba(255,255,255,0.76),rgba(66,255,0,0.08),rgba(74,67,255,0.06))] shadow-[0_0_0_1px_#4242FF,0_18px_50px_rgba(74,67,255,0.10)]"
+          : "hover:border-[#F8FAD7]/25",
       )}
     >
       <div
@@ -1016,8 +1294,8 @@ function DecisionCard({
           "absolute left-0 top-6 h-10 w-1 rounded-r-full",
           decision.severity === "critical" && "bg-red-500",
           decision.severity === "high" && "bg-amber-500",
-          decision.severity === "medium" && "bg-blue-500",
-          decision.severity === "info" && "bg-[#F5F3FF]/25",
+          decision.severity === "medium" && "bg-[#4242FF]/100",
+          decision.severity === "info" && "bg-[#F8FAD7]/25",
         )}
       />
       <div className="p-4 pl-5">
@@ -1031,35 +1309,35 @@ function DecisionCard({
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <SeverityBadge severity={decision.severity} />
-              <span className="text-xs font-semibold text-[#F5F3FF]/58">
+              <span className="text-xs font-semibold text-[#F8FAD7]/58">
                 {decision.client}
               </span>
-              <span className="text-[#F5F3FF]/20">·</span>
-              <span className="text-xs text-[#F5F3FF]/58">
+              <span className="text-[#F8FAD7]/20">·</span>
+              <span className="text-xs text-[#F8FAD7]/58">
                 {decision.platform}
               </span>
-              <span className="ml-auto text-xs font-medium text-[#F5F3FF]/42">
+              <span className="ml-auto text-xs font-medium text-[#F8FAD7]/42">
                 {decision.age}
               </span>
             </div>
             <button
               onClick={onSelect}
-              className="block w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-[#4A43FF]"
+              className="block w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-[#4242FF]"
             >
-              <h3 className="text-[0.98rem] font-bold leading-6 tracking-[-0.02em] text-[#F5F3FF]">
+              <h3 className="text-[0.98rem] font-bold leading-6 tracking-[-0.02em] text-[#F8FAD7]">
                 {decision.title}
               </h3>
-              <p className="mt-1 line-clamp-2 text-sm leading-6 text-[#F5F3FF]/58">
+              <p className="mt-1 line-clamp-2 text-sm leading-6 text-[#F8FAD7]/58">
                 {decision.diagnosis}
               </p>
             </button>
-            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#F5F3FF]/8 pt-3">
-              <div className="flex items-center gap-2 text-xs text-[#F5F3FF]/58">
-                <Bot className="size-3.5 text-[#4A43FF]" />
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#F8FAD7]/8 pt-3">
+              <div className="flex items-center gap-2 text-xs text-[#F8FAD7]/58">
+                <Bot className="size-3.5 text-[#4242FF]" />
                 {decision.agent}
               </div>
-              <div className="flex items-center gap-2 text-xs font-semibold text-[#F5F3FF]/78">
-                <Sparkles className="size-3.5 text-[#4A43FF]" />
+              <div className="flex items-center gap-2 text-xs font-semibold text-[#F8FAD7]/78">
+                <Sparkles className="size-3.5 text-[#4242FF]" />
                 {decision.impact}
               </div>
               <div className="ml-auto flex items-center gap-2">
@@ -1068,7 +1346,7 @@ function DecisionCard({
                   variant="outline"
                   size="xs"
                   onClick={onSelect}
-                  className="border-[#F5F3FF]/12 bg-[#16161d]/55 text-[#4A43FF]"
+                  className="border-[#F8FAD7]/12 bg-[#323330]/55 text-[#4242FF]"
                 >
                   Revisar
                   <ChevronRight />
@@ -1102,9 +1380,9 @@ function DecisionDetail({
   if (!decision) {
     return (
       <Surface className="sticky top-20 flex min-h-72 flex-col items-center justify-center p-6 text-center">
-        <BadgeCheck className="mb-3 size-8 text-emerald-500" />
+        <BadgeCheck className="mb-3 size-8 text-emerald-2000" />
         <h3 className="font-bold">Sin decisiones por revisar</h3>
-        <p className="mt-2 text-sm text-[#F5F3FF]/58">
+        <p className="mt-2 text-sm text-[#F8FAD7]/58">
           Selecciona otra cuenta o vuelve cuando aparezca un hallazgo.
         </p>
       </Surface>
@@ -1113,18 +1391,18 @@ function DecisionDetail({
 
   return (
     <Surface className="sticky top-20 overflow-hidden">
-      <div className="border-b border-[#F5F3FF]/10 bg-[#121218]/55 p-4">
+      <div className="border-b border-[#F8FAD7]/10 bg-[#252624]/55 p-4">
         <div className="flex items-center justify-between gap-3">
           <SeverityBadge severity={decision.severity} />
-          <span className="font-micro text-[0.6rem] text-[#F5F3FF]/42">
+          <span className="font-micro text-[0.6rem] text-[#F8FAD7]/42">
             {decision.id}
           </span>
         </div>
-        <h3 className="mt-3 text-lg font-extrabold leading-6 tracking-[-0.03em] text-[#F5F3FF]">
+        <h3 className="mt-3 text-lg font-extrabold leading-6 tracking-[-0.03em] text-[#F8FAD7]">
           {decision.title}
         </h3>
-        <div className="mt-3 flex items-center gap-2 text-xs text-[#F5F3FF]/58">
-          <span className="font-bold text-[#F5F3FF]/78">{decision.client}</span>
+        <div className="mt-3 flex items-center gap-2 text-xs text-[#F8FAD7]/58">
+          <span className="font-bold text-[#F8FAD7]/78">{decision.client}</span>
           <span>·</span>
           <span>{decision.platform}</span>
           <span>·</span>
@@ -1139,21 +1417,21 @@ function DecisionDetail({
             {decision.proposedAction}
           </DetailBlock>
 
-          <div className="overflow-hidden rounded-[16px] border border-[#F5F3FF]/15 bg-[linear-gradient(135deg,#F5F3FF_0%,#333333_58%,#4A43FF_145%)] text-white shadow-[0_18px_42px_rgba(245,243,255,0.12)]">
+          <div className="overflow-hidden rounded-[16px] border border-[#F8FAD7]/15 bg-[linear-gradient(135deg,#F8FAD7_0%,#333333_58%,#4242FF_145%)] text-white shadow-[0_18px_42px_rgba(245,243,255,0.12)]">
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <span className="text-xs font-bold uppercase tracking-[0.1em] text-white/55">
                 Diff operativo
               </span>
-              <span className="text-xs font-semibold text-[#42FF00]">
+              <span className="text-xs font-semibold text-[#3BFF00]">
                 {decision.metric}
               </span>
             </div>
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-4">
               <DiffValue label="Actual" value={decision.before} />
-              <ArrowRight className="size-4 text-[#42FF00]" />
+              <ArrowRight className="size-4 text-[#3BFF00]" />
               <DiffValue label="Propuesto" value={decision.after} />
             </div>
-            <div className="flex items-center justify-between gap-3 bg-[#16161d]/[0.07] px-4 py-3">
+            <div className="flex items-center justify-between gap-3 bg-[#323330]/[0.07] px-4 py-3">
               <span className="text-xs text-white/60">
                 {decision.guardrail}
               </span>
@@ -1164,32 +1442,32 @@ function DecisionDetail({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-[#F5F3FF]/10 bg-[#121218]/55 p-3">
-              <p className="text-xs text-[#F5F3FF]/58">Impacto estimado</p>
-              <p className="mt-1 text-sm font-bold leading-5 text-[#F5F3FF]">
+            <div className="rounded-xl border border-[#F8FAD7]/10 bg-[#252624]/55 p-3">
+              <p className="text-xs text-[#F8FAD7]/58">Impacto estimado</p>
+              <p className="mt-1 text-sm font-bold leading-5 text-[#F8FAD7]">
                 {decision.impact}
               </p>
             </div>
-            <div className="rounded-xl border border-[#F5F3FF]/10 bg-[#121218]/55 p-3">
-              <p className="text-xs text-[#F5F3FF]/58">Confianza</p>
-              <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[#F5F3FF]">
-                <ShieldCheck className="size-4 text-[#4A43FF]" />
+            <div className="rounded-xl border border-[#F8FAD7]/10 bg-[#252624]/55 p-3">
+              <p className="text-xs text-[#F8FAD7]/58">Confianza</p>
+              <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[#F8FAD7]">
+                <ShieldCheck className="size-4 text-[#4242FF]" />
                 {decision.confidence}
               </p>
             </div>
           </div>
 
-          <div className="rounded-xl border border-[#F5F3FF]/10 bg-[#16161d]/35 p-3">
+          <div className="rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/35 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <span className="grid size-8 place-items-center rounded-xl bg-[#4A43FF]/8 text-[#4A43FF]">
+                <span className="grid size-8 place-items-center rounded-xl bg-[#4242FF]/8 text-[#4242FF]">
                   <Bot className="size-4" />
                 </span>
                 <div>
-                  <p className="text-xs font-bold text-[#F5F3FF]">
+                  <p className="text-xs font-bold text-[#F8FAD7]">
                     {decision.agent}
                   </p>
-                  <p className="mt-0.5 text-[0.68rem] text-[#F5F3FF]/42">
+                  <p className="mt-0.5 text-[0.68rem] text-[#F8FAD7]/42">
                     {decision.rule}
                   </p>
                 </div>
@@ -1201,12 +1479,12 @@ function DecisionDetail({
           <Button
             onClick={onApprove}
             disabled={saving}
-            className="h-11 w-full bg-[#42FF00] font-extrabold text-[#F5F3FF] shadow-[0_10px_28px_rgba(66,255,0,0.30)] hover:bg-[#98E944]"
+            className="h-11 w-full bg-[#3BFF00] font-extrabold text-[#F8FAD7] shadow-[0_10px_28px_rgba(66,255,0,0.30)] hover:bg-[#98E944]"
           >
             <BadgeCheck />
             Firmar propuesta
           </Button>
-          <p className="text-center text-[0.68rem] leading-5 text-[#F5F3FF]/48">
+          <p className="text-center text-[0.68rem] leading-5 text-[#F8FAD7]/48">
             Registra la aprobación; no ejecuta cambios en Google ni Meta.
           </p>
           <div className="grid grid-cols-2 gap-2">
@@ -1227,13 +1505,13 @@ function DecisionDetail({
               size="sm"
               onClick={onDiscard}
               disabled={saving}
-              className="text-red-600 hover:bg-red-50 hover:text-red-700"
+              className="text-red-600 hover:bg-red-500/10 hover:text-red-300"
             >
               <X />
               Descartar
             </Button>
           </div>
-          <p className="text-center text-[0.68rem] leading-5 text-[#F5F3FF]/42">
+          <p className="text-center text-[0.68rem] leading-5 text-[#F8FAD7]/42">
             Tu identidad, la evidencia y el cambio exacto quedarán registrados.
           </p>
         </div>
@@ -1251,10 +1529,10 @@ function DetailBlock({
 }) {
   return (
     <div>
-      <p className="font-micro text-[0.6rem] text-[#4A43FF]">
+      <p className="font-micro text-[0.6rem] text-[#4242FF]">
         {label}
       </p>
-      <p className="mt-2 text-sm leading-6 text-[#F5F3FF]/78">{children}</p>
+      <p className="mt-2 text-sm leading-6 text-[#F8FAD7]/78">{children}</p>
     </div>
   );
 }
@@ -1287,7 +1565,7 @@ function EditDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-[#F5F3FF]/12 bg-[#121218] sm:max-w-xl">
+      <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Editar cambio propuesto</DialogTitle>
           <DialogDescription>
@@ -1298,7 +1576,7 @@ function EditDialog({
         <div className="space-y-3 py-2">
           <label
             htmlFor="edited-change"
-            className="text-sm font-semibold text-[#F5F3FF]"
+            className="text-sm font-semibold text-[#F8FAD7]"
           >
             Estado posterior
           </label>
@@ -1351,7 +1629,7 @@ function DiscardDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-[#F5F3FF]/12 bg-[#121218] sm:max-w-xl">
+      <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Descartar recomendación</DialogTitle>
           <DialogDescription>
@@ -1361,7 +1639,7 @@ function DiscardDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <label className="text-sm font-semibold text-[#F5F3FF]">
+            <label className="text-sm font-semibold text-[#F8FAD7]">
               Motivo
             </label>
             <Select value={reason} onValueChange={onReasonChange}>
@@ -1387,10 +1665,10 @@ function DiscardDialog({
           <div className="space-y-2">
             <label
               htmlFor="discard-note"
-              className="text-sm font-semibold text-[#F5F3FF]"
+              className="text-sm font-semibold text-[#F8FAD7]"
             >
               Contexto adicional{" "}
-              <span className="font-normal text-[#F5F3FF]/42">(opcional)</span>
+              <span className="font-normal text-[#F8FAD7]/42">(opcional)</span>
             </label>
             <Textarea
               id="discard-note"
@@ -1418,12 +1696,19 @@ function DiscardDialog({
   );
 }
 
+/**
+ * Las dos verificaciones reales de una cuenta: ¿sigue autorizada la lectura?,
+ * ¿la métrica llega y está al día? No incluye "cambios automáticos": ese dato
+ * es el mismo para cualquier cuenta —desactivado por diseño, en todo el
+ * sistema— así que no es una verificación de esta cuenta en particular. Se
+ * muestra una sola vez, como nota fija de la pantalla, en vez de repetirse
+ * idéntico en cada fila.
+ */
 function performanceHealthChecks(
-  account: PerformanceAccountSummary | null,
+  account: PerformanceAccountSummary,
   referenceTime: number,
 ): HealthCheck[] {
-  if (!account) return [];
-  const platform = account.provider === "google" ? "Google Ads" : "Meta Ads";
+  const platform = platformLabel(account.provider);
   const isStale = Boolean(
     account.lastSyncedAt &&
       referenceTime - account.lastSyncedAt > 26 * 60 * 60 * 1000,
@@ -1439,6 +1724,7 @@ function performanceHealthChecks(
   return [
     {
       check: "Autorización e inventario",
+      account: account.name,
       platform,
       state: connectionState,
       detail:
@@ -1450,6 +1736,7 @@ function performanceHealthChecks(
     },
     {
       check: "Métricas de rendimiento",
+      account: account.name,
       platform,
       state: metricState,
       detail: account.hasData
@@ -1457,14 +1744,6 @@ function performanceHealthChecks(
         : account.issue ?? "La primera lectura todavía no entrega filas",
       lastCheck: relativeTime(account.lastSyncedAt, referenceTime),
       owner: "WiWO.ADS",
-    },
-    {
-      check: "Cambios automáticos",
-      platform,
-      state: "inactive",
-      detail: "Deshabilitados por diseño · solo lectura y propuesta",
-      lastCheck: "No aplica",
-      owner: "Gobierno",
     },
   ];
 }
@@ -1493,4 +1772,65 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "WU";
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "es"),
+  );
+}
+
+/**
+ * Menú de cuenta: quién está dentro y cómo salir.
+ *
+ * El cierre de sesión es un enlace y no un fetch porque la ruta responde con
+ * una redirección y borra el cookie de sesión; navegar de verdad es lo que
+ * deja el navegador en el estado correcto.
+ */
+function UserMenu({
+  currentUser,
+  signOutPath,
+  side,
+  children,
+}: {
+  currentUser: DashboardIdentity;
+  signOutPath: string;
+  side: "right" | "bottom";
+  children: React.ReactNode;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
+      <DropdownMenuContent
+        side={side}
+        align="end"
+        className="w-64 border-[#F8FAD7]/12 bg-[#323330] text-[#F8FAD7]"
+      >
+        <DropdownMenuLabel className="font-normal">
+          <p className="text-xs font-bold text-[#F8FAD7]">Sesión iniciada</p>
+          <p className="mt-1 truncate text-[0.7rem] text-[#F8FAD7]/58">
+            {currentUser.email}
+          </p>
+          <p className="mt-0.5 text-[0.65rem] text-[#F8FAD7]/45">
+            {roleLabels[currentUser.role] ?? currentUser.role}
+          </p>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator className="bg-[#F8FAD7]/10" />
+        <DropdownMenuItem
+          variant="destructive"
+          className="cursor-pointer"
+          onSelect={(event) => {
+            // La navegación se hace a mano: con `asChild` y un enlace, el menú
+            // se cierra en pointerdown y el clic real puede no llegar nunca al
+            // ancla. Con un clic sintético funcionaba; con el mouse, no.
+            event.preventDefault();
+            window.location.assign(signOutPath);
+          }}
+        >
+          <LogOut />
+          Cerrar sesión
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }

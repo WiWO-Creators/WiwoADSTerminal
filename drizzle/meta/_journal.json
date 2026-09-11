@@ -29,6 +29,62 @@
       "when": 1788576894214,
       "tag": "0003_nappy_stick",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1788978844590,
+      "tag": "0004_equipo_y_permisos",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789042708250,
+      "tag": "0005_portafolios",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789056148563,
+      "tag": "0006_cliente_correo",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789057566268,
+      "tag": "0007_revisar_cliente",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789075000000,
+      "tag": "0008_pagina_por_cuenta",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789075500000,
+      "tag": "0009_paises_por_cuenta",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789160000000,
+      "tag": "0010_proveedor_por_cuenta",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789161000000,
+      "tag": "0011_ejecuciones",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,4 @@
-import {
-  getChatGPTUser,
-  isAuthorizedChatGPTUser,
-} from "@/app/chatgpt-auth";
+import { getSession } from "@/app/sesion";
 import {
   applyDecisionAction,
   approveDecisionBatch,
@@ -9,33 +6,40 @@ import {
   getDashboardSnapshot,
   type DecisionAction,
 } from "@/lib/dashboard-store";
+import { esRango } from "@/lib/rangos";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const user = await getChatGPTUser();
-  if (!user) {
-    return Response.json({ error: "Inicia sesión para continuar" }, { status: 401 });
+export async function GET(request: Request) {
+  const session = await getSession();
+  if (!session) {
+    return Response.json(
+      { error: "Tu cuenta no tiene acceso a WiWO.ADS" },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
   }
-  if (!isAuthorizedChatGPTUser(user)) {
-    return Response.json({ error: "Tu cuenta no tiene acceso a WiWO.ADS" }, { status: 403 });
-  }
+  const user = session.actor;
 
   try {
-    return Response.json(await getDashboardSnapshot(user));
+    // Un periodo desconocido no es un error: se cae al mes en curso, que es lo
+    // que se venía mostrando siempre.
+    const pedido = new URL(request.url).searchParams.get("rango") ?? "";
+    const rango = esRango(pedido) ? pedido : undefined;
+    return Response.json(await getDashboardSnapshot(user, rango));
   } catch (error) {
     return routeError(error);
   }
 }
 
 export async function POST(request: Request) {
-  const user = await getChatGPTUser();
-  if (!user) {
-    return Response.json({ error: "Inicia sesión para continuar" }, { status: 401 });
+  const session = await getSession();
+  if (!session) {
+    return Response.json(
+      { error: "Tu cuenta no tiene acceso a WiWO.ADS" },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
   }
-  if (!isAuthorizedChatGPTUser(user)) {
-    return Response.json({ error: "Tu cuenta no tiene acceso a WiWO.ADS" }, { status: 403 });
-  }
+  const user = session.actor;
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) {
     return Response.json({ error: "Origen no permitido" }, { status: 403 });

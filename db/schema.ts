@@ -18,8 +18,35 @@ export const users = sqliteTable(
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     createdAt: integer("created_at").notNull(),
     lastSeenAt: integer("last_seen_at").notNull(),
+    invitedBy: text("invited_by"),
+    invitedAt: integer("invited_at"),
   },
   (table) => [uniqueIndex("idx_users_email").on(table.email)],
+);
+
+/**
+ * Qué portafolios ve cada persona.
+ *
+ * Vacío para un rol que ve todo. Para el resto, la ausencia de una fila
+ * significa que ese cliente no existe para esa persona: el filtro se aplica al
+ * leer, no en la interfaz.
+ */
+export const userPortfolios = sqliteTable(
+  "user_portfolios",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    portfolioId: text("portfolio_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by"),
+  },
+  (table) => [
+    uniqueIndex("idx_user_portfolios_user_portfolio").on(
+      table.userId,
+      table.portfolioId,
+    ),
+    index("idx_user_portfolios_user").on(table.userId),
+  ],
 );
 
 export const decisions = sqliteTable(

@@ -22,10 +22,10 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
     <Badge
       className={cn(
         "rounded-md border px-2 py-1 text-[0.72rem] font-bold uppercase tracking-[0.08em]",
-        severity === "critical" && "border-red-200 bg-red-50 text-red-700",
-        severity === "high" && "border-amber-200 bg-amber-50 text-amber-800",
-        severity === "medium" && "border-blue-200 bg-blue-50 text-blue-800",
-        severity === "info" && "border-slate-200 bg-slate-50 text-slate-600",
+        severity === "critical" && "border-red-500/25 bg-red-500/10 text-red-300",
+        severity === "high" && "border-amber-500/25 bg-amber-500/10 text-amber-300",
+        severity === "medium" && "border-[#4242FF]/25 bg-[#4242FF]/10 text-[#4242FF]",
+        severity === "info" && "border-[#F8FAD7]/10 bg-[#F8FAD7]/[0.03] text-[#F8FAD7]/66",
       )}
     >
       {severity === "critical" && <AlertTriangle />}
@@ -52,10 +52,10 @@ export function HealthBadge({
     <span
       className={cn(
         "inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold",
-        state === "critical" && "bg-red-50 text-red-700",
-        state === "warning" && "bg-amber-50 text-amber-800",
-        state === "healthy" && "bg-emerald-50 text-emerald-700",
-        state === "inactive" && "bg-slate-100 text-slate-500",
+        state === "critical" && "bg-red-500/10 text-red-300",
+        state === "warning" && "bg-amber-500/10 text-amber-300",
+        state === "healthy" && "bg-emerald-500/10 text-emerald-300",
+        state === "inactive" && "bg-[#F8FAD7]/[0.07] text-[#F8FAD7]/58",
       )}
     >
       <span
@@ -64,7 +64,7 @@ export function HealthBadge({
           state === "critical" && "bg-red-500",
           state === "warning" && "bg-amber-500",
           state === "healthy" && "bg-emerald-500",
-          state === "inactive" && "bg-slate-400",
+          state === "inactive" && "bg-[#F8FAD7]/35",
         )}
       />
       {label ?? labels[state]}
@@ -74,7 +74,7 @@ export function HealthBadge({
 
 export function AutonomyBadge({ level }: { level: string }) {
   return (
-    <span className="inline-flex min-w-8 items-center justify-center rounded-full border border-[#4A43FF]/20 bg-[#4A43FF]/8 px-2.5 py-1 text-xs font-bold text-[#4A43FF]">
+    <span className="inline-flex min-w-8 items-center justify-center rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-2.5 py-1 text-xs font-bold text-[#4242FF]">
       {level}
     </span>
   );
@@ -90,7 +90,7 @@ export function Surface({
   return (
     <section
       className={cn(
-        "rounded-[16px] border border-[#F5F3FF]/[0.14] bg-[#16161d]/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.78),0_16px_48px_rgba(245,243,255,0.035)] backdrop-blur-md",
+        "rounded-[16px] border border-[#F8FAD7]/[0.14] bg-[#323330]/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.78),0_16px_48px_rgba(245,243,255,0.035)] backdrop-blur-md",
         className,
       )}
     >
@@ -117,21 +117,21 @@ export function StatCard({
       <div
         className={cn(
           "absolute inset-y-0 left-0 w-1",
-          tone === "blue" && "bg-[#4A43FF]",
+          tone === "blue" && "bg-[#4242FF]",
           tone === "red" && "bg-red-500",
           tone === "cyan" &&
-            "bg-gradient-to-b from-[#42FF00] via-[#42FF00] to-[#4A43FF]",
+            "bg-gradient-to-b from-[#3BFF00] via-[#3BFF00] to-[#4242FF]",
         )}
       />
       <div className="flex items-start justify-between gap-4 pl-2">
         <div>
-          <p className="text-sm font-medium text-[#F5F3FF]/60">{label}</p>
-          <p className="metric-number mt-2 text-2xl font-extrabold text-[#F5F3FF]">
+          <p className="text-sm font-medium text-[#F8FAD7]/60">{label}</p>
+          <p className="metric-number mt-2 text-2xl font-extrabold text-[#F8FAD7]">
             {value}
           </p>
-          <p className="mt-1 text-xs leading-5 text-[#F5F3FF]/55">{note}</p>
+          <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/55">{note}</p>
         </div>
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#F5F3FF]/10 bg-[#16161d]/65 text-[#4A43FF] shadow-sm">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/65 text-[#4242FF] shadow-sm">
           <Icon className="size-4" />
         </span>
       </div>

@@ -1,9 +1,6 @@
 import { env } from "cloudflare:workers";
 
-import {
-  isAuthorizedChatGPTUser,
-  type ChatGPTUser,
-} from "@/app/chatgpt-auth";
+import { can, type Actor } from "@/lib/permisos";
 import { getRawDb } from "@/db";
 import {
   fetchGoogleDailyAccountMetrics,
@@ -42,6 +39,8 @@ export type IntegrationSummary = {
   label: string;
   description: string;
   configured: boolean;
+  /** Qué falta para habilitar el proveedor. Vacío cuando está listo. */
+  missingConfig: string[];
   status: "not_connected" | "connected" | "needs_attention";
   providerUserName: string | null;
   accountCount: number;
@@ -172,23 +171,48 @@ export function isIntegrationProvider(
 }
 
 export function providerIsConfigured(provider: IntegrationProvider): boolean {
-  if (!env.OAUTH_TOKEN_KEY) return false;
-  if (provider === "google") {
-    return Boolean(
-      env.GOOGLE_CLIENT_ID &&
-        env.GOOGLE_CLIENT_SECRET &&
-        env.GOOGLE_ADS_DEVELOPER_TOKEN,
-    );
-  }
-  return Boolean(env.META_APP_ID && env.META_APP_SECRET);
+  return missingProviderConfig(provider).length === 0;
 }
 
-export function userCanManageIntegrations(user: ChatGPTUser): boolean {
-  return isAuthorizedChatGPTUser(user);
+/**
+ * Qué le falta a un proveedor para poder conectarse.
+ *
+ * Se devuelve el detalle y no un booleano porque "falta configuración" es un
+ * mensaje inútil: en Google el OAuth puede estar listo y faltar solo el
+ * developer token, que es un trámite aparte y de días.
+ */
+export function missingProviderConfig(
+  provider: IntegrationProvider,
+): string[] {
+  const missing: string[] = [];
+  if (!env.OAUTH_TOKEN_KEY) missing.push("llave de cifrado");
+  if (provider === "google") {
+    if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+      missing.push("credenciales OAuth");
+    }
+    if (!env.GOOGLE_ADS_DEVELOPER_TOKEN) {
+      missing.push("developer token de Google Ads");
+    }
+    return missing;
+  }
+  if (!env.META_APP_ID || !env.META_APP_SECRET) {
+    missing.push("credenciales de la app de Meta");
+  }
+  return missing;
+}
+
+/**
+ * Quién puede administrar conexiones.
+ *
+ * Se consulta el rol, no una lista de correos: un analista autenticado entra al
+ * sistema pero no toca las fuentes de datos.
+ */
+export function userCanManageIntegrations(actor: Actor): boolean {
+  return can(actor, "administrar_conexiones");
 }
 
 export async function listIntegrations(
-  user: ChatGPTUser,
+  user: Actor,
 ): Promise<IntegrationSummary[]> {
   const observedAt = Date.now();
   return Promise.all(
@@ -221,6 +245,7 @@ export async function listIntegrations(
         provider,
         ...PROVIDERS[provider],
         configured: providerIsConfigured(provider),
+        missingConfig: missingProviderConfig(provider),
         status,
         providerUserName: connection?.provider_user_name ?? null,
         accountCount: eligibleAccounts.length,
@@ -251,7 +276,7 @@ export async function listIntegrations(
 }
 
 export async function createAuthorizationUrl(
-  user: ChatGPTUser,
+  user: Actor,
   provider: IntegrationProvider,
   request: Request,
 ): Promise<string> {
@@ -331,7 +356,7 @@ export async function createAuthorizationUrl(
 }
 
 export async function completeAuthorization(
-  user: ChatGPTUser,
+  user: Actor,
   provider: IntegrationProvider,
   state: string,
   code: string,
@@ -424,7 +449,7 @@ export async function completeAuthorization(
 }
 
 export async function syncIntegration(
-  user: ChatGPTUser,
+  user: Actor,
   provider: IntegrationProvider,
 ): Promise<IntegrationSummary[]> {
   assertAdmin(user);
@@ -502,7 +527,7 @@ export async function syncIntegration(
 }
 
 export async function selectIntegrationAccounts(
-  user: ChatGPTUser,
+  user: Actor,
   provider: IntegrationProvider,
   selectedIds: string[],
 ): Promise<IntegrationSummary[]> {
@@ -626,7 +651,7 @@ export async function selectIntegrationAccounts(
 }
 
 export async function disconnectIntegration(
-  user: ChatGPTUser,
+  user: Actor,
   provider: IntegrationProvider,
 ): Promise<IntegrationSummary[]> {
   assertAdmin(user);
@@ -1598,7 +1623,7 @@ async function replaceAccounts(
 }
 
 async function logIntegrationEvent(
-  user: ChatGPTUser,
+  user: Actor,
   eventType: string,
   actionLabel: string,
   result: string,
@@ -1616,7 +1641,7 @@ async function logIntegrationEvent(
     .bind(
       `LOG-${crypto.randomUUID()}`,
       user.id,
-      user.displayName,
+      user.email,
       user.email,
       eventType,
       actionLabel,
@@ -1691,8 +1716,8 @@ function assertConfigured(provider: IntegrationProvider) {
   }
 }
 
-function assertAdmin(user: ChatGPTUser) {
-  if (!userCanManageIntegrations(user)) {
+function assertAdmin(actor: Actor) {
+  if (!userCanManageIntegrations(actor)) {
     throw new IntegrationError(
       "Tu usuario no tiene permiso para administrar conexiones",
       403,

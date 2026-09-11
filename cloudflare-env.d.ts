@@ -33,8 +33,10 @@ declare module "cloudflare:workers" {
   export const env: {
     DB?: D1Database;
     OAUTH_TOKEN_KEY?: string;
+    WINDSOR_API_KEY?: string;
     APP_ORIGIN?: string;
     OAUTH_ADMIN_EMAILS?: string;
+    DEV_LOGIN_ENABLED?: string;
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;
     GOOGLE_ADS_DEVELOPER_TOKEN?: string;
