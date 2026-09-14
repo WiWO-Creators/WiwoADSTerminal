@@ -10,7 +10,7 @@ import {
   type PlanStep,
 } from "@/lib/constructor";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
-import { can, type Actor } from "@/lib/permisos";
+import { can, enAlcance } from "@/lib/permisos";
 import {
   executeWindsorAction,
   idDeResultado,
@@ -314,10 +314,4 @@ async function registrar(
 
 function fail(message: string, status: number) {
   return Response.json({ error: message }, { status, headers: NO_STORE });
-}
-
-/** Ver la nota en la ruta de simulación: alcance por permisos, no por gasto. */
-function enAlcance(actor: Actor, portfolioId: string): boolean {
-  if (can(actor, "ver_todos_los_clientes")) return true;
-  return actor.portfolioIds.includes(portfolioId);
 }

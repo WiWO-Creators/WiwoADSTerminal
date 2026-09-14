@@ -15,6 +15,7 @@ export default async function Home({
     return (
       <main className="grid min-h-svh place-items-center bg-[#292929] px-6 text-[#F8FAD7]">
         <section className="w-full max-w-lg rounded-[28px] border border-[#F8FAD7]/10 bg-[#323330]/70 p-8 shadow-[0_24px_70px_rgba(74,67,255,0.16)]">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
           <img
             src="/wiwo-ads-electric.png"
             alt="WiWO.ADS"

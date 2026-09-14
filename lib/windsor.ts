@@ -237,12 +237,43 @@ async function requestWindsor(
   rangeEnd: string,
   timeoutMs = TIMEOUT_MS,
 ): Promise<Row[]> {
-  const connector = CONNECTORS[provider].connector;
+  return requestWindsorConnector(
+    CONNECTORS[provider].connector,
+    fields,
+    rangeStart,
+    rangeEnd,
+    { timeoutMs },
+  );
+}
+
+/**
+ * Pide un conector de Windsor por su nombre, no por plataforma publicitaria.
+ *
+ * `requestWindsor` asume que cada conector es una de las `ACTIVE_PLATFORMS`
+ * del registro de plataformas. Los conectores de contenido orgánico
+ * (`facebook_organic`, `instagram`) no encajan ahí —no son una plataforma de
+ * anuncios—, así que esta versión toma el nombre del conector directo.
+ *
+ * `selectAccounts` acota el pedido a una sola cuenta. Verificado por prueba
+ * directa: sin él, el conector devuelve el contenido de TODAS las páginas e
+ * Instagram conectados al workspace de Windsor, no solo del cliente pedido.
+ */
+async function requestWindsorConnector(
+  connector: string,
+  fields: string[],
+  rangeStart: string,
+  rangeEnd: string,
+  {
+    timeoutMs = TIMEOUT_MS,
+    selectAccounts,
+  }: { timeoutMs?: number; selectAccounts?: string } = {},
+): Promise<Row[]> {
   const url = new URL(`${API_BASE}/${connector}`);
   url.searchParams.set("api_key", env.WINDSOR_API_KEY!);
   url.searchParams.set("date_from", rangeStart);
   url.searchParams.set("date_to", rangeEnd);
   url.searchParams.set("fields", fields.join(","));
+  if (selectAccounts) url.searchParams.set("select_accounts", selectAccounts);
 
   let lastError: unknown = null;
   for (let intento = 0; intento < REINTENTOS; intento += 1) {
@@ -998,6 +1029,215 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
   }
 
   return [...merged.values()];
+}
+
+/**
+ * Contenido orgánico real de una Página de Facebook o cuenta de Instagram —
+ * lo que el equipo puede elegir como pieza al crear un anuncio, igual que
+ * "usar publicación existente" en Meta Ads Manager.
+ *
+ * Verificado por prueba directa contra el workspace real de Windsor (no
+ * documentado en ningún lado): `facebook_organic` da `type` (photo / album /
+ * video_inline) y no distingue Reel de video de feed por ese campo — un Reel
+ * se reconoce porque su `permalink_url` contiene "/reel/". `instagram` sí
+ * separa Reel de Feed en `media_product_type`, y trae Historias en una
+ * familia de campos aparte (`story_*`) que no comparte fila con `media_*`.
+ */
+export type OrganicPost = {
+  platform: "facebook" | "instagram";
+  accountId: string;
+  id: string;
+  createdAt: string | null;
+  permalink: string;
+  mediaUrl: string;
+  caption: string | null;
+  format: "reel" | "story" | "carousel" | "image" | "video";
+};
+
+const ORGANIC_CACHE_KEY = "windsor_organico_v1";
+/**
+ * Contenido nuevo no exige la frescura de las métricas de gasto: dos horas de
+ * caché evitan golpear Windsor en cada apertura del selector sin hacer
+ * esperar a alguien que publicó hace un minuto y quiere usarlo ya.
+ */
+const ORGANIC_TTL_MS = 2 * 60 * 60 * 1000;
+
+function formatoFacebook(
+  tipo: string | null,
+  permalink: string,
+): OrganicPost["format"] {
+  if (permalink.includes("/reel/")) return "reel";
+  if (tipo === "album") return "carousel";
+  if (tipo === "video_inline") return "video";
+  return "image";
+}
+
+function formatoInstagram(
+  mediaType: string | null,
+  productType: string | null,
+): OrganicPost["format"] {
+  if (productType === "REELS" || mediaType === "REELS") return "reel";
+  if (mediaType === "CAROUSEL_ALBUM") return "carousel";
+  if (mediaType === "VIDEO") return "video";
+  return "image";
+}
+
+async function conCache(
+  cacheId: string,
+  calcular: () => Promise<OrganicPost[]>,
+): Promise<OrganicPost[]> {
+  const db = getRawDb();
+  const cached = await db
+    .prepare("SELECT value, updated_at FROM app_meta WHERE key = ? LIMIT 1")
+    .bind(cacheId)
+    .first<{ value: string; updated_at: number }>();
+  if (cached && Date.now() - Number(cached.updated_at) < ORGANIC_TTL_MS) {
+    return JSON.parse(cached.value) as OrganicPost[];
+  }
+
+  const posts = await calcular();
+  await db
+    .prepare(
+      `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(cacheId, JSON.stringify(posts), Date.now())
+    .run();
+  return posts;
+}
+
+/** Publicaciones reales de una Página de Facebook, más recientes primero. */
+export async function fetchFacebookPosts(
+  pageId: string,
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<OrganicPost[]> {
+  if (!windsorConfigured()) throw new WindsorError("Falta WINDSOR_API_KEY");
+
+  return conCache(
+    `${ORGANIC_CACHE_KEY}:facebook:${pageId}:${rangeStart}:${rangeEnd}`,
+    async () => {
+      const raw = await requestWindsorConnector(
+        "facebook_organic",
+        [
+          "account_id",
+          "post_id",
+          "message",
+          "created_time",
+          "permalink_url",
+          "full_picture",
+          "type",
+        ],
+        rangeStart,
+        rangeEnd,
+        { selectAccounts: pageId },
+      );
+
+      return raw
+        .map((row): OrganicPost | null => {
+          const id = text(row.post_id);
+          const permalink = text(row.permalink_url);
+          const mediaUrl = text(row.full_picture);
+          // Sin imagen no sirve como pieza de anuncio: no hay qué mostrar.
+          if (!id || !permalink || !mediaUrl) return null;
+          return {
+            platform: "facebook",
+            accountId: pageId,
+            id,
+            createdAt: text(row.created_time),
+            permalink,
+            mediaUrl,
+            caption: text(row.message),
+            format: formatoFacebook(text(row.type), permalink),
+          };
+        })
+        .filter((post): post is OrganicPost => post !== null)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    },
+  );
+}
+
+/**
+ * Publicaciones e historias reales de una cuenta de Instagram, más recientes
+ * primero.
+ *
+ * Windsor entrega historias y publicaciones en familias de campos separadas
+ * (`story_*` contra `media_*`); una fila trae una u otra, nunca las dos.
+ */
+export async function fetchInstagramMedia(
+  accountId: string,
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<OrganicPost[]> {
+  if (!windsorConfigured()) throw new WindsorError("Falta WINDSOR_API_KEY");
+
+  return conCache(
+    `${ORGANIC_CACHE_KEY}:instagram:${accountId}:${rangeStart}:${rangeEnd}`,
+    async () => {
+      const raw = await requestWindsorConnector(
+        "instagram",
+        [
+          "account_id",
+          "media_id",
+          "media_caption",
+          "timestamp",
+          "media_permalink",
+          "media_url",
+          "media_type",
+          "media_product_type",
+          "media_thumbnail_url",
+          "story_id",
+          "story_permalink",
+          "story_thumbnail_url",
+          "story_timestamp",
+        ],
+        rangeStart,
+        rangeEnd,
+        { selectAccounts: accountId },
+      );
+
+      return raw
+        .map((row): OrganicPost | null => {
+          const storyId = text(row.story_id);
+          if (storyId) {
+            const permalink = text(row.story_permalink);
+            const mediaUrl = text(row.story_thumbnail_url);
+            if (!permalink || !mediaUrl) return null;
+            return {
+              platform: "instagram",
+              accountId,
+              id: storyId,
+              createdAt: text(row.story_timestamp),
+              permalink,
+              mediaUrl,
+              caption: null,
+              format: "story",
+            };
+          }
+
+          const id = text(row.media_id);
+          const permalink = text(row.media_permalink);
+          const mediaUrl = text(first(row, "media_url", "media_thumbnail_url"));
+          if (!id || !permalink || !mediaUrl) return null;
+          return {
+            platform: "instagram",
+            accountId,
+            id,
+            createdAt: text(row.timestamp),
+            permalink,
+            mediaUrl,
+            caption: text(row.media_caption),
+            format: formatoInstagram(
+              text(row.media_type),
+              text(row.media_product_type),
+            ),
+          };
+        })
+        .filter((post): post is OrganicPost => post !== null)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+    },
+  );
 }
 
 /**

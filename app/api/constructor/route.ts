@@ -7,7 +7,7 @@ import {
   type CuentaCliente,
 } from "@/lib/constructor";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
-import { can, type Actor } from "@/lib/permisos";
+import { can, enAlcance } from "@/lib/permisos";
 
 export const dynamic = "force-dynamic";
 
@@ -72,15 +72,4 @@ export async function POST(request: Request) {
 
 function fail(message: string, status: number) {
   return Response.json({ error: message }, { status, headers: NO_STORE });
-}
-
-/**
- * Si esta persona puede trabajar sobre ese cliente.
- *
- * Es una pregunta de permisos —quién tiene asignado a quién— y no de si el
- * cliente gastó dinero este mes.
- */
-function enAlcance(actor: Actor, portfolioId: string): boolean {
-  if (can(actor, "ver_todos_los_clientes")) return true;
-  return actor.portfolioIds.includes(portfolioId);
 }

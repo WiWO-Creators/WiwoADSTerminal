@@ -10,6 +10,64 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { HealthState, Severity } from "./data";
 
+const ORB_SIZE_PX = { xs: 12, sm: 16, md: 24 } as const;
+
+export type OrbState =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "generating"
+  | "routing"
+  | "success"
+  | "error"
+  | "retry";
+
+const ORB_STATE_LABEL: Record<OrbState, string> = {
+  idle: "En espera",
+  listening: "Escuchando",
+  thinking: "Pensando",
+  generating: "Generando",
+  routing: "Coordinando",
+  success: "Listo",
+  error: "Error",
+  retry: "Reintentando",
+};
+
+/**
+ * La señal propia de WiWO para "algo inteligente está pasando" — no un
+ * spinner genérico, una presencia que respira, razona y vuelve a la calma.
+ * Portado desde WiwoMetriQ (ver el bloque `.wiwo-orb` en globals.css).
+ *
+ * Solo la variante inline (xs/sm/md), para botones e indicadores junto a
+ * texto — el orbe volumétrico grande de MetriQ no se portó todavía.
+ */
+export function ThinkingOrb({
+  size = "md",
+  state = "thinking",
+  className,
+  label,
+}: {
+  size?: keyof typeof ORB_SIZE_PX;
+  state?: OrbState;
+  className?: string;
+  /** aria-label accesible; por defecto el del estado. Pasa "" para decorativo. */
+  label?: string;
+}) {
+  const a11yLabel = label ?? ORB_STATE_LABEL[state];
+  const px = ORB_SIZE_PX[size];
+  // thinking es el estilo base (.wiwo-orb sin modificador).
+  const stateClass = state === "thinking" ? "" : `wiwo-orb--${state}`;
+  return (
+    <span
+      role={a11yLabel ? "status" : undefined}
+      aria-label={a11yLabel || undefined}
+      aria-hidden={a11yLabel ? undefined : "true"}
+      className={cn("wiwo-orb", stateClass, className)}
+      style={{ width: px, height: px }}
+    />
+  );
+}
+
 export function SeverityBadge({ severity }: { severity: Severity }) {
   const labels = {
     critical: "Crítica",
@@ -21,11 +79,11 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   return (
     <Badge
       className={cn(
-        "rounded-md border px-2 py-1 text-[0.72rem] font-bold uppercase tracking-[0.08em]",
-        severity === "critical" && "border-red-500/25 bg-red-500/10 text-red-300",
-        severity === "high" && "border-amber-500/25 bg-amber-500/10 text-amber-300",
-        severity === "medium" && "border-[#4242FF]/25 bg-[#4242FF]/10 text-[#4242FF]",
-        severity === "info" && "border-[#F8FAD7]/10 bg-[#F8FAD7]/[0.03] text-[#F8FAD7]/66",
+        "gap-1 border px-2.5 py-1 text-[0.7rem] font-bold uppercase tracking-[0.07em] [&>svg]:size-3",
+        severity === "critical" && "border-red-500/20 bg-red-500/10 text-red-400",
+        severity === "high" && "border-amber-500/20 bg-amber-500/10 text-amber-400",
+        severity === "medium" && "border-[#4242FF]/20 bg-[#4242FF]/10 text-[#4242FF]",
+        severity === "info" && "border-[#F8FAD7]/12 bg-[#F8FAD7]/[0.04] text-[#F8FAD7]/60",
       )}
     >
       {severity === "critical" && <AlertTriangle />}
@@ -90,7 +148,13 @@ export function Surface({
   return (
     <section
       className={cn(
-        "rounded-[16px] border border-[#F8FAD7]/[0.14] bg-[#323330]/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.78),0_16px_48px_rgba(245,243,255,0.035)] backdrop-blur-md",
+        // Elevación en dos capas —una ambiental, ancha y difusa; una de
+        // contacto, corta y apenas visible— en vez de un solo borde blanco
+        // casi opaco. Eso último se leía como un reflejo de plástico en cada
+        // tarjeta de la app; esto se lee como una superficie apenas
+        // levantada, que es lo que Neo pide con "Beige como mundo": el fondo
+        // manda, la tarjeta no compite contra él.
+        "rounded-[16px] border border-[#F8FAD7]/[0.09] bg-[#323330]/55 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset,0_1px_2px_rgba(0,0,0,0.16),0_12px_32px_-8px_rgba(0,0,0,0.28)] backdrop-blur-md",
         className,
       )}
     >
@@ -113,25 +177,25 @@ export function StatCard({
   tone?: "blue" | "red" | "cyan";
 }) {
   return (
-    <Surface className="relative overflow-hidden p-4">
-      <div
-        className={cn(
-          "absolute inset-y-0 left-0 w-1",
-          tone === "blue" && "bg-[#4242FF]",
-          tone === "red" && "bg-red-500",
-          tone === "cyan" &&
-            "bg-gradient-to-b from-[#3BFF00] via-[#3BFF00] to-[#4242FF]",
-        )}
-      />
-      <div className="flex items-start justify-between gap-4 pl-2">
-        <div>
-          <p className="text-sm font-medium text-[#F8FAD7]/60">{label}</p>
-          <p className="metric-number mt-2 text-2xl font-extrabold text-[#F8FAD7]">
+    <Surface className="p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <p className="font-micro text-[0.62rem] text-[#F8FAD7]/45">
+            {label}
+          </p>
+          <p className="metric-number mt-2.5 text-[1.8rem] font-extrabold leading-none text-[#F8FAD7]">
             {value}
           </p>
-          <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/55">{note}</p>
+          <p className="mt-2.5 text-xs leading-5 text-[#F8FAD7]/50">{note}</p>
         </div>
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/65 text-[#4242FF] shadow-sm">
+        <span
+          className={cn(
+            "grid size-9 shrink-0 place-items-center rounded-full border",
+            tone === "blue" && "border-[#4242FF]/20 bg-[#4242FF]/10 text-[#4242FF]",
+            tone === "red" && "border-red-500/20 bg-red-500/10 text-red-400",
+            tone === "cyan" && "border-[#3BFF00]/20 bg-[#3BFF00]/10 text-[#3BFF00]",
+          )}
+        >
           <Icon className="size-4" />
         </span>
       </div>

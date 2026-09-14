@@ -7,6 +7,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -75,26 +80,11 @@ export function EquipoView({
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function primeraCarga() {
-      try {
-        const data = await fetchTeam();
-        if (!cancelled) setMembers(data);
-      } catch (issue) {
-        if (!cancelled) {
-          setError(issue instanceof Error ? issue.message : "No se pudo cargar");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void primeraCarga();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    // Cargar al montar es exactamente para lo que son los efectos; `load`
+    // hace su propio setState adentro, el linter solo ve la llamada indirecta.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    void load();
+  }, [load]);
 
   async function invite() {
     if (!email.trim()) return;
@@ -341,7 +331,6 @@ function ClientPicker({
   disabled: boolean;
   onChange: (ids: string[]) => void;
 }) {
-  const [open, setOpen] = useState(false);
   if (role === "admin" || role === "lead") {
     return (
       <span className="text-xs text-[#F8FAD7]/45">Todos los clientes</span>
@@ -349,19 +338,26 @@ function ClientPicker({
   }
 
   return (
-    <div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
-        className="text-left text-sm font-semibold text-[#4242FF] underline-offset-2 hover:underline disabled:opacity-50"
-      >
-        {selected.length === 0
-          ? "Sin clientes asignados"
-          : `${selected.length} ${selected.length === 1 ? "cliente" : "clientes"}`}
-      </button>
-      {open && (
-        <div className="mt-2 max-h-44 w-64 space-y-1 overflow-y-auto rounded-xl border border-[#F8FAD7]/12 bg-[#292929]/80 p-2">
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          disabled={disabled}
+          className="text-left text-sm font-semibold text-[#4242FF] underline-offset-2 hover:underline disabled:opacity-50"
+        >
+          {selected.length === 0
+            ? "Sin clientes asignados"
+            : `${selected.length} ${selected.length === 1 ? "cliente" : "clientes"}`}
+        </button>
+      </PopoverTrigger>
+      {/*
+        Antes esto era un div condicional dentro de la misma celda: si la
+        fila quedaba cerca del borde inferior de la tabla, la lista de
+        clientes se cortaba contra el `overflow-hidden` de la tarjeta que
+        envuelve la tabla. Popover la saca por portal, fuera de ese recorte.
+      */}
+      <PopoverContent align="start" className="w-64 p-2">
+        <div className="max-h-44 space-y-1 overflow-y-auto">
           {portfolios.map((portfolio) => {
             const checked = selected.includes(portfolio.id);
             return (
@@ -386,7 +382,7 @@ function ClientPicker({
             );
           })}
         </div>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -180,6 +180,9 @@ export function ClientesView({
   }, []);
 
   useEffect(() => {
+    // Cargar al montar es exactamente para lo que son los efectos; `load`
+    // hace su propio setState adentro, el linter solo ve la llamada indirecta.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
     void load();
   }, [load]);
 
@@ -313,7 +316,7 @@ export function ClientesView({
           <div className="max-h-[70vh] space-y-0.5 overflow-y-auto">
             {portfoliosFiltrados.length === 0 && (
               <p className="px-3 py-4 text-center text-xs text-[#F8FAD7]/40">
-                Sin resultados para "{busqueda}"
+                Sin resultados para &ldquo;{busqueda}&rdquo;
               </p>
             )}
             {portfoliosFiltrados.map((portfolio) => {

@@ -1013,7 +1013,9 @@ function AccountOption({
         "flex items-center gap-3 rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/60 p-3 transition-colors",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer hover:border-[#4242FF]/35 hover:bg-[#1c1c25]",
+          : // Antes hover:bg-[#1c1c25]: un navy-morado frío, ajeno a la
+            // paleta ink/beige de Neo.
+            "cursor-pointer hover:border-[#4242FF]/35 hover:bg-[#F8FAD7]/[0.06]",
       )}
     >
       <Checkbox

@@ -15,7 +15,8 @@ export type ViewKey =
   | "integrations"
   | "team"
   | "builder"
-  | "clients";
+  | "clients"
+  | "historial";
 
 export type Severity = "critical" | "high" | "medium" | "info";
 export type HealthState = "critical" | "warning" | "healthy" | "inactive";

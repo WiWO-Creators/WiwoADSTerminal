@@ -1,21 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
+  Calendar,
   Check,
   ChevronRight,
+  Clapperboard,
+  Film,
+  GalleryHorizontal,
+  ImageIcon,
+  Images,
   Info,
   LoaderCircle,
   Megaphone,
   Rocket,
   ShieldCheck,
   Sparkles,
+  Upload,
   Wand2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -41,7 +55,7 @@ import {
 } from "@/lib/constructor";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 /**
  * Cuenta de un cliente, tal como la sirve `/api/clientes` — mismo `pageId` y
@@ -57,6 +71,18 @@ type Cuenta = {
 };
 
 type Cliente = { id: string; name: string; accounts: Cuenta[] };
+
+/** Contenido real ya publicado, tal como lo sirve `/api/creatividades`. */
+type Publicacion = {
+  platform: "facebook" | "instagram";
+  accountId: string;
+  id: string;
+  createdAt: string | null;
+  permalink: string;
+  mediaUrl: string;
+  caption: string | null;
+  format: "reel" | "story" | "carousel" | "image" | "video";
+};
 
 type Issue = { field: string; message: string; blocking: boolean };
 type PlanStep = {
@@ -206,14 +232,14 @@ export function ConstructorView({
     draft.platforms.includes(p),
   );
 
-  useEffect(() => {
-    // Si la pestaña activa deja de estar entre las elegidas —se destildó esa
-    // plataforma, o todavía no hay ninguna— se cae a la primera disponible en
-    // vez de quedar mostrando el formulario de algo que ya no aplica.
-    if (!plataformasElegidas.includes(plataformaActiva)) {
-      setPlataformaActiva(plataformasElegidas[0] ?? "google");
-    }
-  }, [plataformasElegidas, plataformaActiva]);
+  // Si la pestaña activa deja de estar entre las elegidas —se destildó esa
+  // plataforma, o todavía no hay ninguna— se cae a la primera disponible acá
+  // mismo, durante el render (React lo soporta y lo prefiere para esto), en
+  // vez de confirmar un render con el formulario de algo que ya no aplica y
+  // recién corregirlo un instante después en un efecto.
+  if (!plataformasElegidas.includes(plataformaActiva)) {
+    setPlataformaActiva(plataformasElegidas[0] ?? "google");
+  }
 
   useEffect(() => {
     let cancelado = false;
@@ -398,7 +424,6 @@ export function ConstructorView({
           {fase === "conjunto" && (
             <FaseConjunto
               draft={draft}
-              cuentas={cuentas}
               onChange={actualizar}
               plataformasElegidas={plataformasElegidas}
               plataformaActiva={plataformaActiva}
@@ -442,7 +467,7 @@ export function ConstructorView({
                 disabled={busy}
                 className="font-extrabold"
               >
-                {busy ? <LoaderCircle className="animate-spin" /> : <Wand2 />}
+                {busy ? <ThinkingOrb size="xs" state="thinking" label="" /> : <Wand2 />}
                 Revisar el plan
               </Button>
             )}
@@ -560,7 +585,7 @@ export function ConstructorView({
                       className="w-full font-extrabold"
                     >
                       {publicando ? (
-                        <LoaderCircle className="animate-spin" />
+                        <ThinkingOrb size="xs" state="generating" label="" />
                       ) : (
                         <Rocket />
                       )}
@@ -973,14 +998,12 @@ function FaseCampana({
 
 function FaseConjunto({
   draft,
-  cuentas,
   onChange,
   plataformasElegidas,
   plataformaActiva,
   onPlataformaActiva,
 }: {
   draft: CampaignDraft;
-  cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
   plataformasElegidas: Platform[];
   plataformaActiva: Platform;
@@ -1388,6 +1411,7 @@ function FaseAnuncio({
         ? c.externalId === draft.accountByPlatform.meta
         : cuentas.filter((x) => x.provider === "meta").length === 1),
   );
+  const [selectorAbierto, setSelectorAbierto] = useState(false);
 
   return (
     <>
@@ -1500,21 +1524,61 @@ function FaseAnuncio({
             </div>
             {draft.mediaType !== "none" && (
               <Campo etiqueta="URL PÚBLICA DE LA PIEZA" className="mt-3">
-                <Input
-                  value={draft.mediaUrl}
-                  onChange={(e) => onChange({ mediaUrl: e.target.value })}
-                  placeholder="https://"
-                  className="bg-[#292929]/60"
-                />
+                <div className="flex flex-wrap gap-2">
+                  <Input
+                    value={draft.mediaUrl}
+                    onChange={(e) => onChange({ mediaUrl: e.target.value })}
+                    placeholder="https://"
+                    className="min-w-0 flex-1 bg-[#292929]/60"
+                  />
+                  <SubidaDeArchivo
+                    portfolioId={draft.portfolioId}
+                    onSubido={(url, tipo) =>
+                      onChange({ mediaUrl: url, mediaType: tipo })
+                    }
+                  />
+                  {cuentaMeta && draft.portfolioId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSelectorAbierto(true)}
+                      className="shrink-0 border-[#F8FAD7]/15 bg-[#323330]/60"
+                    >
+                      <Images className="size-4" />
+                      Elegir publicación
+                    </Button>
+                  )}
+                </div>
                 <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/45">
                   <Info className="mt-0.5 size-3.5 shrink-0" />
-                  Meta va a buscar el archivo a esa dirección, no lo recibe
-                  cargado. Subir desde el computador exige que WiWO.ADS lo
-                  hospede primero — está pendiente.
+                  Meta va a buscar el archivo en esta dirección. Si el sitio
+                  todavía no está publicado en un dominio real, un archivo
+                  recién subido no será alcanzable para Meta ni para Google —
+                  solo se verá en esta vista previa.
                 </p>
               </Campo>
             )}
           </Seccion>
+
+          {cuentaMeta && draft.portfolioId && (
+            <SelectorDeContenido
+              open={selectorAbierto}
+              onOpenChange={setSelectorAbierto}
+              portfolioId={draft.portfolioId}
+              accountId={cuentaMeta.externalId}
+              onSeleccionar={(post) => {
+                onChange({
+                  mediaUrl: post.mediaUrl,
+                  mediaType:
+                    post.format === "video" || post.format === "reel"
+                      ? "video"
+                      : "image",
+                  message: draft.message.trim() ? draft.message : (post.caption ?? draft.message),
+                });
+                setSelectorAbierto(false);
+              }}
+            />
+          )}
         </>
       )}
 
@@ -1594,6 +1658,341 @@ function FaseAnuncio({
   );
 }
 
+/**
+ * Sube un archivo real a R2 y deja lista su URL pública.
+ *
+ * La condición real está en el aviso de arriba, no acá: esta ruta sirve el
+ * archivo desde `/api/media/...`, y esa dirección solo es alcanzable para
+ * Google o Meta si el sitio está publicado en un dominio real — en
+ * `localhost` sirve para previsualizar, no para publicar de verdad.
+ */
+function SubidaDeArchivo({
+  portfolioId,
+  onSubido,
+}: {
+  portfolioId: string;
+  onSubido: (url: string, tipo: "image" | "video") => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function subir(archivo: File) {
+    setSubiendo(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.set("portfolioId", portfolioId);
+      form.set("archivo", archivo);
+      const response = await fetch("/api/creatividades/subir", {
+        method: "POST",
+        body: form,
+      });
+      const body = (await response.json()) as { url?: string; error?: string };
+      if (!response.ok || !body.url) {
+        throw new Error(body.error ?? "No se pudo subir el archivo");
+      }
+      onSubido(body.url, archivo.type.startsWith("video/") ? "video" : "image");
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "No se pudo subir el archivo");
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
+        className="hidden"
+        onChange={(event) => {
+          const archivo = event.target.files?.[0];
+          event.target.value = "";
+          if (archivo) void subir(archivo);
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        disabled={subiendo || !portfolioId}
+        onClick={() => inputRef.current?.click()}
+        className="shrink-0 border-[#F8FAD7]/15 bg-[#323330]/60"
+      >
+        {subiendo ? (
+          <LoaderCircle className="size-4 animate-spin" />
+        ) : (
+          <Upload className="size-4" />
+        )}
+        Subir archivo
+      </Button>
+      {error && <p className="w-full text-xs text-red-300">{error}</p>}
+    </>
+  );
+}
+
+const FILTROS_FORMATO: Array<{ id: Publicacion["format"] | "todos"; label: string; icon: typeof ImageIcon }> = [
+  { id: "todos", label: "Todos", icon: Images },
+  { id: "reel", label: "Reel", icon: Clapperboard },
+  { id: "video", label: "Video", icon: Film },
+  { id: "story", label: "Historia", icon: GalleryHorizontal },
+  { id: "carousel", label: "Carrusel", icon: Images },
+  { id: "image", label: "Imagen", icon: ImageIcon },
+];
+
+const RANGOS_CONTENIDO = [
+  { dias: 30, label: "Últimos 30 días" },
+  { dias: 90, label: "Últimos 90 días" },
+  { dias: 180, label: "Últimos 6 meses" },
+  { dias: 365, label: "Último año" },
+];
+
+/**
+ * Selector de contenido ya publicado, para usarlo como pieza del anuncio —
+ * lo mismo que "usar publicación existente" en Meta Ads Manager.
+ *
+ * Nunca deja elegir un video o Reel de **Facebook**: `full_picture`, el único
+ * campo que Windsor entrega para esos posts por esta vía, es la miniatura del
+ * video, no el archivo. Pasarlo como `video_url` crearía un anuncio roto sin
+ * ningún aviso hasta que alguien lo revisara en la plataforma. Instagram no
+ * tiene ese problema — su `media_url` sí es el archivo real de video — así
+ * que ahí Reel y Video se pueden usar igual que una imagen.
+ */
+function SelectorDeContenido({
+  open,
+  onOpenChange,
+  portfolioId,
+  accountId,
+  onSeleccionar,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  portfolioId: string;
+  accountId: string;
+  onSeleccionar: (post: Publicacion) => void;
+}) {
+  const [posts, setPosts] = useState<Publicacion[]>([]);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const [formato, setFormato] = useState<Publicacion["format"] | "todos">("todos");
+  const [dias, setDias] = useState(90);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelado = false;
+    // Sincronizar con Windsor es exactamente para lo que son los efectos;
+    // el aviso del linter es para el caso de "esto se podría calcular
+    // durante el render", que no aplica a una petición de red.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    setCargando(true);
+    setError(null);
+    void (async () => {
+      try {
+        const hasta = new Date().toISOString().slice(0, 10);
+        const desde = new Date(Date.now() - dias * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+        const params = new URLSearchParams({
+          portfolioId,
+          accountId,
+          desde,
+          hasta,
+        });
+        const response = await fetch(`/api/creatividades?${params}`, {
+          cache: "no-store",
+        });
+        const body = (await response.json()) as {
+          posts?: Publicacion[];
+          aviso?: string | null;
+          error?: string;
+        };
+        if (cancelado) return;
+        if (!response.ok) throw new Error(body.error ?? "No se pudo cargar");
+        setPosts(body.posts ?? []);
+        setAviso(body.aviso ?? null);
+      } catch (issue) {
+        if (!cancelado) {
+          setError(issue instanceof Error ? issue.message : "No se pudo cargar");
+        }
+      } finally {
+        if (!cancelado) setCargando(false);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [open, portfolioId, accountId, dias]);
+
+  const filtrados = posts.filter(
+    (post) => formato === "todos" || post.format === formato,
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Elegir publicación existente</DialogTitle>
+          <DialogDescription>
+            Contenido real ya publicado en Facebook e Instagram. Elige uno
+            para usarlo como pieza del anuncio.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#F8FAD7]/10 pb-3">
+          {FILTROS_FORMATO.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setFormato(item.id)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                  formato === item.id
+                    ? "border-[#4242FF] bg-[#4242FF]/12 text-[#4242FF]"
+                    : "border-[#F8FAD7]/12 text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                )}
+              >
+                <Icon className="size-3.5" />
+                {item.label}
+              </button>
+            );
+          })}
+          <Select
+            value={String(dias)}
+            onValueChange={(value) => setDias(Number(value))}
+          >
+            <SelectTrigger size="sm" className="ml-auto w-44 bg-[#323330]/65">
+              <Calendar className="size-3.5 text-[#4242FF]" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RANGOS_CONTENIDO.map((item) => (
+                <SelectItem key={item.dias} value={String(item.dias)}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {aviso && (
+          <p className="flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/50">
+            <Info className="mt-0.5 size-3.5 shrink-0" />
+            {aviso}
+          </p>
+        )}
+
+        <div className="scrollbar-thin max-h-[60vh] overflow-y-auto">
+          {cargando ? (
+            <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-[#F8FAD7]/55">
+              <ThinkingOrb size="md" state="thinking" label="" />
+              Buscando publicaciones…
+            </div>
+          ) : error ? (
+            <div className="rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          ) : filtrados.length === 0 ? (
+            <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-sm text-[#F8FAD7]/55">
+              <Images className="size-6 text-[#F8FAD7]/30" />
+              No hay publicaciones con este filtro en el rango elegido.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {filtrados.map((post) => (
+                <TarjetaPublicacion
+                  key={`${post.platform}:${post.id}`}
+                  post={post}
+                  onUsar={() => onSeleccionar(post)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const ETIQUETA_FORMATO: Record<Publicacion["format"], string> = {
+  reel: "Reel",
+  story: "Historia",
+  carousel: "Carrusel",
+  image: "Imagen",
+  video: "Video",
+};
+
+function TarjetaPublicacion({
+  post,
+  onUsar,
+}: {
+  post: Publicacion;
+  onUsar: () => void;
+}) {
+  // Ver la nota en SelectorDeContenido: el video de Facebook solo trae
+  // miniatura por esta vía, así que no se puede usar como pieza real.
+  const usable = !(
+    post.platform === "facebook" &&
+    (post.format === "video" || post.format === "reel")
+  );
+
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[#F8FAD7]/10 bg-[#292929]/60">
+      <div className="relative aspect-square w-full overflow-hidden bg-[#1c1c1a]">
+        {/* eslint-disable-next-line @next/next/no-img-element -- miniatura desde el CDN de Facebook/Instagram, no un asset propio */}
+        <img
+          src={post.mediaUrl}
+          alt=""
+          className="size-full object-cover"
+          loading="lazy"
+        />
+        <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-bold text-white backdrop-blur-sm">
+          {ETIQUETA_FORMATO[post.format]}
+        </span>
+        <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[0.6rem] font-semibold text-white/85 backdrop-blur-sm">
+          {post.platform === "facebook" ? "Facebook" : "Instagram"}
+        </span>
+      </div>
+      <div className="p-2.5">
+        <p className="text-[0.65rem] text-[#F8FAD7]/45">
+          {post.createdAt ? formatoFecha(post.createdAt) : "Sin fecha"}
+        </p>
+        {post.caption && (
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#F8FAD7]/70">
+            {post.caption}
+          </p>
+        )}
+        {usable ? (
+          <Button
+            type="button"
+            size="sm"
+            onClick={onUsar}
+            className="mt-2 w-full font-bold"
+          >
+            Usar esta
+          </Button>
+        ) : (
+          <p className="mt-2 flex items-start gap-1.5 text-[0.62rem] leading-4 text-amber-400/80">
+            <Info className="mt-0.5 size-3 shrink-0" />
+            Solo hay miniatura disponible; pega el archivo de video a mano.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatoFecha(iso: string): string {
+  return new Intl.DateTimeFormat("es-CL", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(iso));
+}
+
 /** Vista previa liviana, para orientarse mientras se completa el formulario. */
 /** El dominio limpio de una URL, para las migas de Google y el pie de Meta. */
 function dominioDe(url: string): string {
@@ -1615,12 +2014,18 @@ function dominioDe(url: string): string {
  * mostrarlo acá, antes de publicar, que descubrirlo cuando Meta la rechace.
  */
 function ImagenDeLaPieza({ url }: { url: string }) {
+  // Sin efecto: si la URL cambió desde el render anterior, el estado se
+  // ajusta acá mismo (React lo soporta y lo prefiere para esto) en vez de
+  // confirmar un render con el estado viejo y recién corregirlo un instante
+  // después en un efecto.
+  const [urlAnterior, setUrlAnterior] = useState(url);
   const [estado, setEstado] = useState<"cargando" | "ok" | "error">(
     url.trim() ? "cargando" : "error",
   );
-  useEffect(() => {
+  if (url !== urlAnterior) {
+    setUrlAnterior(url);
     setEstado(url.trim() ? "cargando" : "error");
-  }, [url]);
+  }
 
   if (estado === "error") {
     return (

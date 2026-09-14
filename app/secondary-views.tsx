@@ -509,10 +509,13 @@ export function HealthView({
               className="relative grid size-20 place-items-center rounded-full before:absolute before:inset-2 before:rounded-full before:bg-[#323330]"
               style={
                 {
+                  // Antes el tramo sin llenar era #E8EBF2 —gris casi blanco,
+                  // pensado para una tarjeta clara— y quedaba como un arco
+                  // brillante encima de esta tarjeta oscura.
                   background:
                     "conic-gradient(#4242FF " +
                     String(score) +
-                    "%, #E8EBF2 0)",
+                    "%, rgba(248, 250, 215, 0.12) 0)",
                 } as CSSProperties
               }
             >

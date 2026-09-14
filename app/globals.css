@@ -34,8 +34,11 @@
   --primary-foreground: #292929;
   --secondary: #323330;
   --secondary-foreground: #F8FAD7;
-  --muted: #1b1b24;
-  --muted-foreground: #a2a0af;
+  /* Antes #1b1b24 / #a2a0af: un azul-marino y un lavanda fríos, ajenos a la
+     paleta beige/tinta de Neo. Cualquier tabla o pestaña con fondo "muted"
+     quedaba con un parche de otro sistema de diseño encima. */
+  --muted: #26261f;
+  --muted-foreground: #9d9c88;
   --accent: rgba(74, 67, 255, 0.18);
   --accent-foreground: #4242ff;
   --destructive: #d93d43;
@@ -48,7 +51,10 @@
   --chart-4: #f2a934;
   --chart-5: #d93d43;
   --radius: 1rem;
-  --sidebar: #0f0f14;
+  /* Antes #0f0f14: un azul-negro frío, ajeno a la paleta ink/beige de Neo.
+     #201f1d es el valor real que usa WiwoMetriQ para su sidebar — más oscuro
+     que las tarjetas para separarlas, pero de la misma familia tibia. */
+  --sidebar: #201f1d;
   --sidebar-foreground: #F8FAD7;
   --sidebar-primary: #4242ff;
   --sidebar-primary-foreground: #292929;
@@ -131,8 +137,8 @@ body {
   --popover-foreground: #17161c;
   --secondary: #ececf2;
   --secondary-foreground: #17161c;
-  --muted: #ececf2;
-  --muted-foreground: #62616b;
+  --muted: #eeeee0;
+  --muted-foreground: #6c6b5c;
   --border: rgba(23, 22, 28, 0.14);
   --input: rgba(23, 22, 28, 0.2);
   --sidebar: #ffffff;
@@ -245,16 +251,21 @@ textarea {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
+/* El verde de marca a toda página en cada encabezado de tabla —antes el color
+   fijo de estas dos reglas— es "tech en microdosis" tomado al pie de la
+   letra al revés: se convierte en el color dominante de cualquier pantalla
+   con una tabla. Se deja como una etiqueta discreta, beige apagado, y el
+   verde queda disponible para lo que sí debe destacar. */
 [data-slot="table-header"] [data-slot="table-row"] {
-  background: #323330 !important;
+  background: rgba(248, 250, 215, 0.03) !important;
 }
 
 [data-slot="table-header"] [data-slot="table-head"] {
-  color: #3bff00 !important;
+  color: rgba(248, 250, 215, 0.45) !important;
   font-family: "Tomorrow", ui-monospace, monospace;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 500;
-  letter-spacing: 0.055em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -266,11 +277,10 @@ textarea {
    tema. Sin estos ajustes la cabecera de tabla queda como una banda negra con
    texto oscuro encima, y los campos de formulario salen negros sobre blanco. */
 .theme-shell[data-theme="light"] [data-slot="table-header"] [data-slot="table-row"] {
-  background: #eeeef4 !important;
+  background: rgba(23, 22, 28, 0.03) !important;
 }
 .theme-shell[data-theme="light"] [data-slot="table-header"] [data-slot="table-head"] {
-  /* El verde de marca sobre blanco no se lee; se oscurece manteniendo el tono. */
-  color: #2a7500 !important;
+  color: rgba(23, 22, 28, 0.5) !important;
 }
 .theme-shell[data-theme="light"] [data-slot="input"],
 .theme-shell[data-theme="light"] [data-slot="textarea"] {
@@ -292,14 +302,30 @@ textarea {
 /* ── Tokens del sistema Neo (neo.wiwo.me) ────────────────────────────────────
    Se declaran acá para que el resto del proyecto deje de escribir valores
    sueltos. Los colores ya están aplicados; forma y espaciado quedan
-   disponibles para lo que venga. */
+   disponibles para lo que venga.
+
+   `--wiwo-purple`, `--wiwo-onfill` y los tokens de movimiento de acá abajo
+   salen de WiwoMetriQ (`WiwoDevs/WiwoMetrics`), la otra app que sí implementa
+   Neo en producción — no son una interpretación nueva.
+
+   Pendiente, a propósito no aplicado todavía: MetriQ usa `--radius: 0.5rem`
+   (8px) como radio base de tarjeta, con una escala proporcional
+   (`--radius-sm/md/lg/xl` derivados de ahí). Acá `Surface` sigue en
+   `rounded-[16px]`, el doble. Corregirlo bien exige revisar cada
+   `rounded-[Npx]` suelto del proyecto, no solo esta variable — queda para una
+   pasada aparte en vez de cambiar el token sin que nada lo use todavía. */
 :root {
   --wiwo-beige: #f8fad7;
   --wiwo-ink: #292929;
+  /* Texto claro FIJO sobre fills oscuros o de color (azul, degradados) — no
+     flipea con el tema, a diferencia del beige de cuerpo de texto. */
+  --wiwo-onfill: #fffef7;
   --wiwo-blue: #4242ff;
   --wiwo-blue-700: #2525c8;
   --wiwo-green: #3bff00;
   --wiwo-lime: #8af84f;
+  /* Morado Neo: estado "listening" del Thinking Orb, sin uso de marca fuera de eso. */
+  --wiwo-purple: #8d7cff;
   --wiwo-gradient-primary: linear-gradient(103deg, #3bff00, #4242ff);
   --wiwo-gradient-soft: linear-gradient(
     135deg,
@@ -316,6 +342,15 @@ textarea {
   --space-6: 2rem;
   --space-7: 3rem;
   --space-8: 4.5rem;
+  /* Duraciones con nombre: antes cada transición tenía su propio valor suelto. */
+  --motion-micro: 160ms;
+  --motion-state: 280ms;
+  --motion-expressive: 420ms;
+  --motion-hero: 900ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-expressive: cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* "Tech en microdosis": los controles de Neo son pastillas. */
@@ -457,4 +492,242 @@ textarea {
 .theme-shell[data-theme="light"] .wa-preview-meta .wa-m-cta {
   background: #e4e6eb;
   color: #050505;
+}
+
+/* ── Thinking Orb ─────────────────────────────────────────────────────────
+   Portado desde WiwoMetriQ (WiwoDevs/WiwoMetrics, docs/THINKING_ORB.md —
+   "Kit de portabilidad"), la app hermana que implementa Neo en producción.
+   Solo la variante *inline* (xs/sm/md): la bolita de gradiente que respira,
+   para botones e indicadores junto a texto — reemplaza el `LoaderCircle`
+   genérico en los lugares donde "algo inteligente está pasando" (leer
+   Windsor, armar el plan, publicar). La variante *stage* —el orbe
+   volumétrico con partículas, para paneles de carga grandes— no se portó:
+   es varios cientos de líneas de CSS adicionales, para otra pasada. */
+@keyframes wiwo-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes wiwo-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1) saturate(1);
+  }
+  50% {
+    transform: scale(1.09);
+    filter: brightness(1.12) saturate(1.15);
+  }
+}
+@keyframes wiwo-orb-morph {
+  0%,
+  100% {
+    border-radius: 50%;
+  }
+  33% {
+    border-radius: 54% 46% 52% 48% / 48% 52% 48% 52%;
+  }
+  66% {
+    border-radius: 46% 54% 48% 52% / 52% 46% 54% 48%;
+  }
+}
+@keyframes wiwo-orb-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-12%) scale(1.06);
+  }
+}
+@keyframes wiwo-orb-ribbon {
+  0% {
+    transform: scale(0.75);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-emanate {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-bloom {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-contract {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    transform: scale(0.84);
+    filter: saturate(1.25) brightness(0.95);
+  }
+}
+@keyframes wiwo-orb-success {
+  0% {
+    transform: scale(0.9);
+  }
+  45% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Base: gradiente líquido que respira + highlight que orbita. Es el estado
+   "thinking", el default — no necesita modificador. */
+.wiwo-orb {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border-radius: 999px;
+  background: var(--wiwo-gradient-primary);
+  box-shadow:
+    0 0 14px -2px rgba(66, 66, 255, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  animation:
+    wiwo-orb-breathe 2.4s ease-in-out infinite,
+    wiwo-orb-morph 7s ease-in-out infinite;
+}
+/* Capa de FX por estado (ribbon/emanación/bloom). Oculta por defecto; cada
+   modificador de estado la enciende. */
+.wiwo-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+}
+.wiwo-orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.6) 60deg,
+    transparent 150deg
+  );
+  mix-blend-mode: screen;
+  animation: wiwo-orb-spin 2.8s linear infinite;
+}
+
+/* idle: gris definido en espera, pulso bajo (sistema disponible). */
+.wiwo-orb--idle {
+  background: radial-gradient(circle at 38% 32%, #b8b8b3, #76766f);
+  box-shadow:
+    0 0 10px -3px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  animation: wiwo-orb-breathe 3.8s ease-in-out infinite;
+}
+.wiwo-orb--idle::before {
+  opacity: 0.3;
+  animation-duration: 7s;
+}
+
+/* listening: morado, rebote vivo + ribbon sensible al input. */
+.wiwo-orb--listening {
+  background: radial-gradient(circle at 38% 32%, #c2b6ff, var(--wiwo-purple));
+  box-shadow:
+    0 0 16px -2px rgba(141, 124, 255, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+  animation: wiwo-orb-bounce 1.2s var(--ease-spring) infinite;
+}
+.wiwo-orb--listening::before {
+  opacity: 0;
+}
+.wiwo-orb--listening::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(141, 124, 255, 0.7);
+  animation: wiwo-orb-ribbon 1.8s var(--ease-out) infinite;
+}
+
+/* generating: más brillante y veloz, emanación saliendo (output activo). */
+.wiwo-orb--generating {
+  filter: saturate(1.25) brightness(1.12);
+  animation:
+    wiwo-orb-breathe 1.5s ease-in-out infinite,
+    wiwo-orb-morph 4s ease-in-out infinite;
+}
+.wiwo-orb--generating::before {
+  animation-duration: 1.4s;
+}
+.wiwo-orb--generating::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(66, 66, 255, 0.5);
+  animation: wiwo-orb-emanate 1.6s var(--ease-out) infinite;
+}
+
+/* routing: órbitas partidas, coordinación entre agentes. */
+.wiwo-orb--routing {
+  animation: wiwo-orb-breathe 2.6s ease-in-out infinite;
+}
+.wiwo-orb--routing::before {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.8) 22deg,
+    transparent 56deg,
+    transparent 180deg,
+    rgba(255, 255, 255, 0.55) 202deg,
+    transparent 236deg
+  );
+  animation: wiwo-orb-spin 1.4s linear infinite;
+}
+.wiwo-orb--routing::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgba(66, 66, 255, 0.38);
+  animation: wiwo-orb-emanate 2.2s linear infinite;
+}
+
+/* success: lima alegre + bloom celebratorio. */
+.wiwo-orb--success {
+  background: var(--wiwo-green);
+  box-shadow:
+    0 0 18px -2px rgba(59, 255, 0, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  animation: wiwo-orb-success 0.6s var(--ease-spring) 1 both;
+}
+.wiwo-orb--success::before {
+  display: none;
+}
+.wiwo-orb--success::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(59, 255, 0, 0.6);
+  animation: wiwo-orb-bloom 0.7s var(--ease-out) 1 both;
+}
+
+/* error: fricción + contracción (bloqueo claro, sin rojo agresivo permanente).
+   retry es un alias del mismo lenguaje visual. */
+.wiwo-orb--error,
+.wiwo-orb--retry {
+  background: linear-gradient(135deg, #ff6f61 0%, #ba1a1a 100%);
+  box-shadow:
+    0 0 14px -3px rgba(186, 26, 26, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  animation: wiwo-orb-contract 1.4s var(--ease-in-out) infinite;
 }

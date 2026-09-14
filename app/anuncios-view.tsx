@@ -2,7 +2,18 @@
 
 import { useMemo, useState } from "react";
 import { ChevronRight, LayoutList, Search, X } from "lucide-react";
+import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -140,6 +151,10 @@ export function AnunciosView({
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
   const [busqueda, setBusqueda] = useState("");
   const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
+  const [confirmando, setConfirmando] = useState<{
+    fila: Fila;
+    activar: boolean;
+  } | null>(null);
 
   const permitidas = useMemo(
     () =>
@@ -261,7 +276,10 @@ export function AnunciosView({
         [fila.clave]: activar ? "ENABLED" : "PAUSED",
       }));
     } catch (issue) {
-      alert(
+      // Antes esto era un alert() nativo: la única ventana del navegador en
+      // toda la app, rompiendo el diseño de golpe. El resto del sistema
+      // reporta errores con toast; esto solo lo alinea.
+      toast.error(
         issue instanceof Error
           ? issue.message
           : "No se pudo contactar al servidor",
@@ -307,11 +325,7 @@ export function AnunciosView({
         disabled={cargando}
         onClick={(e) => {
           e.stopPropagation();
-          const verbo = activaAhora ? "pausar" : "activar";
-          if (!confirm(`¿${verbo.charAt(0).toUpperCase() + verbo.slice(1)} "${fila.nombre}" en ${platformLabel(fila.provider)}? Esto escribe de verdad en la plataforma.`)) {
-            return;
-          }
-          void cambiarEstado(fila, !activaAhora);
+          setConfirmando({ fila, activar: !activaAhora });
         }}
         className={cn(
           "rounded-full border px-2.5 py-1 text-[0.62rem] font-bold transition-colors disabled:opacity-40",
@@ -683,6 +697,42 @@ export function AnunciosView({
           </div>
         )}
       </Surface>
+
+      {/*
+        Antes esto era un confirm() nativo del navegador: la única ventana
+        del sistema en toda la app, incluso para la acción más consecuente
+        de esta pantalla (escribe de verdad en la plataforma). Mismo texto,
+        ahora con el diálogo que ya usa el resto de WiWO.ADS.
+      */}
+      <AlertDialog
+        open={Boolean(confirmando)}
+        onOpenChange={(open) => !open && setConfirmando(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirmando &&
+                `¿${confirmando.activar ? "Activar" : "Pausar"} "${confirmando.fila.nombre}"?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmando &&
+                `Esto escribe de verdad en ${platformLabel(confirmando.fila.provider)}.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!confirmando) return;
+                void cambiarEstado(confirmando.fila, confirmando.activar);
+                setConfirmando(null);
+              }}
+            >
+              {confirmando?.activar ? "Activar" : "Pausar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

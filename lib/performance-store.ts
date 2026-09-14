@@ -434,10 +434,6 @@ function minText(values: Array<string | null>): string | null {
   return present.length ? present.sort().at(0) ?? null : null;
 }
 
-function isoDate(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
-
 /**
  * Snapshot construido desde Windsor.
  *

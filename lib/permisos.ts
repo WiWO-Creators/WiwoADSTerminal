@@ -101,3 +101,18 @@ export function can(actor: Actor, capability: Capability): boolean {
 export function visiblePortfolios(actor: Actor): string[] | null {
   return can(actor, "ver_todos_los_clientes") ? null : actor.portfolioIds;
 }
+
+/**
+ * Si esta persona puede trabajar sobre ese cliente puntual.
+ *
+ * El alcance sale de los permisos, no del gasto: antes varias rutas exigían
+ * que el cliente apareciera en el snapshot de rendimiento del periodo, y eso
+ * bloqueaba justo el caso normal —armarle algo a un cliente que hoy no tiene
+ * nada al aire—. Repetida idéntica en cuatro rutas del Constructor hasta
+ * juntarla acá: una sola definición, cero riesgo de que una copia se
+ * actualice y las otras tres queden con la regla vieja.
+ */
+export function enAlcance(actor: Actor, portfolioId: string): boolean {
+  if (can(actor, "ver_todos_los_clientes")) return true;
+  return actor.portfolioIds.includes(portfolioId);
+}

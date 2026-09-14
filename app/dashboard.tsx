@@ -7,7 +7,6 @@ import {
   Bell,
   Building2,
   CalendarRange,
-  LoaderCircle,
   Bot,
   ChevronRight,
   Clock3,
@@ -16,9 +15,9 @@ import {
   FlaskConical,
   Gauge,
   HeartPulse,
+  History,
   Inbox,
   LayoutDashboard,
-  LayoutList,
   LockKeyhole,
   LogOut,
   MoreHorizontal,
@@ -104,6 +103,7 @@ import {
   ConstructorView,
   type ConstructorAttachTo as ConstructorViewAttachTo,
 } from "./constructor-view";
+import { EjecucionesView } from "./ejecuciones-view";
 import { EquipoView } from "./equipo-view";
 import { IntegrationsView } from "./integrations-view";
 import {
@@ -116,6 +116,7 @@ import {
   AutonomyBadge,
   SeverityBadge,
   Surface,
+  ThinkingOrb,
 } from "./ui";
 
 const navItems: Array<{
@@ -150,6 +151,12 @@ const navItems: Array<{
     icon: WandSparkles,
     roles: ["admin", "lead", "buyer"],
   },
+  {
+    key: "historial",
+    label: "Publicaciones",
+    icon: History,
+    roles: ["admin", "lead", "buyer", "analyst"],
+  },
   { key: "control", label: "Sala de control", icon: LayoutDashboard },
   { key: "pacing", label: "Inversión", icon: Gauge },
   { key: "health", label: "Salud de medición", icon: HeartPulse },
@@ -173,6 +180,7 @@ const viewMeta: Record<ViewKey, { eyebrow: string; title: string }> = {
   team: { eyebrow: "Configuración", title: "Equipo y permisos" },
   builder: { eyebrow: "Creación", title: "Constructor de campañas" },
   clients: { eyebrow: "Cartera", title: "Clientes" },
+  historial: { eyebrow: "Gobierno", title: "Publicaciones reales" },
 };
 
 const roleLabels: Record<string, string> = {
@@ -273,7 +281,11 @@ export default function WiwoDashboard({
   const [builderContexto, setBuilderContexto] = useState<BuilderContexto | null>(null);
 
   useEffect(() => {
+    // A propósito en un efecto y no en el inicializador de useState: leer
+    // localStorage durante el render rompería la hidratación (el servidor
+    // siempre arranca en "dark", sin acceso a localStorage del navegador).
     const savedTheme = window.localStorage.getItem("wiwo-ads-theme");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
     if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
   }, []);
 
@@ -689,6 +701,7 @@ export default function WiwoDashboard({
               attachTo={builderConstructorAttachTo(builderContexto)}
             />
           )}
+          {view === "historial" && <EjecucionesView />}
           {view === "team" && (
             <EquipoView
               portfolios={performance.portfolios.map((item) => ({
@@ -751,6 +764,7 @@ function AppSidebar({
     >
       <SidebarHeader className="border-b border-[#F8FAD7]/10 px-3 py-4">
         <div className="flex min-h-10 items-center gap-3 overflow-hidden px-1">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
           <img
             src="/wiwo-ads-electric.png"
             alt="WiWO.ADS"
@@ -952,7 +966,7 @@ function AppHeader({
                   lea como "trabajando", no como una pantalla congelada.
                 */}
                 {cambiandoRango ? (
-                  <LoaderCircle className="size-3.5 animate-spin text-[#4242FF]" />
+                  <ThinkingOrb size="xs" state="thinking" label="" />
                 ) : (
                   <CalendarRange className="size-3.5 text-[#4242FF]" />
                 )}
@@ -1284,8 +1298,13 @@ function DecisionCard({
     <Surface
       className={cn(
         "relative overflow-hidden transition-all",
+        // Antes esta tarjeta se volvía casi blanca al seleccionarla, con el
+        // mismo texto beige translúcido encima: el color de más alto
+        // contraste del sistema quedaba ilegible justo en la tarjeta que
+        // importa más. El acento ahora es el borde y un tinte azul apenas
+        // perceptible sobre la misma superficie oscura.
         selected
-          ? "border-[#4242FF] bg-[linear-gradient(115deg,rgba(255,255,255,0.76),rgba(66,255,0,0.08),rgba(74,67,255,0.06))] shadow-[0_0_0_1px_#4242FF,0_18px_50px_rgba(74,67,255,0.10)]"
+          ? "border-[#4242FF]/60 bg-[#4242FF]/[0.07] shadow-[0_0_0_1px_rgba(66,66,255,0.35),0_18px_44px_-12px_rgba(66,66,255,0.28)]"
           : "hover:border-[#F8FAD7]/25",
       )}
     >
@@ -1417,9 +1436,24 @@ function DecisionDetail({
             {decision.proposedAction}
           </DetailBlock>
 
-          <div className="overflow-hidden rounded-[16px] border border-[#F8FAD7]/15 bg-[linear-gradient(135deg,#F8FAD7_0%,#333333_58%,#4242FF_145%)] text-white shadow-[0_18px_42px_rgba(245,243,255,0.12)]">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <span className="text-xs font-bold uppercase tracking-[0.1em] text-white/55">
+          {/*
+            Antes esta tarjeta era un degradado beige→gris→azul con texto
+            blanco encima: en la esquina beige el texto quedaba casi
+            invisible (~1.05:1 de contraste). El degradado de marca queda
+            como un borde de 1px arriba —el acento, no el fondo— sobre una
+            superficie oscura donde el texto blanco sí se lee.
+          */}
+          {/*
+            Deliberadamente oscura en los dos temas, con texto blanco: es un
+            acento sobre el resto de la pantalla, no una superficie que deba
+            aclararse en modo claro. Por eso usa `text-white`, no
+            `text-[#F8FAD7]` — esa clase sí se voltea a tinta oscura en modo
+            claro, y sobre este fondo oscuro se leería negro sobre negro.
+          */}
+          <div className="overflow-hidden rounded-[16px] border border-white/10 bg-[#1f201d] shadow-[0_18px_42px_rgba(0,0,0,0.22)]">
+            <div className="h-[3px] bg-[linear-gradient(103deg,#3BFF00,#4242FF)]" />
+            <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+              <span className="font-micro text-[0.62rem] text-white/50">
                 Diff operativo
               </span>
               <span className="text-xs font-semibold text-[#3BFF00]">
@@ -1428,11 +1462,11 @@ function DecisionDetail({
             </div>
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-4">
               <DiffValue label="Actual" value={decision.before} />
-              <ArrowRight className="size-4 text-[#3BFF00]" />
+              <ArrowRight className="size-4 text-white/35" />
               <DiffValue label="Propuesto" value={decision.after} />
             </div>
-            <div className="flex items-center justify-between gap-3 bg-[#323330]/[0.07] px-4 py-3">
-              <span className="text-xs text-white/60">
+            <div className="flex items-center justify-between gap-3 border-t border-white/8 bg-white/[0.02] px-4 py-3">
+              <span className="text-xs text-white/55">
                 {decision.guardrail}
               </span>
               <span className="metric-number text-sm font-extrabold text-white">
@@ -1479,7 +1513,12 @@ function DecisionDetail({
           <Button
             onClick={onApprove}
             disabled={saving}
-            className="h-11 w-full bg-[#3BFF00] font-extrabold text-[#F8FAD7] shadow-[0_10px_28px_rgba(66,255,0,0.30)] hover:bg-[#98E944]"
+            // Antes tenía texto beige (#F8FAD7) sobre este mismo verde: los
+            // dos son colores claros, ~1.3:1 de contraste, casi invisible en
+            // el botón principal de toda la pantalla. Tinta oscura es la
+            // combinación de alto contraste real sobre el verde de marca —
+            // la misma que ya se usa en el botón de "Salir" de esta pantalla.
+            className="h-11 w-full bg-[#3BFF00] font-extrabold text-[#292929] shadow-[0_10px_28px_rgba(66,255,0,0.30)] hover:bg-[#98E944]"
           >
             <BadgeCheck />
             Firmar propuesta
@@ -1540,10 +1579,12 @@ function DetailBlock({
 function DiffValue({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="text-[0.65rem] uppercase tracking-[0.08em] text-white/45">
+      <p className="text-[0.65rem] uppercase tracking-[0.08em] text-white/40">
         {label}
       </p>
-      <p className="mt-1 text-sm font-semibold leading-5">{value}</p>
+      <p className="mt-1 text-sm font-semibold leading-5 text-white">
+        {value}
+      </p>
     </div>
   );
 }
