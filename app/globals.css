@@ -179,6 +179,16 @@ textarea {
   font: inherit;
 }
 
+/* El navegador no muestra el cursor de mano en <button> por defecto (a
+   diferencia de <a>) — con más de 25 botones nativos sueltos en la app,
+   corregirlo acá una vez evita repetir `cursor-pointer` en cada uno. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 ::selection {
   background: #3bff00;
   color: #292929;

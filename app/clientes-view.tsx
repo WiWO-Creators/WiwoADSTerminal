@@ -64,6 +64,8 @@ type Portfolio = {
   needsReview: boolean;
   reviewNote: string | null;
   notes: string | null;
+  targetCpaMicros: number | null;
+  targetRoas: number | null;
   accountIds: string[];
   accounts: CuentaVinculada[];
 };
@@ -499,10 +501,20 @@ function Ficha({
   const [pageId, setPageId] = useState(portfolio.pageId ?? "");
   const [countries, setCountries] = useState(portfolio.countries.join(", "));
   const [email, setEmail] = useState(portfolio.contactEmail ?? "");
+  const [metaCpa, setMetaCpa] = useState(
+    portfolio.targetCpaMicros !== null
+      ? String(portfolio.targetCpaMicros / 1_000_000)
+      : "",
+  );
+  const [metaRoas, setMetaRoas] = useState(
+    portfolio.targetRoas !== null ? String(portfolio.targetRoas) : "",
+  );
   const cambiado =
     pageId !== (portfolio.pageId ?? "") ||
     countries !== portfolio.countries.join(", ") ||
-    email !== (portfolio.contactEmail ?? "");
+    email !== (portfolio.contactEmail ?? "") ||
+    metaCpa !== (portfolio.targetCpaMicros !== null ? String(portfolio.targetCpaMicros / 1_000_000) : "") ||
+    metaRoas !== (portfolio.targetRoas !== null ? String(portfolio.targetRoas) : "");
 
   const {
     porPlataforma,
@@ -555,6 +567,8 @@ function Ficha({
               type="button"
               onClick={() => setMostrarAjustes(!mostrarAjustes)}
               title="Ajustes del cliente"
+              aria-label="Ajustes del cliente"
+              aria-expanded={mostrarAjustes}
               className={cn(
                 "inline-flex size-7 shrink-0 items-center justify-center rounded-full border transition-colors",
                 mostrarAjustes
@@ -700,6 +714,50 @@ function Ficha({
             </p>
           )}
 
+          {/*
+            Sin esto el motor de reglas no tiene con qué comparar: un CPA de
+            $8.000 es excelente para un cliente y pésimo para otro. Vacío a
+            propósito por defecto — sin meta, este cliente simplemente no
+            genera recomendaciones de presupuesto, en vez de usar un umbral
+            inventado.
+          */}
+          <div className="mt-3 grid gap-3 border-t border-[#F8FAD7]/8 pt-3 sm:grid-cols-2">
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+                META DE CPA (EN LA MONEDA DE LA CUENTA)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={metaCpa}
+                disabled={!editable}
+                onChange={(e) => setMetaCpa(e.target.value)}
+                placeholder="Sin meta definida"
+                className="h-9 bg-[#292929]/60 text-xs"
+              />
+            </div>
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+                META DE ROAS (EJ. 3.5)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.1"
+                value={metaRoas}
+                disabled={!editable}
+                onChange={(e) => setMetaRoas(e.target.value)}
+                placeholder="Sin meta definida"
+                className="h-9 bg-[#292929]/60 text-xs"
+              />
+            </div>
+          </div>
+          <p className="mt-1 text-[0.62rem] leading-4 text-[#F8FAD7]/38">
+            Sin estas dos metas, este cliente no genera recomendaciones en la
+            cola de Decisiones.
+          </p>
+
           {portfolio.needsReview && portfolio.reviewNote && (
             <p className="mt-3 rounded-xl border border-[#4242FF]/20 bg-[#4242FF]/[0.06] px-3 py-2 text-[0.68rem] leading-5 text-[#F8FAD7]/62">
               {portfolio.reviewNote}
@@ -728,6 +786,10 @@ function Ficha({
                     .split(",")
                     .map((c) => c.trim())
                     .filter(Boolean),
+                  targetCpaMicros: metaCpa.trim()
+                    ? Math.round(Number(metaCpa) * 1_000_000)
+                    : null,
+                  targetRoas: metaRoas.trim() ? Number(metaRoas) : null,
                 })
               }
               className="mt-3 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70"

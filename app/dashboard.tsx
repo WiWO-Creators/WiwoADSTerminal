@@ -277,6 +277,7 @@ export default function WiwoDashboard({
   // rango equivocado si la primera respuesta (más lenta) llegaba después.
   const rangoSolicitadoRef = useRef(0);
   const [saving, setSaving] = useState(false);
+  const [evaluandoReglas, setEvaluandoReglas] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [builderContexto, setBuilderContexto] = useState<BuilderContexto | null>(null);
 
@@ -575,6 +576,38 @@ export default function WiwoDashboard({
     if (snapshot) toast.info("Decisión escalada al Lead AdTech");
   }
 
+  async function evaluarReglas() {
+    setEvaluandoReglas(true);
+    try {
+      const response = await fetch("/api/decisiones/evaluar", {
+        method: "POST",
+      });
+      const body = (await response.json()) as {
+        generadas?: number;
+        evaluadas?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "No se pudo evaluar");
+      await refreshOperationalData();
+      if (body.generadas) {
+        toast.success(
+          `${body.generadas} ${body.generadas === 1 ? "recomendación nueva" : "recomendaciones nuevas"}`,
+          { description: `${body.evaluadas} campañas evaluadas.` },
+        );
+      } else {
+        toast.info("Sin recomendaciones nuevas", {
+          description: `${body.evaluadas} campañas evaluadas, ninguna cruzó una meta.`,
+        });
+      }
+    } catch (issue) {
+      toast.error("No se pudo evaluar el motor de reglas", {
+        description: issue instanceof Error ? issue.message : undefined,
+      });
+    } finally {
+      setEvaluandoReglas(false);
+    }
+  }
+
   async function postponeSelected() {
     if (!selectedDecision) return;
     const snapshot = await sendCommand({
@@ -635,6 +668,8 @@ export default function WiwoDashboard({
               onEscalate={() => void escalateSelected()}
               onPostpone={() => void postponeSelected()}
               onBatch={() => void approveBatch()}
+              onEvaluarReglas={() => void evaluarReglas()}
+              evaluandoReglas={evaluandoReglas}
               onClearFilters={() => {
                 setAccountFilter("all");
                 setPlatformFilter("all");
@@ -1079,6 +1114,8 @@ function DecisionsView({
   onEscalate,
   onPostpone,
   onBatch,
+  onEvaluarReglas,
+  evaluandoReglas,
   onClearFilters,
 }: {
   decisions: Decision[];
@@ -1100,6 +1137,8 @@ function DecisionsView({
   onEscalate: () => void;
   onPostpone: () => void;
   onBatch: () => void;
+  onEvaluarReglas: () => void;
+  evaluandoReglas: boolean;
   onClearFilters: () => void;
 }) {
   const critical = decisions.filter(
@@ -1127,6 +1166,20 @@ function DecisionsView({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onEvaluarReglas}
+            disabled={evaluandoReglas}
+            className="border-[#F8FAD7]/12 bg-[#323330]/60 font-bold text-[#F8FAD7]/75"
+          >
+            {evaluandoReglas ? (
+              <ThinkingOrb size="xs" state="thinking" label="" />
+            ) : (
+              <Sparkles />
+            )}
+            Evaluar reglas ahora
+          </Button>
           {selectedRows.length > 0 && (
             <Button
               variant="outline"
@@ -1141,6 +1194,12 @@ function DecisionsView({
           )}
         </div>
       </div>
+      <p className="mb-4 -mt-3 text-xs leading-5 text-[#F8FAD7]/40">
+        Lee métricas ya obtenidas de Windsor y las compara contra la meta de
+        cada cliente (Clientes → Ajustes). No cambia nada en ninguna
+        plataforma — solo puede dejar una recomendación acá para que la
+        firmes.
+      </p>
 
       <DecisionFilters
         source={allDecisions}

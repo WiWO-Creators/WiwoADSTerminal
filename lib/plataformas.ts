@@ -111,6 +111,8 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "clicks",
       "conversions",
       "conversions_value",
+      // Ya en la moneda de la cuenta, igual que `cost` — no en micras.
+      "budget_amount",
     ],
     camposCatalogoCampana: [
       "account_id",
@@ -200,6 +202,9 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "actions_lead",
       "actions_omni_purchase",
       "action_values_omni_purchase",
+      // En unidad menor de la moneda (centavos) — se convierte al leerlo,
+      // igual que Windsor lo exige al revés al escribir un presupuesto nuevo.
+      "campaign_daily_budget",
     ],
     camposCatalogoCampana: [
       "account_id",

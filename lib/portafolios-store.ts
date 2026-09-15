@@ -34,6 +34,14 @@ export type Portfolio = {
   needsReview: boolean;
   reviewNote: string | null;
   notes: string | null;
+  /**
+   * Metas de rendimiento para el motor de reglas. Sin ellas, el cliente
+   * simplemente no genera recomendaciones de presupuesto — el motor nunca
+   * inventa un umbral por su cuenta.
+   */
+  targetCpaMicros: number | null;
+  /** Como razón real (3.5 = 3.5x), no en la unidad `_bp` que usa la base. */
+  targetRoas: number | null;
   accountIds: string[];
   /**
    * Página de Facebook por cuenta de Meta, no por cliente.
@@ -72,6 +80,8 @@ type PortfolioRow = {
   needs_review: number;
   review_note: string | null;
   notes: string | null;
+  target_cpa_micros: number | null;
+  target_roas_bp: number | null;
 };
 
 const SEED_FLAG = "portfolios_seed_v1";
@@ -147,7 +157,7 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     db
       .prepare(
         `SELECT id, name, page_id, instagram_id, countries, contact_email,
-                needs_review, review_note, notes
+                needs_review, review_note, notes, target_cpa_micros, target_roas_bp
          FROM portfolios ORDER BY name COLLATE NOCASE`,
       )
       .all<PortfolioRow>(),
@@ -196,6 +206,8 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     needsReview: Boolean(row.needs_review),
     reviewNote: row.review_note,
     notes: row.notes,
+    targetCpaMicros: row.target_cpa_micros,
+    targetRoas: row.target_roas_bp === null ? null : row.target_roas_bp / 100,
     accountIds: byPortfolio.get(row.id) ?? [],
     accountPages: pagesByPortfolio.get(row.id) ?? {},
     accountCountries: countriesByPortfolio.get(row.id) ?? {},
@@ -222,6 +234,9 @@ export type PortfolioInput = {
   contactEmail?: string | null;
   needsReview?: boolean;
   notes?: string | null;
+  targetCpaMicros?: number | null;
+  /** Como razón real (3.5 = 3.5x); se convierte a `_bp` al guardar. */
+  targetRoas?: number | null;
   accountIds?: string[];
 };
 
@@ -316,6 +331,16 @@ export async function updatePortfolio(
   if (input.notes !== undefined) {
     campos.push("notes = ?");
     valores.push(clean(input.notes));
+  }
+  if (input.targetCpaMicros !== undefined) {
+    campos.push("target_cpa_micros = ?");
+    valores.push(input.targetCpaMicros);
+  }
+  if (input.targetRoas !== undefined) {
+    campos.push("target_roas_bp = ?");
+    valores.push(
+      input.targetRoas === null ? null : Math.round(input.targetRoas * 100),
+    );
   }
 
   if (campos.length > 0) {

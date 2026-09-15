@@ -122,6 +122,13 @@ export type WindsorCampaign = {
    * leería como "no rindió".
    */
   conActividad: boolean;
+  /**
+   * Presupuesto diario configurado, no el gasto. `null` cuando la campaña usa
+   * presupuesto de campaña compartido en Meta (Advantage Campaign Budget) y
+   * Windsor no lo expone a este nivel, o cuando la fila del catálogo no trae
+   * el campo (no se pide junto con las métricas de actividad).
+   */
+  dailyBudgetMicros: number | null;
 };
 
 type Row = Record<string, unknown>;
@@ -710,6 +717,8 @@ function toCampaigns(raw: Row[], provider: WindsorProvider): WindsorCampaign[] {
     // El id no debería cambiar entre filas de la misma campaña; si alguna
     // fila vino sin él, se rescata el de otra.
     current.campaignId = current.campaignId ?? campaign.campaignId;
+    current.dailyBudgetMicros =
+      current.dailyBudgetMicros ?? campaign.dailyBudgetMicros;
   }
 
   return [...merged.values()];
@@ -768,9 +777,36 @@ function parseCampaigns(
         conversions: conversions === null ? null : number(conversions),
         conversionValueMicros:
           conversionValue === null ? null : toMicros(conversionValue),
+        dailyBudgetMicros: presupuestoDiarioMicros(row, provider),
       };
     })
     .filter((row): row is WindsorCampaign => row !== null);
+}
+
+/**
+ * Presupuesto diario en micros, verificado por plataforma.
+ *
+ * Google entrega `budget_amount` ya en la moneda de la cuenta, igual que
+ * `cost` — se convierte igual. Meta entrega `campaign_daily_budget` en la
+ * unidad menor (centavos), la misma unidad que exige de vuelta al escribir
+ * un presupuesto nuevo — hay que multiplicar por 10.000, no por 1.000.000.
+ */
+function presupuestoDiarioMicros(
+  row: Row,
+  provider: WindsorProvider,
+): number | null {
+  if (provider === "google") {
+    const valor = row.budget_amount;
+    return valor === null || valor === undefined || valor === ""
+      ? null
+      : toMicros(valor);
+  }
+  if (provider === "meta") {
+    const valor = row.campaign_daily_budget;
+    if (valor === null || valor === undefined || valor === "") return null;
+    return Math.round(number(valor) * 10_000);
+  }
+  return null;
 }
 
 /**

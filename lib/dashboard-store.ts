@@ -1,4 +1,6 @@
 import { getRawDb } from "@/db";
+import { listPortfolios } from "@/lib/portafolios-store";
+import { AGENTE, evaluarReglas, rangoL7DConRezago } from "@/lib/reglas";
 import type { RangoId } from "@/lib/rangos";
 import {
   type AuditEvent,
@@ -9,6 +11,7 @@ import {
   getPerformanceSnapshot,
   type PerformanceSnapshot,
 } from "@/lib/performance-store";
+import { fetchWindsorCampaigns } from "@/lib/windsor";
 
 type DecisionRow = {
   id: string;
@@ -579,6 +582,80 @@ function toAuditEvent(row: AuditRow): AuditEvent {
     origin: row.origin_snapshot,
     result: row.result,
   };
+}
+
+export type ResultadoEvaluacion = {
+  /** Recomendaciones nuevas de verdad; corridas repetidas el mismo día no duplican. */
+  generadas: number;
+  evaluadas: number;
+};
+
+/**
+ * Corre el motor de reglas y guarda las recomendaciones nuevas en `decisions`.
+ *
+ * Lee lo que ya está disponible — métricas de Windsor, metas del cliente— y
+ * no ejecuta nada en ninguna plataforma. El id determinístico de cada
+ * candidato (regla + campaña + día, ver `lib/reglas.ts`) es lo que evita
+ * duplicar la misma recomendación si esto se corre varias veces el mismo día:
+ * `INSERT OR IGNORE` la descarta en silencio cuando ya existe.
+ */
+export async function evaluarYGuardarDecisiones(): Promise<ResultadoEvaluacion> {
+  const db = getRawDb();
+  const ahora = new Date();
+  const rango = rangoL7DConRezago(ahora);
+
+  const [portfolios, campanas] = await Promise.all([
+    listPortfolios(),
+    fetchWindsorCampaigns(rango.desde, rango.hasta),
+  ]);
+
+  const candidatos = evaluarReglas(portfolios, campanas, ahora);
+  if (candidatos.length === 0) {
+    return { generadas: 0, evaluadas: campanas.length };
+  }
+
+  const statements = candidatos.map((c) =>
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO decisions
+           (id, status, severity, client, platform, owner_label, autonomy,
+            title, diagnosis, proposed_action, impact, confidence, agent, rule,
+            age_label, expires_label, before_value, after_value, guardrail,
+            metric, delta, primary_label, execution_status, generated_at,
+            expires_at, version, created_at, updated_at)
+         VALUES (?, 'pending', ?, ?, ?, ?, 'N0', ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, 'not_requested', ?, ?, 1, ?, ?)`,
+      )
+      .bind(
+        c.id,
+        c.severity,
+        c.client,
+        c.platform,
+        "Sin asignar",
+        c.title,
+        c.diagnosis,
+        c.proposedAction,
+        c.impact,
+        c.confidence,
+        AGENTE,
+        c.rule,
+        c.before,
+        c.after,
+        c.guardrail,
+        c.metric,
+        c.delta,
+        c.primaryLabel,
+        c.generatedAt,
+        c.expiresAt,
+        c.generatedAt,
+        c.generatedAt,
+      ),
+  );
+
+  const resultados = await db.batch(statements);
+  const generadas = resultados.filter(
+    (resultado) => (resultado.meta?.changes ?? 0) > 0,
+  ).length;
+  return { generadas, evaluadas: campanas.length };
 }
 
 function formatEventTime(timestamp: number) {
