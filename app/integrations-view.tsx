@@ -300,11 +300,11 @@ export function IntegrationsView({
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <ShieldCheck className="size-3 text-[#4242FF]" />
             Fuentes de datos · operación controlada
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             Conecta las cuentas que WiWO debe leer
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
@@ -398,17 +398,17 @@ export function IntegrationsView({
       ) : null}
 
       {loadError && !loading ? (
-        <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-red-200 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-danger shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 size-4 shrink-0 text-red-300" />
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
             <div>
               <p className="text-sm font-bold">No se pudieron cargar las conexiones</p>
-              <p className="mt-1 text-xs leading-5 text-red-300">{loadError}</p>
+              <p className="mt-1 text-xs leading-5 text-danger">{loadError}</p>
             </div>
           </div>
           <Button
             variant="outline"
-            className="shrink-0 border-red-500/25 bg-[#323330]"
+            className="shrink-0 border-danger-deep/25 bg-[#323330]"
             onClick={() => setReloadVersion((current) => current + 1)}
           >
             <RefreshCw />
@@ -418,8 +418,8 @@ export function IntegrationsView({
       ) : null}
 
       {!canManage && !loading ? (
-        <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-amber-200 shadow-sm">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-amber-300" />
+        <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-warn-deep/25 bg-warn-deep/10 px-4 py-3 text-warn shadow-sm">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-warn" />
           <p className="text-sm leading-6">
             Puedes revisar el estado, pero solo un administrador puede conectar
             o desconectar cuentas.
@@ -703,7 +703,7 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
       {estado === null ? (
         <p className="mt-3 text-xs text-[#F8FAD7]/45">Consultando estado…</p>
       ) : !estado.disponible ? (
-        <p className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2 text-xs leading-5 text-amber-200">
+        <p className="mt-3 rounded-xl border border-warn-deep/25 bg-warn-deep/[0.08] px-3 py-2 text-xs leading-5 text-warn">
           Todavía no se ha construido. Hasta entonces el sistema solo muestra
           campañas y anuncios que entregaron en el periodo elegido.
         </p>
@@ -734,7 +734,7 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
             {formatDate(estado.construidoEn)}
           </p>
           {estado.fallos.length > 0 && (
-            <p className="mt-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2 text-[0.68rem] leading-5 text-amber-200">
+            <p className="mt-2 rounded-xl border border-warn-deep/25 bg-warn-deep/[0.08] px-3 py-2 text-[0.68rem] leading-5 text-warn">
               Falta la parte de {estado.fallos.map((f) => f.plataforma).join(", ")}:{" "}
               {estado.fallos[0].mensaje}
             </p>
@@ -779,17 +779,17 @@ function ProviderCard({
     integration.performanceStatus === "partial" ||
     integration.performanceStatus === "error";
   const status = attention
-    ? { label: "Atención requerida", className: "border-red-500/25 bg-red-500/10 text-red-300" }
+    ? { label: "Atención requerida", className: "border-danger-deep/25 bg-danger-deep/10 text-danger" }
     : needsSelection
-      ? { label: "Selección pendiente", className: "border-amber-500/25 bg-amber-500/10 text-amber-300" }
+      ? { label: "Selección pendiente", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : metricsIssue
-        ? { label: "Lectura requiere atención", className: "border-amber-500/25 bg-amber-500/10 text-amber-300" }
+        ? { label: "Lectura requiere atención", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : metricsStale
-        ? { label: "Lectura desactualizada", className: "border-amber-500/25 bg-amber-500/10 text-amber-300" }
+        ? { label: "Lectura desactualizada", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : connected && metricsReady
-        ? { label: "Datos actualizados", className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" }
+        ? { label: "Datos actualizados", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : connected
-          ? { label: "OAuth conectado", className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" }
+          ? { label: "OAuth conectado", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : { label: "Sin conexión", className: "border-[#F8FAD7]/10 bg-[#323330]/60 text-[#F8FAD7]/48" };
 
   return (
@@ -904,7 +904,7 @@ function ProviderCard({
         )}
 
         {integration.performanceError || integration.lastError ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-300">
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-warn-deep/25 bg-warn-deep/10 px-3 py-2.5 text-xs leading-5 text-warn">
             <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
             {integration.performanceError ?? integration.lastError}
           </div>
@@ -977,7 +977,7 @@ function ProviderCard({
                 variant="ghost"
                 onClick={onDisconnect}
                 disabled={!canManage || Boolean(busy)}
-                className="ml-auto text-[#F8FAD7]/45 hover:text-red-600"
+                className="ml-auto text-[#F8FAD7]/45 hover:text-danger-deep"
               >
                 Desconectar
               </Button>

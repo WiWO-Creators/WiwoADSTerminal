@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronRight, LayoutList, Search, X } from "lucide-react";
+import { ChevronRight, Search, Settings2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -34,6 +34,7 @@ import { OBJETIVO_CORTO } from "@/lib/objetivos";
 import type { AdSummary, PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
+import { GestionarCampanaDialog, type CampanaGestionable } from "./gestionar-campana";
 import { Surface } from "./ui";
 
 type Nivel = "campana" | "conjunto" | "anuncio";
@@ -146,7 +147,10 @@ export function AnunciosView({
   const [nivel, setNivel] = useState<Nivel>("campana");
   const [enVuelo, setEnVuelo] = useState<Set<string>>(new Set());
   const [estadosLocales, setEstadosLocales] = useState<Record<string, string>>({});
-  const [portfolioId, setPortfolioId] = useState(portfolioIdFijo ?? "all");
+  // Sin setter: esta vista siempre vive dentro de Clientes, que ya resuelve
+  // qué cliente mirar (su propia lista) y remonta este componente por `key`
+  // cuando cambia. Un segundo selector acá adentro solo duplicaba al primero.
+  const [portfolioId] = useState(portfolioIdFijo ?? "all");
   const [provider, setProvider] = useState("all");
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
   const [busqueda, setBusqueda] = useState("");
@@ -155,6 +159,7 @@ export function AnunciosView({
     fila: Fila;
     activar: boolean;
   } | null>(null);
+  const [gestionando, setGestionando] = useState<CampanaGestionable | null>(null);
 
   const permitidas = useMemo(
     () =>
@@ -330,11 +335,42 @@ export function AnunciosView({
         className={cn(
           "rounded-full border px-2.5 py-1 text-[0.62rem] font-bold transition-colors disabled:opacity-40",
           activaAhora
-            ? "border-amber-500/30 text-amber-300 hover:bg-amber-500/10"
-            : "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10",
+            ? "border-warn-deep/30 text-warn hover:bg-warn-deep/10"
+            : "border-ok-deep/30 text-ok hover:bg-ok-deep/10",
         )}
       >
         {cargando ? "…" : activaAhora ? "Pausar" : "Activar"}
+      </button>
+    );
+  }
+
+  /**
+   * Presupuesto, nombre, estrategia de puja y el resto de `gestionar-campana`
+   * — solo a nivel de campaña, que es donde vive cada una de esas acciones en
+   * Windsor. Exige el id nativo, igual que pausar/activar.
+   */
+  function botonGestionar(fila: Fila) {
+    if (nivel !== "campana" && nivel !== "conjunto") return null;
+    const id = nivel === "campana" ? fila.campaignId : fila.adsetId;
+    if (!id) return null;
+    return (
+      <button
+        type="button"
+        title={nivel === "campana" ? "Gestionar campaña" : "Gestionar conjunto"}
+        onClick={(e) => {
+          e.stopPropagation();
+          setGestionando({
+            provider: fila.provider as Platform,
+            accountId: fila.accountId,
+            nivel,
+            id,
+            nombre: fila.nombre,
+            currency: fila.currency,
+          });
+        }}
+        className="rounded-full border border-[#F8FAD7]/12 p-1.5 text-[#F8FAD7]/50 transition-colors hover:border-[#4242FF]/30 hover:text-[#4242FF]"
+      >
+        <Settings2 className="size-3.5" />
       </button>
     );
   }
@@ -403,26 +439,13 @@ export function AnunciosView({
     return null;
   }
 
-  // Embebida en la ficha de un cliente: el título grande sería redundante, ya
-  // está el nombre del cliente arriba.
-  const compacto = Boolean(portfolioIdFijo);
-
   return (
-    <div className={compacto ? "w-full" : "mx-auto w-full max-w-[1600px] p-4 md:p-6"}>
-      {!compacto && (
-        <div className="mb-5">
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
-            <LayoutList className="size-3 text-[#4242FF]" />
-            Todas las plataformas · un solo lugar
-          </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
-            Administrador de anuncios
-          </h2>
-        </div>
-      )}
-
-      <Surface className="mb-4 flex flex-col gap-3 p-3 lg:flex-row lg:items-center">
-        <div className="flex gap-1 rounded-full border border-[#F8FAD7]/10 p-1">
+    <div className="w-full">
+      <Surface className="mb-4 flex flex-wrap items-center gap-3 p-3">
+        {/* Sin borde propio: ya vive dentro de una tarjeta con su propio
+            contorno — ponerle uno más adentro se leía como una caja adentro
+            de otra. El fondo del grupo alcanza para distinguir los botones. */}
+        <div className="flex gap-1 rounded-full bg-[#292929]/40 p-1">
           {NIVELES.map((item) => (
             <button
               key={item.id}
@@ -440,7 +463,7 @@ export function AnunciosView({
           ))}
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-40 flex-1 items-center gap-2 sm:min-w-52">
           <Search className="ml-1 size-4 shrink-0 text-[#4242FF]" />
           <Input
             value={busqueda}
@@ -450,21 +473,6 @@ export function AnunciosView({
           />
         </div>
 
-        {!portfolioIdFijo && (
-          <Select value={portfolioId} onValueChange={setPortfolioId}>
-            <SelectTrigger size="sm" className="w-full bg-[#292929]/60 lg:w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los clientes</SelectItem>
-              {portfolios.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
         {onCrearCampana && portfolioId !== "all" && (
           <button
             type="button"
@@ -652,7 +660,7 @@ export function AnunciosView({
                         className={cn(
                           "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
                           activo(estadosLocales[fila.clave] ?? fila.status)
-                            ? "bg-emerald-500/12 text-emerald-300"
+                            ? "bg-ok-deep/12 text-ok"
                             : "bg-[#F8FAD7]/8 text-[#F8FAD7]/50",
                         )}
                       >
@@ -682,7 +690,10 @@ export function AnunciosView({
                     </TableCell>
                     {puedeAprobar && (
                       <TableCell className="text-right">
-                        {botonEstado(fila)}
+                        <div className="flex items-center justify-end gap-1.5">
+                          {botonGestionar(fila)}
+                          {botonEstado(fila)}
+                        </div>
                       </TableCell>
                     )}
                     {mostrarColumnaAgregar && (
@@ -733,6 +744,12 @@ export function AnunciosView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <GestionarCampanaDialog
+        campana={gestionando}
+        open={Boolean(gestionando)}
+        onOpenChange={(open) => !open && setGestionando(null)}
+      />
     </div>
   );
 }

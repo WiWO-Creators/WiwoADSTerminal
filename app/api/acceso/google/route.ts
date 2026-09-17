@@ -1,7 +1,5 @@
 import { env } from "cloudflare:workers";
 
-import { devLoginEnabled } from "@/app/chatgpt-auth";
-
 export const dynamic = "force-dynamic";
 
 export const GOOGLE_STATE_COOKIE = "wiwo-acceso-state";
@@ -12,9 +10,13 @@ export function googleLoginConfigured(): boolean {
   return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 }
 
+/**
+ * Puerta de entrada alterna, siempre disponible (no depende de
+ * DEV_LOGIN_ENABLED): a diferencia del formulario de correo sin verificar de
+ * `/api/acceso`, esta sí prueba identidad real contra Google, y el callback
+ * además exige el dominio de la empresa antes de dejar entrar a nadie.
+ */
 export async function GET(request: Request) {
-  if (!devLoginEnabled()) return new Response("No disponible", { status: 404 });
-
   const url = new URL(request.url);
   const returnTo = safePath(url.searchParams.get("return_to"));
 

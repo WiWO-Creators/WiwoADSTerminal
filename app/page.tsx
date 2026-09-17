@@ -11,6 +11,7 @@ export default async function Home({
   searchParams: Promise<{ view?: string }>;
 }) {
   const session = await requireSession("/");
+  const signOutPath = await chatGPTSignOutPath("/");
   if (!session) {
     return (
       <main className="grid min-h-svh place-items-center bg-[#292929] px-6 text-[#F8FAD7]">
@@ -24,7 +25,7 @@ export default async function Home({
           <p className="font-micro mt-8 text-[0.65rem] text-[#4242FF]">
             ACCESO INTERNO
           </p>
-          <h1 className="font-editorial mt-3 text-4xl leading-none tracking-[-0.04em]">
+          <h1 className="mt-3 text-4xl font-extrabold leading-none tracking-[-0.04em]">
             Esta cuenta todavía no pertenece al equipo.
           </h1>
           <p className="mt-5 text-base leading-7 text-[#F8FAD7]/62">
@@ -33,7 +34,7 @@ export default async function Home({
             a entrar.
           </p>
           <a
-            href={chatGPTSignOutPath("/")}
+            href={signOutPath}
             className="mt-7 inline-flex h-11 items-center rounded-xl bg-[#3BFF00] px-5 text-sm font-bold text-[#292929] transition-colors hover:bg-[#4242FF] hover:text-white"
           >
             Salir y usar otra cuenta
@@ -47,7 +48,7 @@ export default async function Home({
 
   return (
     <WiwoDashboard
-      signOutPath={chatGPTSignOutPath("/")}
+      signOutPath={signOutPath}
       initialSnapshot={initialSnapshot}
       initialView={params.view === "integrations" ? "integrations" : "control"}
     />

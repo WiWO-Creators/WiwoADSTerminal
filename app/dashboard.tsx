@@ -11,24 +11,21 @@ import {
   ChevronRight,
   Clock3,
   DatabaseZap,
-  FileChartColumnIncreasing,
-  FlaskConical,
-  Gauge,
   HeartPulse,
   History,
-  Inbox,
   LayoutDashboard,
-  LockKeyhole,
   LogOut,
   MoreHorizontal,
   PlugZap,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   Sun,
   Moon,
+  Users,
   WandSparkles,
   X,
 } from "lucide-react";
@@ -45,7 +42,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -104,6 +100,7 @@ import {
   type ConstructorAttachTo as ConstructorViewAttachTo,
 } from "./constructor-view";
 import { EjecucionesView } from "./ejecuciones-view";
+import { AudienciasView } from "./audiencias-view";
 import { EquipoView } from "./equipo-view";
 import { IntegrationsView } from "./integrations-view";
 import {
@@ -112,6 +109,11 @@ import {
   HealthView,
   PacingView,
 } from "./secondary-views";
+import {
+  DEFAULT_RANGO_STORAGE_KEY,
+  DEFAULT_VIEW_STORAGE_KEY,
+  SettingsView,
+} from "./settings-view";
 import {
   AutonomyBadge,
   SeverityBadge,
@@ -135,7 +137,6 @@ const navItems: Array<{
    */
   proximaFase?: boolean;
 }> = [
-  { key: "decisions", label: "Decisiones", icon: Inbox, proximaFase: true },
   {
     // Antes "Anuncios" era una entrada aparte: elegir un cliente acá y ver
     // sus campañas obligaba a saltar de sección. Ahora la ficha del cliente
@@ -151,23 +152,28 @@ const navItems: Array<{
     icon: WandSparkles,
     roles: ["admin", "lead", "buyer"],
   },
+  { key: "control", label: "Sala de control", icon: LayoutDashboard },
+  { key: "health", label: "Salud de medición", icon: HeartPulse },
+  {
+    key: "audiencias",
+    label: "Audiencias",
+    icon: Users,
+    roles: ["admin", "lead", "buyer"],
+  },
+];
+
+/** Segunda sección del menú — gestión de cuenta, no trabajo de campaña día a
+ * día, así que va separada de la operación principal. */
+const navItemsGestion: typeof navItems = [
   {
     key: "historial",
     label: "Publicaciones",
     icon: History,
     roles: ["admin", "lead", "buyer", "analyst"],
   },
-  { key: "control", label: "Sala de control", icon: LayoutDashboard },
-  { key: "pacing", label: "Inversión", icon: Gauge },
-  { key: "health", label: "Salud de medición", icon: HeartPulse },
-  {
-    key: "audit",
-    label: "Bitácora",
-    icon: FileChartColumnIncreasing,
-    proximaFase: true,
-  },
   { key: "integrations", label: "Cuentas", icon: PlugZap },
   { key: "team", label: "Equipo", icon: ShieldCheck, adminOnly: true },
+  { key: "settings", label: "Ajustes", icon: Settings },
 ];
 
 const viewMeta: Record<ViewKey, { eyebrow: string; title: string }> = {
@@ -181,7 +187,12 @@ const viewMeta: Record<ViewKey, { eyebrow: string; title: string }> = {
   builder: { eyebrow: "Creación", title: "Constructor de campañas" },
   clients: { eyebrow: "Cartera", title: "Clientes" },
   historial: { eyebrow: "Gobierno", title: "Publicaciones reales" },
+  settings: { eyebrow: "Configuración", title: "Ajustes generales" },
+  audiencias: { eyebrow: "Creación", title: "Audiencias" },
 };
+
+/** Radix Select no admite value="" — un id de portafolio real nunca vale esto. */
+const TODOS_LOS_CLIENTES = "__todos__";
 
 const roleLabels: Record<string, string> = {
   direction: "Dirección",
@@ -202,9 +213,17 @@ type BuilderContexto =
   | { modo: "nueva"; portfolioId: string }
   | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto };
 
-/** Fuerza a que el Constructor se reinicie al cambiar de contexto de destino. */
-function builderConstructorKey(contexto: BuilderContexto | null): string {
-  if (!contexto) return "nuevo";
+/**
+ * Fuerza a que el Constructor se reinicie al cambiar de contexto de destino
+ * o, sin uno concreto, al cambiar el cliente marcado en el navbar — seguir
+ * escribiendo la campaña de un cliente bajo el nombre de otro sería el tipo
+ * de error que este reinicio evita.
+ */
+function builderConstructorKey(
+  contexto: BuilderContexto | null,
+  clienteGlobal: string | null,
+): string {
+  if (!contexto) return `nuevo:${clienteGlobal ?? ""}`;
   if (contexto.modo === "nueva") return contexto.portfolioId;
   const attachTo = contexto.attachTo;
   const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";
@@ -246,6 +265,19 @@ export default function WiwoDashboard({
   initialView?: ViewKey;
 }) {
   const [view, setView] = useState<ViewKey>(initialView);
+  /**
+   * A qué cliente está mirando Clientes — vive acá, no adentro de
+   * `ClientesView`, precisamente para que sobreviva a salir de esa vista y
+   * volver. Antes era un "atajo" de un solo uso que se limpiaba al navegar a
+   * cualquier otro lado; el problema real: eso también lo borraba al volver
+   * a Clientes por el ítem normal del menú, así que la selección no
+   * sobrevivía a mirar otra pantalla y regresar. Se elige tanto desde el
+   * selector del navbar como desde la lista de la propia vista — por eso
+   * vive acá y se pasa controlado, no como valor inicial.
+   */
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<
+    string | null
+  >(null);
   const [decisions, setDecisions] = useState(initialSnapshot.decisions);
   const [selectedId, setSelectedId] = useState(
     initialSnapshot.decisions[0]?.id ?? "",
@@ -254,11 +286,6 @@ export default function WiwoDashboard({
   const [accountFilter, setAccountFilter] = useState("all");
   const [platformFilter, setPlatformFilter] = useState("all");
   const [agentFilter, setAgentFilter] = useState("all");
-  // Vacío a propósito: la salud se mira por cliente, no por cuenta suelta —
-  // antes el selector abría directo con la primera cuenta del listado
-  // completo de la agencia, sin relación con la cartera que el resto del
-  // sistema usa para organizarse.
-  const [healthClient, setHealthClient] = useState("");
   const [discardOpen, setDiscardOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [discardReason, setDiscardReason] = useState("");
@@ -290,6 +317,33 @@ export default function WiwoDashboard({
     if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
   }, []);
 
+  useEffect(() => {
+    // Solo se aplica la vista de inicio guardada cuando en verdad se llegó a
+    // la portada genérica. Si `initialView` ya trae algo específico (por
+    // ejemplo `?view=integrations` al volver de conectar una cuenta), esa
+    // intención manda por sobre la preferencia guardada.
+    if (initialView !== "control") return;
+    const vistaGuardada = window.localStorage.getItem(
+      DEFAULT_VIEW_STORAGE_KEY,
+    ) as ViewKey | null;
+    if (
+      vistaGuardada &&
+      vistaGuardada !== "control" &&
+      ["control", "clients", "builder", "health"].includes(vistaGuardada)
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+      setView(vistaGuardada);
+    }
+
+    const rangoGuardado = window.localStorage.getItem(
+      DEFAULT_RANGO_STORAGE_KEY,
+    ) as RangoId | null;
+    if (rangoGuardado && RANGOS.includes(rangoGuardado)) {
+      void cambiarRango(rangoGuardado);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
+  }, []);
+
   function changeTheme(checked: boolean) {
     const nextTheme = checked ? "light" : "dark";
     setTheme(nextTheme);
@@ -314,7 +368,7 @@ export default function WiwoDashboard({
     null;
 
   const healthPortfolio =
-    performance.portfolios.find((item) => item.id === healthClient) ?? null;
+    performance.portfolios.find((item) => item.id === clienteSeleccionado) ?? null;
   // Todas las cuentas del cliente, no una sola: antes elegir "Amipass" en
   // realidad elegía una de sus cuentas de Windsor al azar y las demás no
   // aparecían en ningún lado.
@@ -396,13 +450,13 @@ export default function WiwoDashboard({
         auditEvents: body.auditEvents,
         performance: body.performance,
       });
-      // Si el cliente elegido deja de existir en la lectura nueva, se vuelve
-      // a pedir uno en vez de caer de vuelta en un "todos" que esta pantalla
-      // ya no ofrece.
-      setHealthClient((current) =>
+      // Si el cliente elegido deja de existir en la lectura nueva, se limpia
+      // la selección en vez de dejarla apuntando a un cliente que ya no está.
+      setClienteSeleccionado((current) =>
+        current !== null &&
         body.performance!.portfolios.some((item) => item.id === current)
           ? current
-          : "",
+          : null,
       );
     } catch {
       // The integration surface already reports provider errors.
@@ -625,13 +679,12 @@ export default function WiwoDashboard({
     <SidebarProvider>
       <AppSidebar
         view={view}
-        decisionsCount={decisions.length}
         currentUser={initialSnapshot.user}
         signOutPath={signOutPath}
         onNavigate={setView}
       />
 
-      <SidebarInset className="min-w-0 bg-[#292929]">
+      <SidebarInset className="min-w-0 bg-[var(--canvas)]">
         <AppHeader
           view={view}
           currentUser={initialSnapshot.user}
@@ -642,6 +695,12 @@ export default function WiwoDashboard({
           rango={rango}
           cambiandoRango={cambiandoRango}
           onRangoChange={(valor) => void cambiarRango(valor)}
+          onSelectCliente={(portfolioId) => {
+            setClienteSeleccionado(
+              portfolioId === TODOS_LOS_CLIENTES ? null : portfolioId,
+            );
+            setView("clients");
+          }}
         />
         <div className="telemetry-grid min-h-[calc(100svh-4rem)]">
           {view === "decisions" && (
@@ -679,11 +738,12 @@ export default function WiwoDashboard({
           )}
           {view === "control" && (
             <ControlRoomView
-              pending={decisions.length}
               performance={performance}
-              onOpenQueue={() => setView("decisions")}
+              onOpenClientes={() => setView("clients")}
               onOpenHealth={(client) => {
-                setHealthClient(client);
+                // Mismo selector que el navbar: abrir la salud de un cliente
+                // desde acá también lo deja marcado en todo el resto de la app.
+                setClienteSeleccionado(client);
                 setView("health");
               }}
               onOpenIntegrations={() => setView("integrations")}
@@ -691,8 +751,7 @@ export default function WiwoDashboard({
           )}
           {view === "health" && (
             <HealthView
-              client={healthClient}
-              onClient={setHealthClient}
+              client={clienteSeleccionado}
               portfolios={performance.portfolios}
               onOpenIntegrations={() => setView("integrations")}
               checks={healthChecks}
@@ -713,6 +772,8 @@ export default function WiwoDashboard({
           {view === "clients" && (
             <ClientesView
               performance={performance}
+              seleccionado={clienteSeleccionado}
+              onSeleccionar={setClienteSeleccionado}
               onCrearCampana={(portfolioId) => {
                 setBuilderContexto({ modo: "nueva", portfolioId });
                 setView("builder");
@@ -732,8 +793,10 @@ export default function WiwoDashboard({
               // Cada contexto nuevo es un constructor nuevo: reiniciar el
               // formulario al cambiar de cliente o de campaña de destino, no
               // arrastrar lo que se había escrito para otra cosa.
-              key={builderConstructorKey(builderContexto)}
+              key={builderConstructorKey(builderContexto, clienteSeleccionado)}
               attachTo={builderConstructorAttachTo(builderContexto)}
+              clienteGlobal={clienteSeleccionado}
+              onCambiarClienteGlobal={setClienteSeleccionado}
             />
           )}
           {view === "historial" && <EjecucionesView />}
@@ -751,6 +814,18 @@ export default function WiwoDashboard({
               signOutPath={signOutPath}
               onPerformanceUpdated={() => void refreshOperationalData()}
             />
+          )}
+          {view === "settings" && (
+            <SettingsView
+              rango={rango}
+              cambiandoRango={cambiandoRango}
+              onRangoChange={(valor) => void cambiarRango(valor)}
+              theme={theme}
+              onThemeChange={changeTheme}
+            />
+          )}
+          {view === "audiencias" && (
+            <AudienciasView portfolios={performance.portfolios} />
           )}
         </div>
       </SidebarInset>
@@ -781,21 +856,25 @@ export default function WiwoDashboard({
 
 function AppSidebar({
   view,
-  decisionsCount,
   currentUser,
   signOutPath,
   onNavigate,
 }: {
   view: ViewKey;
-  decisionsCount: number;
   currentUser: DashboardIdentity;
   signOutPath: string;
   onNavigate: (view: ViewKey) => void;
 }) {
   return (
     <Sidebar
+      variant="floating"
       collapsible="icon"
-      className="border-r border-[#F8FAD7]/10 bg-[#292929] [&_[data-sidebar=sidebar]]:bg-[#323330]/45 [&_[data-sidebar=sidebar]]:backdrop-blur-xl"
+      // Panel flotante sobre el lienzo (`--canvas`), no franja pegada al
+      // borde: así se lee como una tarjeta más, con su propio hueco y sombra
+      // (el borde y el `shadow-sm` del panel salen del propio componente,
+      // vía `variant="floating"`), en vez de una barra que reparte la
+      // pantalla en dos.
+      className="[&_[data-sidebar=sidebar]]:bg-[var(--sidebar)]/72 [&_[data-sidebar=sidebar]]:backdrop-blur-xl"
     >
       <SidebarHeader className="border-b border-[#F8FAD7]/10 px-3 py-4">
         <div className="flex min-h-10 items-center gap-3 overflow-hidden px-1">
@@ -818,7 +897,6 @@ function AppSidebar({
               {navItems
                 .filter(
                   (item) =>
-                    !item.proximaFase &&
                     (!item.adminOnly || currentUser.role === "admin") &&
                     (!item.roles || item.roles.includes(currentUser.role)),
                 )
@@ -837,17 +915,6 @@ function AppSidebar({
                     >
                       <Icon />
                       <span>{item.label}</span>
-                      {item.key === "decisions" && decisionsCount > 0 ? (
-                        <span
-                          className={cn(
-                            "ml-auto rounded-full bg-[#F8FAD7]/6 px-1.5 py-0.5 text-[0.65rem] font-bold text-[#F8FAD7]/55",
-                            view === item.key &&
-                              "bg-[#4242FF]/10 text-[#4242FF]",
-                          )}
-                        >
-                          {decisionsCount}
-                        </span>
-                      ) : null}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
@@ -858,14 +925,13 @@ function AppSidebar({
 
         <SidebarGroup className="mt-1">
           <SidebarGroupLabel className="font-micro text-[0.62rem] text-[#F8FAD7]/42">
-            Próxima fase
+            Gestión
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu className="gap-1">
-              {navItems
+              {navItemsGestion
                 .filter(
                   (item) =>
-                    item.proximaFase &&
                     (!item.adminOnly || currentUser.role === "admin") &&
                     (!item.roles || item.roles.includes(currentUser.role)),
                 )
@@ -875,35 +941,19 @@ function AppSidebar({
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton
                         isActive={view === item.key}
-                        tooltip={`${item.label} · sin contenido todavía`}
+                        tooltip={item.label}
                         onClick={() => onNavigate(item.key)}
                         className={cn(
-                          "h-9 text-[#F8FAD7]/38 hover:bg-[#323330]/60 hover:text-[#F8FAD7]/75 data-[active=true]:bg-[#323330]/70 data-[active=true]:text-[#4242FF]",
+                          "h-9 text-[#F8FAD7]/55 hover:bg-[#323330]/60 hover:text-[#F8FAD7]/85 data-[active=true]:bg-[#323330]/70 data-[active=true]:text-[#4242FF]",
                           view === item.key && "font-bold",
                         )}
                       >
                         <Icon />
                         <span>{item.label}</span>
-                        {item.key === "decisions" && decisionsCount > 0 ? (
-                          <span className="ml-auto rounded-full bg-[#4242FF]/12 px-1.5 py-0.5 text-[0.65rem] font-bold text-[#4242FF]">
-                            {decisionsCount}
-                          </span>
-                        ) : null}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
                 })}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  disabled
-                  tooltip="Laboratorio · Fase 4"
-                  className="h-9 text-[#F8FAD7]/30"
-                >
-                  <FlaskConical />
-                  <span>Laboratorio</span>
-                  <LockKeyhole className="ml-auto size-3" />
-                </SidebarMenuButton>
-              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -931,7 +981,7 @@ function AppSidebar({
         </UserMenu>
         <a
           href={signOutPath}
-          className="mt-2 flex h-9 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-[#F8FAD7]/55 transition-colors hover:bg-red-500/10 hover:text-red-300 group-data-[collapsible=icon]:hidden"
+          className="mt-2 flex h-9 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-[#F8FAD7]/55 transition-colors hover:bg-danger-deep/10 hover:text-danger group-data-[collapsible=icon]:hidden"
         >
           <LogOut className="size-3.5" />
           Cerrar sesión
@@ -952,6 +1002,7 @@ function AppHeader({
   rango,
   cambiandoRango,
   onRangoChange,
+  onSelectCliente,
 }: {
   view: ViewKey;
   currentUser: DashboardIdentity;
@@ -962,14 +1013,19 @@ function AppHeader({
   rango: RangoId;
   cambiandoRango: boolean;
   onRangoChange: (valor: RangoId) => void;
+  /** Ir directo a la ficha de un cliente, desde cualquier vista. */
+  onSelectCliente: (portfolioId: string) => void;
 }) {
   const isLive = performance.mode === "live";
   // El periodo solo se ofrece donde cambia lo que se ve. En Equipo o Cuentas
   // sería un control que no hace nada, y eso enseña a desconfiar de los
   // controles.
   const conPeriodo = ["control", "pacing", "health", "ads"].includes(view);
+  // Ver la nota junto al selector de cliente: solo los declarados existen
+  // como portafolio real en Clientes.
+  const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
   return (
-    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-[#F8FAD7]/10 bg-[#292929]/85 px-4 backdrop-blur-xl md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-[#F8FAD7]/10 bg-[var(--canvas)]/85 px-4 backdrop-blur-xl md:px-6">
       <div className="flex min-w-0 items-center gap-3">
         <SidebarTrigger className="size-8 text-[#F8FAD7]/55 hover:bg-[#323330]/60" />
         <div className="h-5 w-px bg-[#F8FAD7]/12" />
@@ -977,10 +1033,41 @@ function AppHeader({
           <p className="font-micro truncate text-[0.6rem] text-[#4242FF]">
             {viewMeta[view].eyebrow}
           </p>
-          <h1 className="truncate text-sm font-bold text-[#F8FAD7] md:text-base">
+          <h1 className="neo-page-title truncate text-[#F8FAD7]">
             {viewMeta[view].title}
           </h1>
         </div>
+        {clientesDeclarados.length > 0 && (
+          // Ir a un cliente desde cualquier vista, como el selector de cuenta
+          // de Google/Meta Ads Manager — sin esto, llegar a la ficha de un
+          // cliente puntual exigía pasar siempre por Clientes y buscarlo ahí.
+          //
+          // Solo clientes declarados: `performance.portfolios` también trae
+          // una entrada por cada cuenta suelta sin cliente asignado (con el
+          // nombre de la cuenta como si fuera uno), y esas no existen como
+          // portafolio real en `/api/clientes` — elegirlas dejaba a
+          // `ClientesView` sin nada que resolver y la lista de la izquierda
+          // no tenía forma de saber que ya "había" una selección.
+          <Select onValueChange={onSelectCliente}>
+            <SelectTrigger
+              size="sm"
+              className="hidden w-44 border-[#F8FAD7]/10 bg-[#323330]/55 md:flex"
+            >
+              <Building2 className="size-3.5 text-[#4242FF]" />
+              <SelectValue placeholder="Ir a un cliente…" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODOS_LOS_CLIENTES}>
+                Todos los clientes
+              </SelectItem>
+              {clientesDeclarados.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
       <div className="flex items-center gap-2">
         {conPeriodo && (
@@ -1037,15 +1124,42 @@ function AppHeader({
             </span>
           </div>
         )}
-        <div className="hidden items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-2.5 py-1.5 sm:flex">
-          <Moon className="size-3.5 text-[#4242FF]" aria-hidden="true" />
-          <Switch
-            size="sm"
-            checked={theme === "light"}
-            onCheckedChange={onThemeChange}
-            aria-label="Activar modo claro"
-          />
-          <Sun className="size-3.5 text-[#3BFF00]" aria-hidden="true" />
+        {/* Control segmentado, no un interruptor binario suelto: cada opción
+            se ve y se puede tocar por sí misma, en vez de depender de leer un
+            estado on/off junto a dos íconos fijos. */}
+        <div
+          role="group"
+          aria-label="Tema de la interfaz"
+          className="hidden items-center gap-0.5 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 p-1 sm:flex"
+        >
+          <button
+            type="button"
+            aria-pressed={theme === "dark"}
+            onClick={() => onThemeChange(false)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold transition-colors",
+              theme === "dark"
+                ? "bg-[#292929] text-[#F8FAD7] shadow-sm"
+                : "text-[#F8FAD7]/40 hover:text-[#F8FAD7]/70",
+            )}
+          >
+            <Moon className="size-3.5" aria-hidden="true" />
+            <span className="hidden lg:inline">Dark</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={theme === "light"}
+            onClick={() => onThemeChange(true)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold transition-colors",
+              theme === "light"
+                ? "bg-[#F8FAD7] text-[#292929] shadow-sm"
+                : "text-[#F8FAD7]/40 hover:text-[#F8FAD7]/70",
+            )}
+          >
+            <Sun className="size-3.5" aria-hidden="true" />
+            <span className="hidden lg:inline">Light</span>
+          </button>
         </div>
         <div className="hidden items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-xs font-medium text-[#F8FAD7]/65 shadow-sm lg:flex">
           <span
@@ -1054,8 +1168,8 @@ function AppHeader({
               view === "integrations"
                 ? "bg-[#4242FF]"
                 : isLive
-                  ? "bg-emerald-500"
-                  : "bg-amber-500",
+                  ? "bg-ok-deep"
+                  : "bg-warn-deep",
             )}
           />
           <DatabaseZap className="size-3.5 text-[#4242FF]" />
@@ -1152,11 +1266,11 @@ function DecisionsView({
     <div className="mx-auto w-full max-w-[1680px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             {decisions.length} decisiones requieren firma
           </h2>
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[#F8FAD7]/58">
-            <span className="font-semibold text-red-600">
+            <span className="font-semibold text-danger-deep">
               {critical} crítica
             </span>
             <span>·</span>
@@ -1215,7 +1329,7 @@ function DecisionsView({
         <div className="space-y-3">
           {decisions.length === 0 ? (
             <Surface className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-              <span className="mb-4 grid size-12 place-items-center rounded-full bg-emerald-500/10 text-emerald-600">
+              <span className="mb-4 grid size-12 place-items-center rounded-full bg-ok-deep/10 text-ok-deep">
                 <BadgeCheck className="size-6" />
               </span>
               <h3 className="text-lg font-bold text-[#F8FAD7]">
@@ -1370,8 +1484,8 @@ function DecisionCard({
       <div
         className={cn(
           "absolute left-0 top-6 h-10 w-1 rounded-r-full",
-          decision.severity === "critical" && "bg-red-500",
-          decision.severity === "high" && "bg-amber-500",
+          decision.severity === "critical" && "bg-danger-deep",
+          decision.severity === "high" && "bg-warn-deep",
           decision.severity === "medium" && "bg-[#4242FF]/100",
           decision.severity === "info" && "bg-[#F8FAD7]/25",
         )}
@@ -1458,7 +1572,7 @@ function DecisionDetail({
   if (!decision) {
     return (
       <Surface className="sticky top-20 flex min-h-72 flex-col items-center justify-center p-6 text-center">
-        <BadgeCheck className="mb-3 size-8 text-emerald-2000" />
+        <BadgeCheck className="mb-3 size-8 text-ok0" />
         <h3 className="font-bold">Sin decisiones por revisar</h3>
         <p className="mt-2 text-sm text-[#F8FAD7]/58">
           Selecciona otra cuenta o vuelve cuando aparezca un hallazgo.
@@ -1603,7 +1717,7 @@ function DecisionDetail({
               size="sm"
               onClick={onDiscard}
               disabled={saving}
-              className="text-red-600 hover:bg-red-500/10 hover:text-red-300"
+              className="text-danger-deep hover:bg-danger-deep/10 hover:text-danger"
             >
               <X />
               Descartar

@@ -24,6 +24,12 @@
 
 :root {
   color-scheme: dark;
+  /* El lienzo real detrás de todo — más oscuro que cualquier panel. Sidebar
+     y tarjetas (`--background`/`--sidebar`/`Surface`) flotan encima de este,
+     nunca al revés. Separado de `--background` a propósito: shadcn usa
+     `--background` como el tono de una superficie elevada (diálogos,
+     popovers, switches), no como el fondo de la página. */
+  --canvas: #20211f;
   --background: #292929;
   --foreground: #F8FAD7;
   --card: #252624;
@@ -51,10 +57,33 @@
   --chart-4: #f2a934;
   --chart-5: #d93d43;
   --radius: 1rem;
-  /* Antes #0f0f14: un azul-negro frío, ajeno a la paleta ink/beige de Neo.
-     #201f1d es el valor real que usa WiwoMetriQ para su sidebar — más oscuro
-     que las tarjetas para separarlas, pero de la misma familia tibia. */
-  --sidebar: #201f1d;
+  /* Estados semánticos, verificados contra neo.wiwo.me (no inventados).
+     Cada uno es un par: la variante "-deep" es el tono real de Neo —pensado
+     para texto sobre superficie clara— y se usa acá como relleno/borde a baja
+     opacidad, donde su tono exacto no importa tanto. La variante corta es un
+     tono más claro para texto/ícono legible sobre nuestras superficies
+     oscuras, porque el tono real de Neo (p.ej. `--danger: #B3261E`) es oscuro
+     sobre oscuro y pierde contraste. `--danger` sale del estado "error" del
+     Thinking Orb (ya portado desde WiwoMetriQ), no es un valor nuevo; los
+     otros cuatro son literales de neo.wiwo.me (`--warn`, `--chart-warning`,
+     `--ok`/`--chart-positive`, `--chart-mint`). Antes de esto la app usaba
+     red-500/amber-500/emerald-500 de Tailwind — parecidos, pero de otra
+     paleta. */
+  --danger-deep: #b3261e;
+  --danger: #ff6f61;
+  --warn-deep: #9c6417;
+  --warn: #d88719;
+  --ok-deep: #1c7a38;
+  --ok: #9adbb0;
+  /* #292929, verificado contra `--sidebar-bg` de neo.wiwo.me. Antes #201f1d
+     (y, antes de eso, #0f0f14): un intento de separar el sidebar oscureciéndolo
+     por debajo de las tarjetas. Pero el sidebar flotante real de Neo (ver
+     `variant="floating"` en AppSidebar) no se separa así — se separa
+     quedando MÁS CLARO que `--canvas` (#20211f) detrás, con hueco y sombra
+     propia, igual que cualquier tarjeta. #201f1d es casi idéntico a
+     `--canvas`: con el sidebar flotante, esa cercanía lo volvía invisible en
+     vez de separarlo. */
+  --sidebar: #292929;
   --sidebar-foreground: #F8FAD7;
   --sidebar-primary: #4242ff;
   --sidebar-primary-foreground: #292929;
@@ -96,6 +125,12 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-danger-deep: var(--danger-deep);
+  --color-danger: var(--danger);
+  --color-warn-deep: var(--warn-deep);
+  --color-warn: var(--warn);
+  --color-ok-deep: var(--ok-deep);
+  --color-ok: var(--ok);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -124,11 +159,12 @@ body {
 
 .theme-shell {
   min-height: 100svh;
-  background: #292929;
+  background: var(--canvas);
   color: #f8fad7;
 }
 
 .theme-shell[data-theme="light"] {
+  --canvas: #f8fad7;
   --background: #F8FAD7;
   --foreground: #292929;
   --card: #ffffff;
@@ -217,10 +253,25 @@ button:disabled {
   background: linear-gradient(90deg, #3bff00 0%, #3bff00 34%, #4242ff 72%, transparent 100%);
 }
 
-.font-editorial {
-  /* "Serif como voz": Neo usa Fraunces para los títulos editoriales. */
-  font-family: "Fraunces", "Instrument Serif", Georgia, serif;
+/* Título de cada sección/página dentro del producto. Antes usaba Fraunces
+   (serif) — el principio "serif como voz" de neo.wiwo.me es para piezas
+   editoriales/de marketing, no para el encabezado de todas las pantallas.
+   WiwoMetriQ, el software hermano que sí implementa Neo en producción, usa
+   sans-serif en negrita en sus propios títulos de pantalla (confirmado
+   contra sus capturas reales) — se corrige acá para no desentonar con el
+   resto de la familia de productos. */
+.neo-section-title {
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
   font-weight: 800;
+  font-size: 1.875rem;
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  color: #f8fad7;
+}
+@media (min-width: 768px) {
+  .neo-section-title {
+    font-size: 2.8rem;
+  }
 }
 
 .font-brand {
@@ -253,12 +304,16 @@ button:disabled {
   border-radius: 999px;
 }
 
+/* Borde bajado de 16% a 7%: adentro de una tarjeta ya con el suyo propio
+   (ver `Surface` en app/ui.tsx), un campo con un contorno tan marcado se
+   leía como una píldora recortada flotando encima, no como parte de la
+   misma superficie. El fondo recesado ya alcanza para marcar dónde se
+   escribe; el brillo interior también se quitó por la misma razón. */
 [data-slot="select-trigger"],
 [data-slot="input"],
 [data-slot="textarea"] {
-  border-color: rgba(245, 243, 255, 0.16);
+  border-color: rgba(245, 243, 255, 0.07);
   background: #323330;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* El verde de marca a toda página en cada encabezado de tabla —antes el color
@@ -295,8 +350,7 @@ button:disabled {
 .theme-shell[data-theme="light"] [data-slot="input"],
 .theme-shell[data-theme="light"] [data-slot="textarea"] {
   background: #ffffff;
-  border-color: rgba(23, 22, 28, 0.18);
-  box-shadow: inset 0 1px 0 rgba(23, 22, 28, 0.04);
+  border-color: rgba(23, 22, 28, 0.1);
 }
 .theme-shell[data-theme="light"] [data-slot="table-row"] {
   border-color: rgba(23, 22, 28, 0.1);
@@ -361,6 +415,53 @@ button:disabled {
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
   --ease-expressive: cubic-bezier(0.2, 0, 0, 1);
+  /* Elevación real de Neo — antes cada tarjeta tenía su propio valor de
+     shadow suelto e inventado. Estos cuatro son literales de neo.wiwo.me. */
+  --shadow-1: 0 8px 26px rgba(0, 0, 0, 0.24);
+  --shadow-2: 0 22px 70px rgba(0, 0, 0, 0.32);
+  --shadow-soft: 0 18px 52px rgba(0, 0, 0, 0.24);
+  --shadow-expressive: 0 30px 90px rgba(66, 66, 255, 0.22);
+  /* Escala tipográfica fluida de Neo (clamp, crece con el viewport) y sus
+     pesos con nombre — "editorial, cálida y humana en primer lugar" en vez
+     de los tamaños/pesos por defecto de Tailwind, que no dicen nada de la
+     voz de marca. */
+  --step--1: 0.82rem;
+  --step-0: 1rem;
+  --step-1: clamp(1.15rem, 1.4vw, 1.35rem);
+  --step-2: clamp(1.45rem, 2vw, 2rem);
+  --step-3: clamp(2rem, 3.8vw, 3.8rem);
+  --step-4: clamp(3.1rem, 7vw, 7.2rem);
+  --weight-body: 450;
+  --weight-meta: 600;
+  --weight-nav: 650;
+  --weight-action: 700;
+  --weight-display: 780;
+}
+
+/* Título de página — el h1 que encabeza cada vista. Antes era sans-serif
+   `text-sm font-bold`, indistinguible de cualquier dashboard genérico. "Serif
+   como voz": los titulares editoriales de Neo van en Fraunces, no en la
+   grotesca del cuerpo de texto. */
+.neo-page-title {
+  /* Sans, no serif — ver la nota de `.neo-section-title` sobre por qué. */
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+  font-weight: 800;
+  font-size: var(--step-1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.theme-shell[data-theme="light"] {
+  --danger-deep: #b3261e;
+  --danger: #b3261e;
+  --warn-deep: #9c6417;
+  --warn: #9c6417;
+  --ok-deep: #1c7a38;
+  --ok: #1c7a38;
+  --shadow-1: 0 8px 26px rgba(41, 41, 41, 0.08);
+  --shadow-2: 0 22px 70px rgba(41, 41, 41, 0.12);
+  --shadow-soft: 0 18px 52px rgba(41, 41, 41, 0.08);
+  --shadow-expressive: 0 30px 90px rgba(66, 66, 255, 0.14);
 }
 
 /* "Tech en microdosis": los controles de Neo son pastillas. */
@@ -379,6 +480,30 @@ button:disabled {
 
 /* Acento de marca para el elemento activo de navegación. */
 .neo-accent {
+  background-image: var(--wiwo-gradient-primary);
+}
+
+/* Texto con relleno de degradado — el mismo recurso que usa WiwoMetriQ para
+   resaltar una palabra dentro de un titular (p.ej. el nombre de la persona
+   en su saludo de inicio). Se usa con cuenta gotas: una palabra por titular,
+   no un párrafo entero. */
+.neo-gradient-text {
+  background-image: var(--wiwo-gradient-primary);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Acento decorativo corto en la esquina de una tarjeta — no un borde
+   completo, una pincelada corta que ancla la tarjeta a la identidad de
+   marca sin competir con su contenido. */
+.neo-card-accent::before {
+  content: "";
+  display: block;
+  width: 2.25rem;
+  height: 4px;
+  margin-bottom: 0.75rem;
+  border-radius: 999px;
   background-image: var(--wiwo-gradient-primary);
 }
 

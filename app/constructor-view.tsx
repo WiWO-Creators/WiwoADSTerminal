@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   AlertCircle,
   Calendar,
@@ -8,11 +9,14 @@ import {
   ChevronRight,
   Clapperboard,
   Film,
+  Flame,
   GalleryHorizontal,
   ImageIcon,
   Images,
   Info,
   LoaderCircle,
+  Lock,
+  Maximize2,
   Megaphone,
   Rocket,
   ShieldCheck,
@@ -44,6 +48,7 @@ import { nombreCompuesto } from "@/lib/nomenclatura";
 import {
   CALL_TO_ACTIONS,
   META_PLACEMENTS,
+  META_SURFACES,
   OBJECTIVES,
   SPECIAL_AD_CATEGORIES,
   type CallToAction,
@@ -56,6 +61,24 @@ import {
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
 import { Surface, ThinkingOrb } from "./ui";
+
+/**
+ * El mapa de segmentación carga Leaflet, que toca `window`/`document` al
+ * importarse — inservible durante el renderizado en el servidor (acá corre
+ * en Cloudflare Workers, sin DOM). `ssr: false` lo deja fuera del render de
+ * servidor y solo lo pide el navegador, cuando ya existe uno.
+ */
+const SegmentacionGeografica = dynamic(
+  () => import("./geo-map").then((mod) => mod.SegmentacionGeografica),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-[320px] items-center justify-center rounded-xl border border-[#F8FAD7]/10 bg-[#292929]/40 text-xs text-[#F8FAD7]/40">
+        Cargando mapa…
+      </div>
+    ),
+  },
+);
 
 /**
  * Cuenta de un cliente, tal como la sirve `/api/clientes` — mismo `pageId` y
@@ -82,6 +105,8 @@ type Publicacion = {
   mediaUrl: string;
   caption: string | null;
   format: "reel" | "story" | "carousel" | "image" | "video";
+  /** Reacciones + comentarios + compartidos ya reales, no una proyección. */
+  engagement: number | null;
 };
 
 type Issue = { field: string; message: string; blocking: boolean };
@@ -141,13 +166,19 @@ export type ConstructorAttachTo = {
   adsetName?: string;
 };
 
-function borradorInicial(attachTo?: ConstructorAttachTo): CampaignDraft {
+function borradorInicial(
+  attachTo?: ConstructorAttachTo,
+  clienteGlobal?: string | null,
+): CampaignDraft {
   // "Crear campaña para este cliente" llega con portfolioId pero sin
   // campaignId: ahí solo se precarga el cliente, no se adjunta a nada — una
   // campaña que todavía no existe no tiene id que adjuntarle.
   const adjuntando = Boolean(attachTo?.campaignId);
   return {
-    portfolioId: attachTo?.portfolioId ?? "",
+    // `attachTo` manda cuando existe —es un destino concreto, no una
+    // preferencia—; sin eso, se parte del cliente marcado en el selector del
+    // navbar, para no pedir elegirlo de nuevo acá adentro.
+    portfolioId: attachTo?.portfolioId ?? clienteGlobal ?? "",
     platforms: attachTo ? [attachTo.platform] : ["google"],
     accountByPlatform:
       attachTo?.accountId ? { [attachTo.platform]: attachTo.accountId } : {},
@@ -172,11 +203,17 @@ function borradorInicial(attachTo?: ConstructorAttachTo): CampaignDraft {
     metaBudgetLevel: "campana",
     mediaUrl: "",
     mediaType: "none",
+    boostPostId: null,
     ageMin: 18,
     ageMax: 65,
     gender: "todos",
     googleChannel: "search",
     metaPlacements: [],
+    metaSurfaces: [],
+    metaInterests: [],
+    targetCountries: [],
+    geoRadius: null,
+    excludedCountries: [],
     callToAction: "LEARN_MORE",
     brandSafety: "estandar",
     existingCampaign:
@@ -208,15 +245,25 @@ function borradorInicial(attachTo?: ConstructorAttachTo): CampaignDraft {
  */
 export function ConstructorView({
   attachTo,
+  clienteGlobal,
+  onCambiarClienteGlobal,
 }: {
   attachTo?: ConstructorAttachTo;
+  /** El cliente marcado en el selector del navbar — punto de partida cuando
+   * no se llega con un destino concreto ya elegido. */
+  clienteGlobal?: string | null;
+  /** Sin esto, elegir otro cliente acá adentro no se reflejaba en el navbar
+   * ni en el resto de la app — cada uno vivía su propia selección. */
+  onCambiarClienteGlobal?: (portfolioId: string) => void;
 } = {}) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [fase, setFase] = useState<Fase>(
     attachTo?.adsetId ? "anuncio" : attachTo?.campaignId ? "conjunto" : "campana",
   );
-  const [draft, setDraft] = useState<CampaignDraft>(() => borradorInicial(attachTo));
+  const [draft, setDraft] = useState<CampaignDraft>(() =>
+    borradorInicial(attachTo, clienteGlobal),
+  );
   const [plan, setPlan] = useState<Plan | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
@@ -333,11 +380,11 @@ export function ConstructorView({
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
           <Sparkles className="size-3 text-[#4242FF]" />
           Constructor · se revisa antes de publicar
         </p>
-        <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+        <h2 className="neo-section-title">
           {draft.existingAdset
             ? "Añade un anuncio, revísalo antes de publicar"
             : draft.existingCampaign
@@ -419,6 +466,7 @@ export function ConstructorView({
               cuentas={cuentas}
               onChange={actualizar}
               onTogglePlatform={alternarPlataforma}
+              onCambiarClienteGlobal={onCambiarClienteGlobal}
             />
           )}
           {fase === "conjunto" && (
@@ -479,7 +527,7 @@ export function ConstructorView({
           <VistaPrevia draft={draft} cuentas={cuentas} />
 
           {error && (
-            <div className="rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            <div className="rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">
               {error}
             </div>
           )}
@@ -503,7 +551,7 @@ export function ConstructorView({
               )}
 
               {bloqueantes.length > 0 && (
-                <Surface className="border-red-500/25 bg-red-500/[0.06] p-4">
+                <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-4">
                   <p className="text-sm font-bold text-[#F8FAD7]">
                     Falta resolver {bloqueantes.length}
                   </p>
@@ -511,7 +559,7 @@ export function ConstructorView({
                     {bloqueantes.map((issue, index) => (
                       <li
                         key={index}
-                        className="flex items-start gap-2 text-xs leading-5 text-red-300"
+                        className="flex items-start gap-2 text-xs leading-5 text-danger"
                       >
                         <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
                         {issue.message}
@@ -522,12 +570,12 @@ export function ConstructorView({
               )}
 
               {avisos.length > 0 && (
-                <Surface className="border-amber-500/25 bg-amber-500/[0.06] p-4">
+                <Surface className="border-warn-deep/25 bg-warn-deep/[0.06] p-4">
                   <ul className="space-y-1.5">
                     {avisos.map((issue, index) => (
                       <li
                         key={index}
-                        className="flex items-start gap-2 text-xs leading-5 text-amber-300"
+                        className="flex items-start gap-2 text-xs leading-5 text-warn"
                       >
                         <Info className="mt-0.5 size-3.5 shrink-0" />
                         {issue.message}
@@ -607,7 +655,7 @@ export function ConstructorView({
                     "overflow-hidden",
                     resultado.ok
                       ? "border-[#3BFF00]/25 bg-[#3BFF00]/[0.05]"
-                      : "border-red-500/25 bg-red-500/[0.06]",
+                      : "border-danger-deep/25 bg-danger-deep/[0.06]",
                   )}
                 >
                   <div className="border-b border-[#F8FAD7]/10 px-4 py-3">
@@ -615,7 +663,7 @@ export function ConstructorView({
                       {resultado.ok ? (
                         <Check className="size-4 text-[#3BFF00]" />
                       ) : (
-                        <AlertCircle className="size-4 text-red-400" />
+                        <AlertCircle className="size-4 text-danger" />
                       )}
                       {resultado.ok ? "Creado" : "Se detuvo"}
                     </h3>
@@ -629,14 +677,14 @@ export function ConstructorView({
                         {paso.ok ? (
                           <Check className="mt-0.5 size-3.5 shrink-0 text-[#3BFF00]" />
                         ) : (
-                          <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-red-400" />
+                          <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-danger" />
                         )}
                         <span className="min-w-0">
                           <span className="block text-sm text-[#F8FAD7]/82">
                             {paso.label}
                           </span>
                           {paso.error && (
-                            <span className="mt-0.5 block text-xs leading-5 text-red-300">
+                            <span className="mt-0.5 block text-xs leading-5 text-danger">
                               {paso.error}
                             </span>
                           )}
@@ -734,7 +782,7 @@ function SelectorPlataforma({
 }) {
   if (plataformas.length <= 1) return null;
   return (
-    <div className="mb-4 flex gap-1 rounded-full border border-[#F8FAD7]/10 p-1">
+    <div className="mb-4 flex gap-1 rounded-full bg-[#292929]/40 p-1">
       {plataformas.map((p) => (
         <button
           key={p}
@@ -769,7 +817,7 @@ function SelectorCuenta({
   const delPlatform = cuentas.filter((c) => c.provider === platform);
   if (delPlatform.length === 0) {
     return (
-      <p className="mt-2 text-xs text-amber-300">
+      <p className="mt-2 text-xs text-warn">
         Este cliente no tiene cuentas de {platformLabel(platform)}.
       </p>
     );
@@ -814,6 +862,7 @@ function FaseCampana({
   cuentas,
   onChange,
   onTogglePlatform,
+  onCambiarClienteGlobal,
 }: {
   draft: CampaignDraft;
   clientes: Cliente[];
@@ -821,6 +870,7 @@ function FaseCampana({
   cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
   onTogglePlatform: (value: Platform) => void;
+  onCambiarClienteGlobal?: (portfolioId: string) => void;
 }) {
   // Adjuntando a una campaña que ya existe: el cliente, la plataforma, el
   // objetivo y la categoría ya quedaron decididos cuando esa campaña se creó.
@@ -859,7 +909,12 @@ function FaseCampana({
           <Campo etiqueta="CLIENTE">
             <Select
               value={draft.portfolioId}
-              onValueChange={(value) => onChange({ portfolioId: value })}
+              onValueChange={(value) => {
+                onChange({ portfolioId: value });
+                // Elegir cliente acá también mueve el selector del navbar —
+                // una sola selección para toda la app, no una por vista.
+                onCambiarClienteGlobal?.(value);
+              }}
             >
               <SelectTrigger className="w-full bg-[#292929]/60">
                 <SelectValue
@@ -896,22 +951,57 @@ function FaseCampana({
 
         <Campo etiqueta="PLATAFORMAS" className="mt-4">
           <div className="flex flex-wrap gap-2">
-            {ACTIVE_PLATFORMS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => onTogglePlatform(value)}
-                className={cn(
-                  "rounded-full border px-4 py-2 text-sm font-bold transition-colors",
-                  draft.platforms.includes(value)
-                    ? "border-[#4242FF] bg-[#4242FF]/12 text-[#F8FAD7]"
-                    : "border-[#F8FAD7]/12 text-[#F8FAD7]/50 hover:border-[#F8FAD7]/25",
-                )}
-              >
-                {platformLabel(value)}
-              </button>
-            ))}
+            {ACTIVE_PLATFORMS.map((value) => {
+              // Sin cliente elegido todavía no hay nada que evaluar — el
+              // bloqueo es sobre las cuentas DE ESE cliente, no una regla
+              // general de la plataforma.
+              const sinCuenta =
+                Boolean(draft.portfolioId) &&
+                !cuentas.some((c) => c.provider === value);
+              const activa = draft.platforms.includes(value);
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  // Bloquea sumarla si no hay cuenta, pero deja quitarla si
+                  // ya estaba activa (por ejemplo, al cambiar de cliente a
+                  // uno sin cuenta en esta red) — nunca deja a alguien
+                  // atrapado sin poder deshacer su propia elección.
+                  disabled={sinCuenta && !activa}
+                  onClick={() => onTogglePlatform(value)}
+                  title={
+                    sinCuenta
+                      ? `Este cliente no tiene ninguna cuenta de ${platformLabel(value)} conectada — hay que vincular una primero, en la ficha del cliente.`
+                      : undefined
+                  }
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-bold transition-colors",
+                    sinCuenta && !activa
+                      ? "cursor-not-allowed border-[#F8FAD7]/8 text-[#F8FAD7]/25"
+                      : activa
+                        ? "border-[#4242FF] bg-[#4242FF]/12 text-[#F8FAD7]"
+                        : "border-[#F8FAD7]/12 text-[#F8FAD7]/50 hover:border-[#F8FAD7]/25",
+                  )}
+                >
+                  {sinCuenta && !activa && <Lock className="size-3.5" />}
+                  {platformLabel(value)}
+                </button>
+              );
+            })}
           </div>
+          {ACTIVE_PLATFORMS.some(
+            (value) =>
+              draft.portfolioId &&
+              !cuentas.some((c) => c.provider === value) &&
+              !draft.platforms.includes(value),
+          ) && (
+            <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/40">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              Las plataformas bloqueadas no tienen ninguna cuenta conectada
+              para este cliente. Vincúlala primero en la ficha del cliente
+              para poder elegirla acá.
+            </p>
+          )}
         </Campo>
 
         {draft.portfolioId &&
@@ -1046,6 +1136,27 @@ function FaseConjunto({
       */}
       <Seccion titulo="Presupuesto y calendario">
         <PresupuestoPorPlataforma draft={draft} onChange={onChange} />
+      </Seccion>
+
+      {/*
+        Igual que el presupuesto: la ubicación geográfica es del conjunto
+        entero, no de una plataforma — el mismo país o círculo se traduce a
+        Meta y a Google en `buildPlan`, así que se ve sin importar cuál
+        pestaña esté activa abajo.
+      */}
+      <Seccion titulo="Segmentación geográfica">
+        <SegmentacionGeografica
+          targetCountries={draft.targetCountries}
+          onTargetCountriesChange={(targetCountries) =>
+            onChange({ targetCountries })
+          }
+          geoRadius={draft.geoRadius}
+          onGeoRadiusChange={(geoRadius) => onChange({ geoRadius })}
+          excludedCountries={draft.excludedCountries}
+          onExcludedCountriesChange={(excludedCountries) =>
+            onChange({ excludedCountries })
+          }
+        />
       </Seccion>
 
       <SelectorPlataforma
@@ -1185,6 +1296,27 @@ function FaseConjunto({
               Los países de segmentación se definen por cuenta en la ficha del
               cliente, no acá.
             </p>
+            <Campo etiqueta="INTERESES (AVANZADO, OPCIONAL)" className="mt-3">
+              <Input
+                value={draft.metaInterests.join(", ")}
+                onChange={(e) =>
+                  onChange({
+                    metaInterests: e.target.value
+                      .split(",")
+                      .map((id) => id.trim())
+                      .filter(Boolean),
+                  })
+                }
+                placeholder="ids de Meta separados por coma, ej. 6003107902433"
+                className="bg-[#292929]/60"
+              />
+            </Campo>
+            <p className="mt-2 flex items-start gap-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+              <Info className="mt-0.5 size-3 shrink-0" />
+              Son ids reales de interés de Meta, no el nombre — todavía no hay
+              forma de buscarlos por palabra desde acá. Se consiguen desde
+              Meta Ads Manager o Audience Insights.
+            </p>
           </Seccion>
 
           <Seccion titulo="Transparencia de anuncios" informativo>
@@ -1216,6 +1348,30 @@ function FaseConjunto({
                     className="border-[#F8FAD7]/30"
                   />
                   {label}
+                </label>
+              ))}
+            </div>
+            <p className="font-micro mb-1.5 mt-4 text-[0.58rem] text-[#F8FAD7]/45">
+              FORMATO DE ENTREGA · VACÍO ES AUTOMÁTICO
+            </p>
+            <div className="flex flex-wrap gap-4">
+              {Object.entries(META_SURFACES).map(([id, item]) => (
+                <label
+                  key={id}
+                  className="flex items-center gap-2 text-sm text-[#F8FAD7]/80"
+                >
+                  <Checkbox
+                    checked={draft.metaSurfaces.includes(id)}
+                    onCheckedChange={(checked) =>
+                      onChange({
+                        metaSurfaces: checked
+                          ? [...draft.metaSurfaces, id]
+                          : draft.metaSurfaces.filter((p) => p !== id),
+                      })
+                    }
+                    className="border-[#F8FAD7]/30"
+                  />
+                  {item.label}
                 </label>
               ))}
             </div>
@@ -1265,7 +1421,7 @@ function FaseConjunto({
             </label>
           </RadioGroup>
           {draft.budgetMode === "total" && (
-            <p className="mt-3 text-[0.68rem] leading-5 text-amber-300/80">
+            <p className="mt-3 text-[0.68rem] leading-5 text-warn/80">
               Google, por esta vía, solo crea presupuesto diario: el modo
               total elegido en Meta no tiene efecto acá.
             </p>
@@ -1527,14 +1683,18 @@ function FaseAnuncio({
                 <div className="flex flex-wrap gap-2">
                   <Input
                     value={draft.mediaUrl}
-                    onChange={(e) => onChange({ mediaUrl: e.target.value })}
+                    onChange={(e) =>
+                      // Escribir la URL a mano reemplaza la pieza: ya no es
+                      // la publicación elegida, así que deja de boostearse.
+                      onChange({ mediaUrl: e.target.value, boostPostId: null })
+                    }
                     placeholder="https://"
                     className="min-w-0 flex-1 bg-[#292929]/60"
                   />
                   <SubidaDeArchivo
                     portfolioId={draft.portfolioId}
                     onSubido={(url, tipo) =>
-                      onChange({ mediaUrl: url, mediaType: tipo })
+                      onChange({ mediaUrl: url, mediaType: tipo, boostPostId: null })
                     }
                   />
                   {cuentaMeta && draft.portfolioId && (
@@ -1549,13 +1709,22 @@ function FaseAnuncio({
                     </Button>
                   )}
                 </div>
-                <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/45">
-                  <Info className="mt-0.5 size-3.5 shrink-0" />
-                  Meta va a buscar el archivo en esta dirección. Si el sitio
-                  todavía no está publicado en un dominio real, un archivo
-                  recién subido no será alcanzable para Meta ni para Google —
-                  solo se verá en esta vista previa.
-                </p>
+                {draft.boostPostId ? (
+                  <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-ok">
+                    <Flame className="mt-0.5 size-3.5 shrink-0" />
+                    Este anuncio va a boostear esa publicación real — conserva
+                    sus likes, comentarios y compartidos actuales, en vez de
+                    crear una pieza nueva desde cero.
+                  </p>
+                ) : (
+                  <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/45">
+                    <Info className="mt-0.5 size-3.5 shrink-0" />
+                    Meta va a buscar el archivo en esta dirección. Si el sitio
+                    todavía no está publicado en un dominio real, un archivo
+                    recién subido no será alcanzable para Meta ni para Google —
+                    solo se verá en esta vista previa.
+                  </p>
+                )}
               </Campo>
             )}
           </Seccion>
@@ -1574,6 +1743,14 @@ function FaseAnuncio({
                       ? "video"
                       : "image",
                   message: draft.message.trim() ? draft.message : (post.caption ?? draft.message),
+                  // Solo Facebook: es el único donde Windsor confirma que el
+                  // id de la publicación viene en el formato que boost_post
+                  // exige (`{page_id}_{post_id}`). Con esto puesto, el plan
+                  // impulsa la publicación real —conserva sus likes,
+                  // comentarios y compartidos— en vez de armar un anuncio
+                  // nuevo con la imagen como pieza. Instagram sigue el
+                  // camino de siempre hasta confirmar su formato de id.
+                  boostPostId: post.platform === "facebook" ? post.id : null,
                 });
                 setSelectorAbierto(false);
               }}
@@ -1727,7 +1904,7 @@ function SubidaDeArchivo({
         )}
         Subir archivo
       </Button>
-      {error && <p className="w-full text-xs text-red-300">{error}</p>}
+      {error && <p className="w-full text-xs text-danger">{error}</p>}
     </>
   );
 }
@@ -1778,6 +1955,7 @@ function SelectorDeContenido({
   const [aviso, setAviso] = useState<string | null>(null);
   const [formato, setFormato] = useState<Publicacion["format"] | "todos">("todos");
   const [dias, setDias] = useState(90);
+  const [orden, setOrden] = useState<"recientes" | "interaccion">("recientes");
 
   useEffect(() => {
     if (!open) return;
@@ -1825,9 +2003,13 @@ function SelectorDeContenido({
     };
   }, [open, portfolioId, accountId, dias]);
 
-  const filtrados = posts.filter(
-    (post) => formato === "todos" || post.format === formato,
-  );
+  const filtrados = posts
+    .filter((post) => formato === "todos" || post.format === formato)
+    .sort((a, b) =>
+      orden === "interaccion"
+        ? (b.engagement ?? 0) - (a.engagement ?? 0)
+        : (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
+    );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1860,22 +2042,60 @@ function SelectorDeContenido({
               </button>
             );
           })}
-          <Select
-            value={String(dias)}
-            onValueChange={(value) => setDias(Number(value))}
-          >
-            <SelectTrigger size="sm" className="ml-auto w-44 bg-[#323330]/65">
-              <Calendar className="size-3.5 text-[#4242FF]" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RANGOS_CONTENIDO.map((item) => (
-                <SelectItem key={item.dias} value={String(item.dias)}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="ml-auto flex items-center gap-2">
+            {/* Ordenar por interacción, no solo por fecha: la publicación
+                que ya viene funcionando orgánicamente no siempre es la más
+                reciente, y es justo la que más conviene boostear. */}
+            <div
+              role="group"
+              aria-label="Ordenar publicaciones"
+              className="flex items-center gap-0.5 rounded-full bg-[#292929]/40 p-1"
+            >
+              <button
+                type="button"
+                aria-pressed={orden === "recientes"}
+                onClick={() => setOrden("recientes")}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-xs font-semibold transition-colors",
+                  orden === "recientes"
+                    ? "bg-[#4242FF] text-[#F8FAD7]"
+                    : "text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                )}
+              >
+                Recientes
+              </button>
+              <button
+                type="button"
+                aria-pressed={orden === "interaccion"}
+                onClick={() => setOrden("interaccion")}
+                className={cn(
+                  "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors",
+                  orden === "interaccion"
+                    ? "bg-[#4242FF] text-[#F8FAD7]"
+                    : "text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                )}
+              >
+                <Flame className="size-3" />
+                Con más interacción
+              </button>
+            </div>
+            <Select
+              value={String(dias)}
+              onValueChange={(value) => setDias(Number(value))}
+            >
+              <SelectTrigger size="sm" className="w-44 bg-[#323330]/65">
+                <Calendar className="size-3.5 text-[#4242FF]" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RANGOS_CONTENIDO.map((item) => (
+                  <SelectItem key={item.dias} value={String(item.dias)}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {aviso && (
@@ -1892,7 +2112,7 @@ function SelectorDeContenido({
               Buscando publicaciones…
             </div>
           ) : error ? (
-            <div className="rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            <div className="rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">
               {error}
             </div>
           ) : filtrados.length === 0 ? (
@@ -1957,9 +2177,20 @@ function TarjetaPublicacion({
         </span>
       </div>
       <div className="p-2.5">
-        <p className="text-[0.65rem] text-[#F8FAD7]/45">
-          {post.createdAt ? formatoFecha(post.createdAt) : "Sin fecha"}
-        </p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[0.65rem] text-[#F8FAD7]/45">
+            {post.createdAt ? formatoFecha(post.createdAt) : "Sin fecha"}
+          </p>
+          {/* La cifra que ya trae la publicación en la plataforma —para
+              distinguir de un vistazo cuál conviene boostear, sin tener que
+              abrir cada una en Facebook o Instagram a compararlas. */}
+          {post.engagement !== null && post.engagement > 0 && (
+            <span className="metric-number inline-flex items-center gap-1 text-[0.65rem] font-bold text-warn">
+              <Flame className="size-3" />
+              {formatCompacto(post.engagement)}
+            </span>
+          )}
+        </div>
         {post.caption && (
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#F8FAD7]/70">
             {post.caption}
@@ -1975,7 +2206,7 @@ function TarjetaPublicacion({
             Usar esta
           </Button>
         ) : (
-          <p className="mt-2 flex items-start gap-1.5 text-[0.62rem] leading-4 text-amber-400/80">
+          <p className="mt-2 flex items-start gap-1.5 text-[0.62rem] leading-4 text-warn/80">
             <Info className="mt-0.5 size-3 shrink-0" />
             Solo hay miniatura disponible; pega el archivo de video a mano.
           </p>
@@ -1991,6 +2222,13 @@ function formatoFecha(iso: string): string {
     month: "short",
     year: "numeric",
   }).format(new Date(iso));
+}
+
+function formatCompacto(valor: number): string {
+  return new Intl.NumberFormat("es-CL", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(valor);
 }
 
 /** Vista previa liviana, para orientarse mientras se completa el formulario. */
@@ -2013,7 +2251,7 @@ function dominioDe(url: string): string {
  * ahí, igual que hace esta vista previa. Si la URL está rota, es mejor
  * mostrarlo acá, antes de publicar, que descubrirlo cuando Meta la rechace.
  */
-function ImagenDeLaPieza({ url }: { url: string }) {
+function ImagenDeLaPieza({ url, alto = "h-44" }: { url: string; alto?: string }) {
   // Sin efecto: si la URL cambió desde el render anterior, el estado se
   // ajusta acá mismo (React lo soporta y lo prefiere para esto) en vez de
   // confirmar un render con el estado viejo y recién corregirlo un instante
@@ -2029,7 +2267,12 @@ function ImagenDeLaPieza({ url }: { url: string }) {
 
   if (estado === "error") {
     return (
-      <div className="wa-m-media flex h-44 items-center justify-center px-4 text-center text-[0.68rem]">
+      <div
+        className={cn(
+          "wa-m-media flex items-center justify-center px-4 text-center text-[0.68rem]",
+          alto,
+        )}
+      >
         {url.trim()
           ? "No se pudo cargar la imagen desde esa URL"
           : "Falta la URL de la pieza"}
@@ -2037,7 +2280,7 @@ function ImagenDeLaPieza({ url }: { url: string }) {
     );
   }
   return (
-    <div className="wa-m-media relative h-44">
+    <div className={cn("wa-m-media relative", alto)}>
       {estado === "cargando" && (
         <div className="absolute inset-0 flex items-center justify-center text-[0.68rem]">
           Cargando imagen…
@@ -2047,12 +2290,57 @@ function ImagenDeLaPieza({ url }: { url: string }) {
       <img
         src={url}
         alt="Pieza del anuncio"
-        className={cn("h-44 w-full object-cover", estado !== "ok" && "invisible")}
+        className={cn("w-full object-cover", alto, estado !== "ok" && "invisible")}
         onLoad={() => setEstado("ok")}
         onError={() => setEstado("error")}
       />
     </div>
   );
+}
+
+/** Una vista previa posible: qué red, con qué presentación. */
+type VarianteVista = {
+  id: string;
+  plataforma: "google" | "meta";
+  etiqueta: string;
+};
+
+/**
+ * Todas las vistas que de verdad aplican al borrador actual — ninguna se
+ * inventa. Google solo aporta Búsqueda (lo único que Windsor puede crear
+ * hoy); Meta aporta Feed e Historias por cada red elegida en "Ubicaciones".
+ * "Vacío es automáticas" ahí significa Facebook e Instagram, así que sin
+ * nada marcado se muestran las dos.
+ */
+function listaDeVistas(draft: CampaignDraft): VarianteVista[] {
+  const vistas: VarianteVista[] = [];
+  if (draft.platforms.includes("google")) {
+    vistas.push({
+      id: "google:busqueda",
+      plataforma: "google",
+      etiqueta: "Google · Búsqueda",
+    });
+  }
+  if (draft.platforms.includes("meta")) {
+    const elegidas = draft.metaPlacements.filter(
+      (p): p is "facebook" | "instagram" => p === "facebook" || p === "instagram",
+    );
+    const redes = elegidas.length > 0 ? elegidas : (["facebook", "instagram"] as const);
+    for (const red of redes) {
+      const nombre = red === "facebook" ? "Facebook" : "Instagram";
+      vistas.push({
+        id: `meta:feed:${red}`,
+        plataforma: "meta",
+        etiqueta: `Meta · Feed de ${nombre}`,
+      });
+      vistas.push({
+        id: `meta:historia:${red}`,
+        plataforma: "meta",
+        etiqueta: `Meta · Historias de ${nombre}`,
+      });
+    }
+  }
+  return vistas;
 }
 
 /**
@@ -2064,26 +2352,150 @@ function ImagenDeLaPieza({ url }: { url: string }) {
  * tarjetas van en claro: son el fondo real de cada plataforma, no el tema
  * oscuro del resto del sistema.
  */
-function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta[] }) {
-  const conMeta = draft.platforms.includes("meta");
-  const conGoogle = draft.platforms.includes("google");
+function TarjetaDeVista({
+  id,
+  draft,
+  cuentaMeta,
+}: {
+  id: string;
+  draft: CampaignDraft;
+  cuentaMeta: Cuenta | undefined;
+}) {
+  const [plataforma, formato] = id.split(":");
 
-  // Google combina los títulos que entran en el espacio disponible; acá se
-  // muestran los dos primeros unidos con " | ", que es lo que se ve la
-  // mayoría de las veces en un resultado real.
-  const titulosGoogle = draft.headlines.filter((t) => t.trim()).slice(0, 2);
-  const tituloGoogle = titulosGoogle.length
-    ? titulosGoogle.join(" | ")
-    : "Título del anuncio";
-  const descripcionGoogle = draft.descriptions.find((d) => d.trim()) ?? "";
-  // La URL visible real es dominio + rutas, no solo el dominio.
-  const urlVisibleGoogle = [
-    dominioDe(draft.landingUrl),
-    draft.pathDisplay1.trim(),
-    draft.pathDisplay2.trim(),
-  ]
-    .filter(Boolean)
-    .join(" › ");
+  if (plataforma === "google") {
+    // Google combina los títulos que entran en el espacio disponible; acá se
+    // muestran los dos primeros unidos con " | ", que es lo que se ve la
+    // mayoría de las veces en un resultado real.
+    const titulosGoogle = draft.headlines.filter((t) => t.trim()).slice(0, 2);
+    const tituloGoogle = titulosGoogle.length
+      ? titulosGoogle.join(" | ")
+      : "Título del anuncio";
+    const descripcionGoogle = draft.descriptions.find((d) => d.trim()) ?? "";
+    // La URL visible real es dominio + rutas, no solo el dominio.
+    const urlVisibleGoogle = [
+      dominioDe(draft.landingUrl),
+      draft.pathDisplay1.trim(),
+      draft.pathDisplay2.trim(),
+    ]
+      .filter(Boolean)
+      .join(" › ");
+
+    // Colores propios de Google, no de Neo — ver `wa-preview-google` en
+    // globals.css. Cambia de claro a oscuro con el interruptor de arriba,
+    // pero siguiendo el modo oscuro real de Google, no el de WiWO.ADS.
+    return (
+      <div className="wa-preview-google rounded-lg p-3 font-sans">
+        <div className="wa-g-domain flex items-center gap-1.5 text-[0.72rem]">
+          <span className="wa-g-label rounded-[3px] border px-1 text-[0.6rem] font-bold">
+            Anuncio
+          </span>
+          {/* Dominio + rutas, tal como se ven pegadas en un resultado real. */}
+          <span className="truncate">{urlVisibleGoogle}</span>
+        </div>
+        <p className="wa-g-title mt-0.5 truncate text-[1.05rem] leading-snug">
+          {tituloGoogle}
+        </p>
+        <p className="wa-g-desc mt-0.5 line-clamp-2 text-[0.8rem] leading-5">
+          {descripcionGoogle || "La descripción aparecerá acá."}
+        </p>
+      </div>
+    );
+  }
+
+  // Meta: Feed e Historias comparten cuenta, texto y pieza — solo cambia
+  // cómo se enmarcan, igual que en la plataforma real.
+  const dominio = dominioDe(draft.landingUrl);
+  const nombreCuenta = cuentaMeta?.name ?? "Elige la cuenta en el paso de Campaña";
+  const inicial = (cuentaMeta?.name ?? "?").charAt(0).toUpperCase();
+
+  if (formato === "historia") {
+    return (
+      <div className="wa-preview-meta relative aspect-[9/16] overflow-hidden rounded-lg font-sans">
+        {draft.mediaType === "video" ? (
+          <div className="wa-m-media flex h-full items-center justify-center px-3 text-center text-[0.68rem]">
+            Vista previa de video no disponible acá — se revisa en la plataforma
+          </div>
+        ) : (
+          <ImagenDeLaPieza url={draft.mediaUrl} alto="h-full" />
+        )}
+        <div className="absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/65 to-transparent p-3">
+          <div className="wa-m-avatar grid size-7 shrink-0 place-items-center rounded-full text-[0.65rem] font-bold ring-2 ring-white/70">
+            {inicial}
+          </div>
+          <p className="truncate text-[0.75rem] font-semibold text-white">
+            {nombreCuenta}
+          </p>
+        </div>
+        <div className="absolute inset-x-0 bottom-0 space-y-2 bg-gradient-to-t from-black/75 to-transparent p-3">
+          <p className="line-clamp-2 text-[0.78rem] leading-5 text-white/95">
+            {draft.message || "El texto principal aparecerá acá."}
+          </p>
+          <span className="inline-flex w-full items-center justify-center rounded-md bg-white/95 px-3 py-1.5 text-[0.72rem] font-bold text-[#050505]">
+            {CALL_TO_ACTIONS[draft.callToAction]}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="wa-preview-meta overflow-hidden rounded-lg font-sans">
+      <div className="flex items-center gap-2 p-3">
+        <div className="wa-m-avatar grid size-9 shrink-0 place-items-center rounded-full text-xs font-bold">
+          {inicial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[0.8rem] font-semibold">{nombreCuenta}</p>
+          <p className="wa-m-sub text-[0.68rem]">Patrocinado</p>
+        </div>
+      </div>
+      <p className="px-3 pb-2 text-[0.82rem] leading-5 whitespace-pre-line line-clamp-4">
+        {draft.message || "El texto principal aparecerá acá."}
+      </p>
+      {draft.mediaType === "video" ? (
+        <div className="wa-m-media flex h-44 items-center justify-center text-[0.68rem]">
+          Vista previa de video no disponible acá — se revisa en la plataforma
+        </div>
+      ) : (
+        <ImagenDeLaPieza url={draft.mediaUrl} />
+      )}
+      <div className="wa-m-footer flex items-center justify-between gap-3 px-3 py-2.5">
+        {/*
+          El pie real de un anuncio de Meta es dominio + título en negrita
+          —y la descripción chica, si hay— no el nombre de la cuenta: eso ya
+          se ve arriba, junto al avatar.
+        */}
+        <div className="min-w-0">
+          <p className="wa-m-domain truncate text-[0.65rem] uppercase tracking-wide">
+            {dominio}
+          </p>
+          <p className="truncate text-[0.82rem] font-semibold">
+            {draft.metaHeadline.trim() || "Tu marca"}
+          </p>
+          {draft.metaDescription.trim() && (
+            <p className="wa-m-sub truncate text-[0.72rem]">
+              {draft.metaDescription.trim()}
+            </p>
+          )}
+        </div>
+        <span className="wa-m-cta shrink-0 rounded-md px-3 py-1.5 text-[0.78rem] font-semibold">
+          {CALL_TO_ACTIONS[draft.callToAction]}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const FILTROS_VISTA = [
+  { id: "todas", label: "Todas" },
+  { id: "google", label: "Google" },
+  { id: "meta", label: "Meta" },
+] as const;
+
+function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta[] }) {
+  const [ampliada, setAmpliada] = useState(false);
+  const [filtro, setFiltro] = useState<(typeof FILTROS_VISTA)[number]["id"]>("todas");
 
   const cuentaMeta = cuentas.find(
     (c) =>
@@ -2092,102 +2504,107 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
         ? c.externalId === draft.accountByPlatform.meta
         : cuentas.filter((x) => x.provider === "meta").length === 1),
   );
-  const dominio = dominioDe(draft.landingUrl);
+
+  const vistas = listaDeVistas(draft);
+  const vistasFiltradas = vistas.filter(
+    (v) => filtro === "todas" || v.plataforma === filtro,
+  );
 
   return (
     <Surface className="overflow-hidden p-4">
-      <p className="font-micro mb-3 flex items-center gap-1.5 text-[0.6rem] text-[#F8FAD7]/45">
-        <Megaphone className="size-3 text-[#4242FF]" />
-        VISTA PREVIA · ASÍ SE VERÍA EN CADA RED
-      </p>
-      {!conMeta && !conGoogle ? (
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="font-micro flex items-center gap-1.5 text-[0.6rem] text-[#F8FAD7]/45">
+          <Megaphone className="size-3 text-[#4242FF]" />
+          VISTA PREVIA · ASÍ SE VERÍA EN CADA RED
+        </p>
+        {vistas.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setAmpliada(true)}
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-2.5 py-1 text-[0.62rem] font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/15"
+          >
+            <Maximize2 className="size-3" />
+            Ampliar vista previa
+          </button>
+        )}
+      </div>
+
+      {vistas.length === 0 ? (
         <p className="text-xs text-[#F8FAD7]/40">Elige al menos una plataforma.</p>
       ) : (
-        <div className="space-y-4">
-          {conGoogle && (
-            <div>
-              <p className="font-micro mb-1.5 text-[0.55rem] text-[#F8FAD7]/40">
-                GOOGLE · RED DE BÚSQUEDA
-              </p>
-              {/*
-                Colores propios de Google, no de Neo — ver `wa-preview-google`
-                en globals.css. Cambia de claro a oscuro con el interruptor de
-                arriba, pero siguiendo el modo oscuro real de Google, no el de
-                WiWO.ADS.
-              */}
-              <div className="wa-preview-google rounded-lg p-3 font-sans">
-                <div className="wa-g-domain flex items-center gap-1.5 text-[0.72rem]">
-                  <span className="wa-g-label rounded-[3px] border px-1 text-[0.6rem] font-bold">
-                    Anuncio
-                  </span>
-                  {/* Dominio + rutas, tal como se ven pegadas en un resultado real. */}
-                  <span className="truncate">{urlVisibleGoogle}</span>
-                </div>
-                <p className="wa-g-title mt-0.5 truncate text-[1.05rem] leading-snug">
-                  {tituloGoogle}
+        <>
+          {/* Apiladas hacia abajo, no en tira horizontal: en la columna
+              angosta del Constructor, dos tarjetas lado a lado quedaban
+              cortadas y pisándose. Con esta columna alcanza para mostrar dos
+              completas; el resto se ve en "Ampliar vista previa". */}
+          <div className="space-y-4">
+            {vistas.slice(0, 2).map((v) => (
+              <div key={v.id}>
+                <p className="font-micro mb-1.5 truncate text-[0.55rem] text-[#F8FAD7]/40">
+                  {v.etiqueta.toUpperCase()}
                 </p>
-                <p className="wa-g-desc mt-0.5 line-clamp-2 text-[0.8rem] leading-5">
-                  {descripcionGoogle || "La descripción aparecerá acá."}
-                </p>
+                <TarjetaDeVista id={v.id} draft={draft} cuentaMeta={cuentaMeta} />
               </div>
-            </div>
+            ))}
+          </div>
+          {vistas.length > 2 && (
+            <button
+              type="button"
+              onClick={() => setAmpliada(true)}
+              className="mt-3 w-full text-center text-xs font-semibold text-[#F8FAD7]/45 transition-colors hover:text-[#F8FAD7]/70"
+            >
+              +{vistas.length - 2} vista{vistas.length - 2 === 1 ? "" : "s"} más
+              en &ldquo;Ampliar vista previa&rdquo;
+            </button>
           )}
-          {conMeta && (
-            <div>
-              <p className="font-micro mb-1.5 text-[0.55rem] text-[#F8FAD7]/40">
-                META · FEED DE FACEBOOK O INSTAGRAM
-              </p>
-              {/* Colores propios de Meta — ver `wa-preview-meta` en globals.css. */}
-              <div className="wa-preview-meta overflow-hidden rounded-lg font-sans">
-                <div className="flex items-center gap-2 p-3">
-                  <div className="wa-m-avatar grid size-9 shrink-0 place-items-center rounded-full text-xs font-bold">
-                    {(cuentaMeta?.name ?? "?").charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[0.8rem] font-semibold">
-                      {cuentaMeta?.name ?? "Elige la cuenta en el paso de Campaña"}
-                    </p>
-                    <p className="wa-m-sub text-[0.68rem]">Patrocinado</p>
-                  </div>
-                </div>
-                <p className="px-3 pb-2 text-[0.82rem] leading-5 whitespace-pre-line line-clamp-4">
-                  {draft.message || "El texto principal aparecerá acá."}
-                </p>
-                {draft.mediaType === "video" ? (
-                  <div className="wa-m-media flex h-44 items-center justify-center text-[0.68rem]">
-                    Vista previa de video no disponible acá — se revisa en la plataforma
-                  </div>
-                ) : (
-                  <ImagenDeLaPieza url={draft.mediaUrl} />
-                )}
-                <div className="wa-m-footer flex items-center justify-between gap-3 px-3 py-2.5">
-                  {/*
-                    El pie real de un anuncio de Meta es dominio + título en
-                    negrita —y la descripción chica, si hay— no el nombre de
-                    la cuenta: eso ya se ve arriba, junto al avatar.
-                  */}
-                  <div className="min-w-0">
-                    <p className="wa-m-domain truncate text-[0.65rem] uppercase tracking-wide">
-                      {dominio}
-                    </p>
-                    <p className="truncate text-[0.82rem] font-semibold">
-                      {draft.metaHeadline.trim() || "Tu marca"}
-                    </p>
-                    {draft.metaDescription.trim() && (
-                      <p className="wa-m-sub truncate text-[0.72rem]">
-                        {draft.metaDescription.trim()}
-                      </p>
-                    )}
-                  </div>
-                  <span className="wa-m-cta shrink-0 rounded-md px-3 py-1.5 text-[0.78rem] font-semibold">
-                    {CALL_TO_ACTIONS[draft.callToAction]}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        </>
       )}
+
+      <Dialog open={ampliada} onOpenChange={setAmpliada}>
+        <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Vista previa</DialogTitle>
+            <DialogDescription>
+              Así se vería este anuncio en cada red, con las redes y formatos
+              que ya quedaron elegidos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#F8FAD7]/10 pb-3">
+            {FILTROS_VISTA.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setFiltro(item.id)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                  filtro === item.id
+                    ? "border-[#4242FF] bg-[#4242FF]/12 text-[#4242FF]"
+                    : "border-[#F8FAD7]/12 text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="scrollbar-thin grid max-h-[65vh] gap-5 overflow-y-auto pt-1 sm:grid-cols-2">
+            {vistasFiltradas.length === 0 && (
+              <p className="py-6 text-center text-sm text-[#F8FAD7]/45 sm:col-span-2">
+                No hay vistas para ese filtro.
+              </p>
+            )}
+            {vistasFiltradas.map((v) => (
+              <div key={v.id}>
+                <p className="font-micro mb-1.5 text-[0.55rem] text-[#F8FAD7]/40">
+                  {v.etiqueta.toUpperCase()}
+                </p>
+                <TarjetaDeVista id={v.id} draft={draft} cuentaMeta={cuentaMeta} />
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Surface>
   );
 }
@@ -2212,7 +2629,7 @@ function Contador({
     <p
       className={cn(
         "mt-1.5 text-xs",
-        excedidas || !enRango ? "text-amber-300" : "text-[#F8FAD7]/45",
+        excedidas || !enRango ? "text-warn" : "text-[#F8FAD7]/45",
       )}
     >
       {items.length} de {minimo}–{maximo}

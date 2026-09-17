@@ -4,10 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Building2,
   ChevronDown,
+  ChevronLeft,
   ChevronUp,
   LoaderCircle,
   Plus,
-  Search,
   Settings,
   TriangleAlert,
 } from "lucide-react";
@@ -154,11 +154,22 @@ function faltantesDe(portfolio: Portfolio) {
  */
 export function ClientesView({
   performance,
+  seleccionado,
+  onSeleccionar,
   onCrearCampana,
   onAgregarConjunto,
   onAgregarAnuncio,
 }: {
   performance: PerformanceSnapshot;
+  /**
+   * Controlado desde afuera (`Dashboard`), no local: esta vista se desmonta
+   * al salir a cualquier otra y se vuelve a montar al volver, así que un
+   * `useState` acá perdía la selección en cada ida y vuelta. Se elige tanto
+   * desde el selector del navbar como desde la lista de acá abajo — las dos
+   * vías escriben al mismo lugar.
+   */
+  seleccionado: string | null;
+  onSeleccionar: (portfolioId: string | null) => void;
   onCrearCampana: (portfolioId: string) => void;
   onAgregarConjunto: (attachTo: AttachToCampana) => void;
   onAgregarAnuncio: (attachTo: AttachToConjunto) => void;
@@ -168,9 +179,8 @@ export function ClientesView({
   const [saving, setSaving] = useState<string | null>(null);
   const [nuevo, setNuevo] = useState("");
   const [creando, setCreando] = useState(false);
-  const [seleccionado, setSeleccionado] = useState<string | null>(null);
-  const [busqueda, setBusqueda] = useState("");
   const [verSinCliente, setVerSinCliente] = useState(false);
+  const [verFicha, setVerFicha] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -187,6 +197,14 @@ export function ClientesView({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
     void load();
   }, [load]);
+
+  useEffect(() => {
+    // Sin esto, abrir la ficha de un cliente y después cambiar a otro desde
+    // el navbar dejaba la ficha del nuevo cliente abierta de entrada — que es
+    // justo lo que se quitó: que aparezca sola en vez de pedirse.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    setVerFicha(false);
+  }, [seleccionado]);
 
   async function crear() {
     if (!nuevo.trim()) return;
@@ -229,11 +247,6 @@ export function ClientesView({
   }
 
   const portfolios = data?.portfolios ?? [];
-  const portfoliosFiltrados = busqueda.trim()
-    ? portfolios.filter((p) =>
-        p.name.toLowerCase().includes(busqueda.trim().toLowerCase()),
-      )
-    : portfolios;
   const seleccionadoObj = portfolios.find((p) => p.id === seleccionado) ?? null;
   const pendientes = portfolios.filter((p) => faltantesDe(p).lista.length > 0);
   const porRevisar = portfolios.filter((p) => p.needsReview);
@@ -247,22 +260,109 @@ export function ClientesView({
   return (
     <div className="mx-auto w-full max-w-[1700px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
           <Building2 className="size-3 text-[#4242FF]" />
           Cartera · clientes y sus anuncios
         </p>
-        <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+        <h2 className="neo-section-title">
           Clientes
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
-          Elige un cliente para ver sus campañas y crear nuevas. La página de
-          Facebook y los países son obligatorios para publicar en Meta.
+          Usa el selector de cliente de la barra superior para abrir uno y ver
+          sus campañas o crear nuevas. La página de Facebook y los países son
+          obligatorios para publicar en Meta.
         </p>
       </div>
 
       {error && (
-        <div className="mb-4 rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="mb-4 rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">
           {error}
+        </div>
+      )}
+
+      {/* Crear cliente y cuentas sin dueño: antes vivían dentro de la lista
+          de la izquierda; sin lista, se juntan acá arriba en una sola franja
+          — siguen siendo las mismas dos acciones, solo que ya no dependen de
+          un panel que ahora elige el selector del navbar. */}
+      {(data?.canManage || (data && data.unassigned.length > 0)) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {creando ? (
+            <div className="flex items-center gap-2">
+              <Input
+                autoFocus
+                value={nuevo}
+                onChange={(e) => setNuevo(e.target.value)}
+                placeholder="Nombre del cliente"
+                className="h-9 w-56 bg-[#292929]/60 text-xs"
+              />
+              <Button
+                size="sm"
+                onClick={() => void crear()}
+                disabled={saving === "nuevo" || !nuevo.trim()}
+                className="h-9 font-extrabold"
+              >
+                {saving === "nuevo" ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Plus />
+                )}
+                Crear
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCreando(false)}
+                className="h-9 text-[#F8FAD7]/50"
+              >
+                Cancelar
+              </Button>
+            </div>
+          ) : (
+            data?.canManage && (
+              <button
+                type="button"
+                onClick={() => setCreando(true)}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-3 py-1.5 text-xs font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/15"
+              >
+                <Plus className="size-3.5" />
+                Crear un cliente
+              </button>
+            )
+          )}
+
+          {data && data.unassigned.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setVerSinCliente(!verSinCliente)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-warn-deep/12 px-3 py-1.5 text-xs font-bold text-warn transition-colors hover:bg-warn-deep/20"
+              >
+                {data.unassigned.length} cuentas sin cliente
+                {verSinCliente ? (
+                  <ChevronUp className="size-3.5" />
+                ) : (
+                  <ChevronDown className="size-3.5" />
+                )}
+              </button>
+              {verSinCliente && (
+                <Surface className="absolute top-full left-0 z-10 mt-1 max-h-64 w-72 space-y-0.5 overflow-y-auto p-1.5">
+                  {data.unassigned.map((account) => (
+                    <div
+                      key={account.externalId}
+                      className="rounded-lg px-2 py-1.5"
+                    >
+                      <p className="truncate text-xs font-semibold text-[#F8FAD7]/70">
+                        {account.name}
+                      </p>
+                      <p className="metric-number mt-0.5 text-[0.6rem] text-[#F8FAD7]/40">
+                        {platformLabel(account.provider)} · {account.externalId}
+                      </p>
+                    </div>
+                  ))}
+                </Surface>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -285,202 +385,75 @@ export function ClientesView({
                 con página, país o correo pendiente.{" "}
               </>
             )}
-            Abre un cliente de la lista para revisar y completar lo que falte.
+            Ábrelo con el selector de cliente de arriba para revisar y
+            completar lo que falte.
           </p>
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-        {/* Lista de clientes, como el panel de portafolios de un Business Manager. */}
-        <Surface className="h-fit overflow-hidden p-2">
-          <div className="mb-1.5 flex items-center gap-2 px-1">
-            <Search className="size-3.5 shrink-0 text-[#4242FF]" />
-            <Input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar cliente"
-              className="h-8 bg-[#292929]/60 text-xs"
-            />
-          </div>
+      {seleccionado !== null ? (
+        <div className="mb-4 flex items-center justify-between gap-2">
+          {/* Volver a "todos" — elegir un cliente puntual ya es trabajo del
+              selector del navbar, no de un panel acá al lado. */}
           <button
             type="button"
-            onClick={() => setSeleccionado(null)}
-            className={cn(
-              "mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors",
-              seleccionado === null
-                ? "bg-[#4242FF]/12 text-[#F8FAD7]"
-                : "text-[#F8FAD7]/55 hover:bg-[#F8FAD7]/6 hover:text-[#F8FAD7]",
-            )}
+            onClick={() => onSeleccionar(null)}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4242FF] transition-colors hover:text-[#4242FF]/75"
           >
-            <span className="text-sm font-bold">Todos los clientes</span>
+            <ChevronLeft className="size-3.5" />
+            Todos los clientes
           </button>
-
-          <div className="max-h-[70vh] space-y-0.5 overflow-y-auto">
-            {portfoliosFiltrados.length === 0 && (
-              <p className="px-3 py-4 text-center text-xs text-[#F8FAD7]/40">
-                Sin resultados para &ldquo;{busqueda}&rdquo;
-              </p>
-            )}
-            {portfoliosFiltrados.map((portfolio) => {
-              const { porPlataforma, lista } = faltantesDe(portfolio);
-              return (
-                <button
-                  key={portfolio.id}
-                  type="button"
-                  onClick={() => setSeleccionado(portfolio.id)}
-                  className={cn(
-                    "flex w-full items-start justify-between gap-2 rounded-xl px-3 py-2.5 text-left transition-colors",
-                    seleccionado === portfolio.id
-                      ? "bg-[#4242FF]/12 text-[#F8FAD7]"
-                      : "text-[#F8FAD7]/55 hover:bg-[#F8FAD7]/6 hover:text-[#F8FAD7]",
-                  )}
-                >
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-bold">
-                        {portfolio.name}
-                      </span>
-                      {portfolio.needsReview && (
-                        <span className="size-1.5 shrink-0 rounded-full bg-[#4242FF]" />
-                      )}
-                    </span>
-                    <span className="mt-0.5 block truncate text-[0.65rem] text-[#F8FAD7]/40">
-                      {porPlataforma.length === 0
-                        ? "Sin cuentas"
-                        : porPlataforma
-                            .map(([p, n]) => `${platformLabel(p)} · ${n}`)
-                            .join(" · ")}
-                    </span>
-                  </span>
-                  {lista.length > 0 && (
-                    <span className="mt-0.5 shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[0.55rem] font-bold text-amber-300">
-                      {lista.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-2 border-t border-[#F8FAD7]/10 pt-2">
-            {creando ? (
-              <div className="flex flex-col gap-2 px-1">
-                <Input
-                  autoFocus
-                  value={nuevo}
-                  onChange={(e) => setNuevo(e.target.value)}
-                  placeholder="Nombre del cliente"
-                  className="h-8 bg-[#292929]/60 text-xs"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => void crear()}
-                    disabled={saving === "nuevo" || !nuevo.trim()}
-                    className="h-8 flex-1 font-extrabold"
-                  >
-                    {saving === "nuevo" ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <Plus />
-                    )}
-                    Crear
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setCreando(false)}
-                    className="h-8 text-[#F8FAD7]/50"
-                  >
-                    Cancelar
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              data?.canManage && (
-                <button
-                  type="button"
-                  onClick={() => setCreando(true)}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/8"
-                >
-                  <Plus className="size-3.5" />
-                  Crear un cliente
-                </button>
-              )
-            )}
-          </div>
-
-          {/*
-            Antes vivía como un recuadro suelto en el panel de detalle, sin
-            relación visible con nada — apareciendo y desapareciendo según el
-            cliente elegido, sin decir por qué estaba ahí. Acá, junto a la
-            lista de clientes, es evidente qué es: cuentas que Windsor
-            encontró pero que todavía no tienen dueño.
-          */}
-          {data && data.unassigned.length > 0 && (
-            <div className="mt-2 border-t border-[#F8FAD7]/10 pt-2">
-              <button
-                type="button"
-                onClick={() => setVerSinCliente(!verSinCliente)}
-                className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-bold text-amber-300/90 transition-colors hover:bg-amber-500/8"
-              >
-                <span>{data.unassigned.length} cuentas sin cliente</span>
-                {verSinCliente ? (
-                  <ChevronUp className="size-3.5" />
-                ) : (
-                  <ChevronDown className="size-3.5" />
-                )}
-              </button>
-              {verSinCliente && (
-                <ul className="mt-1 max-h-52 space-y-0.5 overflow-y-auto px-1">
-                  {data.unassigned.map((account) => (
-                    <li
-                      key={account.externalId}
-                      className="rounded-lg px-2 py-1.5"
-                    >
-                      <p className="truncate text-xs font-semibold text-[#F8FAD7]/70">
-                        {account.name}
-                      </p>
-                      <p className="metric-number mt-0.5 text-[0.6rem] text-[#F8FAD7]/40">
-                        {platformLabel(account.provider)} · {account.externalId}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </Surface>
-
-        {/* Detalle: la ficha del cliente elegido, o la vista general. */}
-        <div className="space-y-4">
+          {/* La ficha (página, países, correo, metas) ya no aparece sola al
+              elegir un cliente — antes se sentía como un recuadro que se
+              generaba solo cada vez, sin haberlo pedido. Ahora es un toggle:
+              se abre cuando de verdad hace falta revisar o completar algo. */}
           {seleccionadoObj && (
-            <Ficha
-              key={seleccionadoObj.id}
-              portfolio={seleccionadoObj}
-              editable={Boolean(data?.canManage)}
-              guardando={saving === seleccionadoObj.id}
-              onGuardar={(cambios) => void guardar(seleccionadoObj.id, cambios)}
-            />
+            <button
+              type="button"
+              onClick={() => setVerFicha(!verFicha)}
+              aria-expanded={verFicha}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-xs font-semibold text-[#F8FAD7]/65 transition-colors hover:text-[#F8FAD7]"
+            >
+              <Settings className="size-3.5" />
+              Ficha del cliente
+              {verFicha ? (
+                <ChevronUp className="size-3.5" />
+              ) : (
+                <ChevronDown className="size-3.5" />
+              )}
+            </button>
           )}
-
-          <Surface className="overflow-hidden p-3">
-            <AnunciosView
-              // Sin esto, cambiar de cliente en la lista de la izquierda no
-              // reinicia el filtro interno de la tabla: `useState` solo lee
-              // `portfolioIdFijo` en el primer montaje, así que el segundo
-              // cliente elegido seguía mostrando las campañas del primero.
-              key={seleccionadoObj?.id ?? "todos"}
-              performance={performance}
-              portfolios={anunciosPortfolios}
-              portfolioIdFijo={seleccionadoObj?.id}
-              onCrearCampana={onCrearCampana}
-              onAgregarConjunto={onAgregarConjunto}
-              onAgregarAnuncio={onAgregarAnuncio}
-              puedeAprobar={Boolean(data?.canApprove)}
-            />
-          </Surface>
         </div>
+      ) : null}
+
+      <div className="space-y-4">
+        {seleccionadoObj && verFicha && (
+          <Ficha
+            key={seleccionadoObj.id}
+            portfolio={seleccionadoObj}
+            editable={Boolean(data?.canManage)}
+            guardando={saving === seleccionadoObj.id}
+            onGuardar={(cambios) => void guardar(seleccionadoObj.id, cambios)}
+          />
+        )}
+
+        {/* AnunciosView ya arma sus propias tarjetas (filtros, tabla); una
+            tarjeta más envolviéndola solo agregaba un borde y una sombra
+            extra alrededor de otras dos. */}
+        <AnunciosView
+          // Sin esto, cambiar de cliente en el selector del navbar no
+          // reinicia el filtro interno de la tabla: `useState` solo lee
+          // `portfolioIdFijo` en el primer montaje, así que el segundo
+          // cliente elegido seguía mostrando las campañas del primero.
+          key={seleccionadoObj?.id ?? "todos"}
+          performance={performance}
+          portfolios={anunciosPortfolios}
+          portfolioIdFijo={seleccionadoObj?.id}
+          onCrearCampana={onCrearCampana}
+          onAgregarConjunto={onAgregarConjunto}
+          onAgregarAnuncio={onAgregarAnuncio}
+          puedeAprobar={Boolean(data?.canApprove)}
+        />
       </div>
     </div>
   );
@@ -558,7 +531,7 @@ function Ficha({
             ))
           )}
           {sinResolver > 0 && (
-            <span className="rounded-full border border-amber-500/25 bg-amber-500/[0.08] px-2.5 py-1 text-[0.62rem] font-bold text-amber-300">
+            <span className="rounded-full border border-warn-deep/25 bg-warn-deep/[0.08] px-2.5 py-1 text-[0.62rem] font-bold text-warn">
               {sinResolver} sin identificar
             </span>
           )}
@@ -587,7 +560,7 @@ function Ficha({
           {faltantes.map((falta) => (
             <span
               key={falta}
-              className="rounded-full border border-amber-500/25 bg-amber-500/[0.08] px-2 py-0.5 text-[0.6rem] font-bold text-amber-300"
+              className="rounded-full border border-warn-deep/25 bg-warn-deep/[0.08] px-2 py-0.5 text-[0.6rem] font-bold text-warn"
             >
               {falta}
             </span>

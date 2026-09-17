@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { notFound } from "next/navigation";
 
 import { devLoginEnabled } from "@/app/chatgpt-auth";
 
@@ -9,25 +8,28 @@ const ERRORES: Record<string, string> = {
   vacio: "Escribe tu correo para continuar.",
   invalido: "Ese correo no tiene un formato válido.",
   google_no_configurado:
-    "Falta configurar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en .dev.vars.",
+    "Falta configurar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET.",
   google_cancelado: "Cancelaste el inicio de sesión con Google.",
   google_estado_invalido:
     "La vuelta desde Google no se pudo verificar. Inténtalo otra vez.",
   google_token_rechazado: "Google rechazó la credencial. Revisa el secreto.",
   google_perfil_rechazado: "No pudimos leer tu perfil de Google.",
   google_sin_correo: "Esa cuenta de Google no expone un correo verificado.",
+  google_dominio_no_permitido:
+    "Esta app es solo para el equipo — entra con tu correo @mgcglobalgroup.com.",
   google_falla_red: "No pudimos hablar con Google. Revisa la conexión.",
 };
 
+/**
+ * Puerta de entrada siempre disponible, con Google como único camino real —
+ * el formulario de correo sin verificar de más abajo solo aparece con
+ * DEV_LOGIN_ENABLED, para desarrollo local.
+ */
 export default async function AccesoPage({
   searchParams,
 }: {
   searchParams: Promise<{ return_to?: string; error?: string; cerrada?: string }>;
 }) {
-  // Esta pantalla solo existe en desarrollo. En producción la sesión la
-  // entrega ChatGPT Sites y esta ruta no debe ser alcanzable.
-  if (!devLoginEnabled()) notFound();
-
   const params = await searchParams;
   const error = params.error ? ERRORES[params.error] : null;
   const returnTo = params.return_to ?? "/";
@@ -45,7 +47,7 @@ export default async function AccesoPage({
         <p className="font-micro mt-8 text-[0.65rem] text-[#4242FF]">
           ACCESO
         </p>
-        <h1 className="font-editorial mt-3 text-4xl leading-none tracking-[-0.04em]">
+        <h1 className="mt-3 text-4xl font-extrabold leading-none tracking-[-0.04em]">
           Inicia sesión
         </h1>
         <p className="mt-4 text-sm leading-6 text-[#F8FAD7]/62">
@@ -60,7 +62,7 @@ export default async function AccesoPage({
 
         {error && (
           <p
-            className="mt-5 rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm leading-6 text-red-300"
+            className="mt-5 rounded-xl border border-danger-deep/25 bg-danger-deep/8 px-4 py-3 text-sm leading-6 text-danger"
             role="alert"
           >
             {error}
@@ -87,36 +89,40 @@ export default async function AccesoPage({
           </p>
         )}
 
-        <div className="my-6 flex items-center gap-3 text-[0.62rem] text-[#F8FAD7]/32">
-          <span className="h-px flex-1 bg-[#F8FAD7]/10" />
-          O CON TU CORREO
-          <span className="h-px flex-1 bg-[#F8FAD7]/10" />
-        </div>
+        {devLoginEnabled() && (
+          <>
+            <div className="my-6 flex items-center gap-3 text-[0.62rem] text-[#F8FAD7]/32">
+              <span className="h-px flex-1 bg-[#F8FAD7]/10" />
+              O CON TU CORREO (SOLO DESARROLLO)
+              <span className="h-px flex-1 bg-[#F8FAD7]/10" />
+            </div>
 
-        <form action="/api/acceso" method="post" className="space-y-3">
-          <input type="hidden" name="return_to" value={returnTo} />
-          <label
-            htmlFor="email"
-            className="font-micro block text-[0.62rem] text-[#F8FAD7]/55"
-          >
-            CORREO
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder="tu@empresa.com"
-            className="h-11 w-full rounded-xl border border-[#F8FAD7]/12 bg-[#292929]/60 px-4 text-sm text-[#F8FAD7] outline-none placeholder:text-[#F8FAD7]/28 focus:border-[#4242FF]"
-          />
-          <button
-            type="submit"
-            className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#F8FAD7]/12 px-5 text-sm font-bold text-[#F8FAD7]/78 transition-colors hover:border-[#4242FF] hover:text-[#F8FAD7]"
-          >
-            Entrar
-          </button>
-        </form>
+            <form action="/api/acceso" method="post" className="space-y-3">
+              <input type="hidden" name="return_to" value={returnTo} />
+              <label
+                htmlFor="email"
+                className="font-micro block text-[0.62rem] text-[#F8FAD7]/55"
+              >
+                CORREO
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                placeholder="tu@empresa.com"
+                className="h-11 w-full rounded-xl border border-[#F8FAD7]/12 bg-[#292929]/60 px-4 text-sm text-[#F8FAD7] outline-none placeholder:text-[#F8FAD7]/28 focus:border-[#4242FF]"
+              />
+              <button
+                type="submit"
+                className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-[#F8FAD7]/12 px-5 text-sm font-bold text-[#F8FAD7]/78 transition-colors hover:border-[#4242FF] hover:text-[#F8FAD7]"
+              >
+                Entrar
+              </button>
+            </form>
+          </>
+        )}
       </section>
     </main>
   );

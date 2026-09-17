@@ -1088,9 +1088,17 @@ export type OrganicPost = {
   mediaUrl: string;
   caption: string | null;
   format: "reel" | "story" | "carousel" | "image" | "video";
+  /**
+   * Reacciones + comentarios + compartidos (o interacciones, en historias) —
+   * la misma cifra que ya se ve en la plataforma. `null` cuando Windsor no la
+   * trae para ese tipo de contenido. Existe para que, al elegir con qué
+   * publicación armar un anuncio, se note a simple vista cuál ya viene
+   * funcionando orgánicamente — no solo la fecha o la miniatura.
+   */
+  engagement: number | null;
 };
 
-const ORGANIC_CACHE_KEY = "windsor_organico_v1";
+const ORGANIC_CACHE_KEY = "windsor_organico_v2";
 /**
  * Contenido nuevo no exige la frescura de las métricas de gasto: dos horas de
  * caché evitan golpear Windsor en cada apertura del selector sin hacer
@@ -1164,6 +1172,10 @@ export async function fetchFacebookPosts(
           "permalink_url",
           "full_picture",
           "type",
+          // Verificado contra el MCP de Windsor (get_fields, tabla "Post",
+          // igual que post_id/permalink_url): reacciones + comentarios +
+          // compartidos, la misma cifra que muestra Facebook.
+          "post_engagements",
         ],
         rangeStart,
         rangeEnd,
@@ -1186,6 +1198,7 @@ export async function fetchFacebookPosts(
             mediaUrl,
             caption: text(row.message),
             format: formatoFacebook(text(row.type), permalink),
+            engagement: optionalNumber(row.post_engagements),
           };
         })
         .filter((post): post is OrganicPost => post !== null)
@@ -1227,6 +1240,15 @@ export async function fetchInstagramMedia(
           "story_permalink",
           "story_thumbnail_url",
           "story_timestamp",
+          // Verificado contra el MCP de Windsor (get_fields): likes +
+          // comentarios + guardados + compartidos de la publicación.
+          // `carousel_album_engagement` es la misma cifra pero para el
+          // carrusel completo — `media_engagement` no siempre la trae.
+          "media_engagement",
+          "carousel_album_engagement",
+          // Para historias no existe un equivalente a "engagement": esto es
+          // lo más cercano (reacciones + respuestas + salidas navegando).
+          "story_interactions",
         ],
         rangeStart,
         rangeEnd,
@@ -1249,6 +1271,7 @@ export async function fetchInstagramMedia(
               mediaUrl,
               caption: null,
               format: "story",
+              engagement: optionalNumber(row.story_interactions),
             };
           }
 
@@ -1267,6 +1290,9 @@ export async function fetchInstagramMedia(
             format: formatoInstagram(
               text(row.media_type),
               text(row.media_product_type),
+            ),
+            engagement: optionalNumber(
+              first(row, "media_engagement", "carousel_album_engagement"),
             ),
           };
         })
@@ -1375,5 +1401,26 @@ export function idDeResultado(raw: unknown, claves: string[]): string | null {
     }
     return null;
   };
-  return visitar(raw, 0);
+  const porCampo = visitar(raw, 0);
+  if (porCampo) return porCampo;
+  // Verificado con una ejecución real: a diferencia de Meta, `create_campaign`
+  // de Google Ads no siempre trae el id en un campo estructurado — a veces
+  // viene solo dentro de un texto libre, p.ej. `"result": "Search campaign
+  // '...' (id 24257873743) created successfully..."`. Se busca como último
+  // recurso, nunca antes que un campo estructurado real.
+  return idDentroDeTexto(raw, 0);
+}
+
+function idDentroDeTexto(valor: unknown, profundidad: number): string | null {
+  if (profundidad > 4 || valor === null || valor === undefined) return null;
+  if (typeof valor === "string") {
+    const coincidencia = valor.match(/\(id[:\s]+(\d+)\)/i);
+    return coincidencia ? coincidencia[1] : null;
+  }
+  if (typeof valor !== "object") return null;
+  for (const anidado of Object.values(valor as Record<string, unknown>)) {
+    const encontrado = idDentroDeTexto(anidado, profundidad + 1);
+    if (encontrado) return encontrado;
+  }
+  return null;
 }

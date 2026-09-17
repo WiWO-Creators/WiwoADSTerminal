@@ -23,18 +23,18 @@ const DEV_SIGN_IN_PATH = "/acceso";
 const DEV_SIGN_OUT_PATH = "/api/acceso/salir";
 
 /**
- * Sesión local de desarrollo.
+ * Sesión local de desarrollo — y, con DEV_LOGIN_ENABLED apagado, el único
+ * respaldo del formulario de correo sin verificar en `/api/acceso`.
  *
- * En producción la identidad la inyecta el dispatch de ChatGPT Sites por
- * cabeceras. Local eso no existe, así que se habilita un login propio con
- * DEV_LOGIN_ENABLED en .dev.vars. Fuera de ese caso el interruptor está
- * apagado y nada de esto se activa: la cabecera sigue mandando siempre.
+ * En producción la identidad normalmente la inyecta el dispatch de ChatGPT
+ * Sites por cabeceras. `DEV_LOGIN_ENABLED` solo abre esa puerta insegura de
+ * "escribe cualquier correo" para desarrollo local.
  */
 export function devLoginEnabled(): boolean {
   return env.DEV_LOGIN_ENABLED === "true";
 }
 
-async function getDevSessionUser(): Promise<ChatGPTUser | null> {
+async function getCookieSessionUser(): Promise<ChatGPTUser | null> {
   const store = await cookies();
   const email = store.get(DEV_SESSION_COOKIE)?.value?.trim().toLowerCase();
   if (!email) return null;
@@ -45,7 +45,12 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!email) {
-    return devLoginEnabled() ? await getDevSessionUser() : null;
+    // Sin cabecera de ChatGPT Sites: puede haber una sesión de esta cookie
+    // igual — no solo por el formulario de desarrollo (ese sigue exigiendo
+    // DEV_LOGIN_ENABLED antes de poder escribirla), sino por haber entrado
+    // con Google en `/acceso`, que sí funciona siempre y verifica el
+    // dominio del correo antes de dejar escribir la cookie.
+    return await getCookieSessionUser();
   }
   const id =
     requestHeaders.get(USER_ID_HEADER) ?? `email:${email.trim().toLowerCase()}`;
@@ -74,15 +79,43 @@ export async function requireChatGPTUser(
   redirect(chatGPTSignInPath(returnTo));
 }
 
+/**
+ * A dónde mandar a alguien sin sesión.
+ *
+ * `SIGN_IN_PATH` (`/signin-with-chatgpt`) no es una ruta de esta app: solo
+ * existe si el dispatch de ChatGPT Sites la intercepta por fuera, antes de
+ * que la petición llegue acá. Pero si `getChatGPTUser` ya dijo que no hay
+ * sesión, es porque esa cabecera nunca llegó — quien entra así nunca pasa
+ * por ese dispatch, así que mandarlo ahí sería un enlace muerto. `/acceso`
+ * (Google, con el dominio de la empresa) es la puerta que de verdad funciona
+ * para ese caso, esté o no `DEV_LOGIN_ENABLED` prendido.
+ */
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  const base = devLoginEnabled() ? DEV_SIGN_IN_PATH : SIGN_IN_PATH;
-  return `${base}?return_to=${encodeURIComponent(safeReturnTo)}`;
+  return `${DEV_SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
-export function chatGPTSignOutPath(returnTo = "/"): string {
+/**
+ * A dónde mandar a alguien que cierra sesión — a diferencia de
+ * `chatGPTSignInPath`, esto sí depende de cómo entró *esta* persona, no de
+ * si hay una sesión o no: alguien con la cabecera real de ChatGPT Sites
+ * necesita el `/signout-with-chatgpt` externo (lo único que de verdad borra
+ * esa sesión); alguien que entró con Google solo necesita borrar la cookie
+ * propia en `/api/acceso/salir`. Mandar al primero al segundo no cerraría
+ * nada — la cabecera volvería a llegar en la siguiente carga.
+ *
+ * `DEV_LOGIN_ENABLED` manda primero: en desarrollo local, la cabecera puede
+ * venir simulada (el script que abre el navegador local la inyecta para
+ * probar como si fuera ChatGPT Sites), pero `/signout-with-chatgpt` no
+ * existe de verdad acá —lo intercepta el dispatch real, que en local no
+ * corre— así que mandar ahí daba 404. Con el interruptor de desarrollo
+ * prendido, siempre se usa la salida propia, sin mirar la cabecera.
+ */
+export async function chatGPTSignOutPath(returnTo = "/"): Promise<string> {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  const base = devLoginEnabled() ? DEV_SIGN_OUT_PATH : SIGN_OUT_PATH;
+  const conCabeceraReal =
+    !devLoginEnabled() && Boolean((await headers()).get(USER_EMAIL_HEADER));
+  const base = conCabeceraReal ? SIGN_OUT_PATH : DEV_SIGN_OUT_PATH;
   return `${base}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 

@@ -1,10 +1,7 @@
 import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";
 
-import {
-  DEV_SESSION_COOKIE_NAME,
-  devLoginEnabled,
-} from "@/app/chatgpt-auth";
+import { DEV_SESSION_COOKIE_NAME } from "@/app/chatgpt-auth";
 import {
   backToLogin,
   clearCookie,
@@ -19,9 +16,15 @@ export const dynamic = "force-dynamic";
 
 const SESSION_SECONDS = 60 * 60 * 12;
 
-export async function GET(request: Request) {
-  if (!devLoginEnabled()) return new Response("No disponible", { status: 404 });
+/**
+ * Dominio de correo de la empresa. Probar identidad con Google no es lo
+ * mismo que tener permiso: esto es solo el primer filtro (¿esta persona
+ * podría ser del equipo?), antes de que `resolveActor` decida si de verdad
+ * tiene un rol vigente.
+ */
+const DOMINIO_PERMITIDO = "@mgcglobalgroup.com";
 
+export async function GET(request: Request) {
   const url = new URL(request.url);
   const store = await cookies();
   const returnTo = safePath(store.get(GOOGLE_RETURN_COOKIE)?.value ?? null);
@@ -73,12 +76,15 @@ export async function GET(request: Request) {
       return fail("google_sin_correo");
     }
     email = profile.email.trim().toLowerCase();
+    if (!email.endsWith(DOMINIO_PERMITIDO)) {
+      return fail("google_dominio_no_permitido");
+    }
   } catch {
     return fail("google_falla_red");
   }
 
-  // Quién puede entrar lo sigue decidiendo OAUTH_ADMIN_EMAILS: iniciar sesión
-  // con Google prueba identidad, no permiso.
+  // Quién puede entrar lo sigue decidiendo OAUTH_ADMIN_EMAILS/el equipo: el
+  // dominio de arriba y Google prueban identidad, no permiso.
   return withCleanup(
     new Response(null, {
       status: 302,

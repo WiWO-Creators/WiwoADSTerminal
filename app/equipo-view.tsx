@@ -128,11 +128,11 @@ export function EquipoView({
   return (
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
           <ShieldCheck className="size-3 text-[#4242FF]" />
           Acceso · roles y clientes
         </p>
-        <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+        <h2 className="neo-section-title">
           Quién entra y qué puede hacer
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
@@ -195,7 +195,7 @@ export function EquipoView({
       </Surface>
 
       {error ? (
-        <div className="rounded-[16px] border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">
           {error}
         </div>
       ) : loading ? (
@@ -294,7 +294,7 @@ export function EquipoView({
                             "border-[#F8FAD7]/12 bg-transparent",
                             member.isActive
                               ? "text-[#F8FAD7]/70"
-                              : "text-amber-300",
+                              : "text-warn",
                           )}
                         >
                           {member.isActive ? "Desactivar" : "Reactivar"}

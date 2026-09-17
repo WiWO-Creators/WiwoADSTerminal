@@ -12,7 +12,6 @@ import {
   FileChartColumnIncreasing,
   Gauge,
   HeartPulse,
-  Inbox,
   LockKeyhole,
   RefreshCw,
   Search,
@@ -58,15 +57,13 @@ import {
 } from "./ui";
 
 export function ControlRoomView({
-  pending,
   performance,
-  onOpenQueue,
+  onOpenClientes,
   onOpenHealth,
   onOpenIntegrations,
 }: {
-  pending: number;
   performance: PerformanceSnapshot;
-  onOpenQueue: () => void;
+  onOpenClientes: () => void;
   onOpenHealth: (client: string) => void;
   onOpenIntegrations: () => void;
 }) {
@@ -77,24 +74,24 @@ export function ControlRoomView({
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <span
               className={cn(
                 "size-2 rounded-full",
-                isCurrent ? "bg-emerald-500" : "bg-amber-500",
+                isCurrent ? "bg-ok-deep" : "bg-warn-deep",
               )}
             />
             {hasLiveData
               ? `${isCurrent ? "Datos reales" : "Datos reales · actualización pendiente"} · ${monthLabel}`
               : "Configuración · todavía sin métricas"}
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
-            Lo que necesita atención, primero
+          <h2 className="neo-section-title">
+            Lo que necesita <span className="neo-gradient-text">atención</span>, primero
           </h2>
         </div>
         {hasLiveData ? (
-          <Button onClick={onOpenQueue} className="h-10 font-extrabold">
-            Abrir cola
+          <Button onClick={onOpenClientes} className="h-10 font-extrabold">
+            Ver clientes
             <ArrowRight />
           </Button>
         ) : (
@@ -105,7 +102,7 @@ export function ControlRoomView({
         )}
       </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard
           label={`Inversión · ${etiquetaPeriodo(performance)}`}
           value={formatCurrencyTotals(performance)}
@@ -115,13 +112,6 @@ export function ControlRoomView({
               : "Se calculará al sincronizar una cuenta"
           }
           icon={CircleDollarSign}
-        />
-        <StatCard
-          label="Decisiones abiertas"
-          value={String(pending)}
-          note="Solo lectura · no ejecuta cambios"
-          icon={Inbox}
-          tone="red"
         />
         <StatCard
           label="Cuentas con datos"
@@ -338,7 +328,6 @@ export function ControlRoomView({
 
 export function HealthView({
   client,
-  onClient,
   portfolios,
   onOpenIntegrations,
   checks,
@@ -348,9 +337,12 @@ export function HealthView({
   critical,
   warnings,
 }: {
-  /** Id de cliente, no de cuenta: la salud se mira por cliente. */
-  client: string;
-  onClient: (value: string) => void;
+  /**
+   * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
+   * selector del navbar — no tiene su propio selector acá adentro, para no
+   * repetir la misma elección en dos lugares que podían desincronizarse.
+   */
+  client: string | null;
   portfolios: PortfolioSummary[];
   onOpenIntegrations: () => void;
   checks: HealthCheck[];
@@ -369,39 +361,23 @@ export function HealthView({
     return (
       <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
         <div className="mb-5">
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <HeartPulse className="size-3 text-[#4242FF]" />
             Salud por cliente
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             Elige un cliente
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
             Por cada una de sus cuentas se revisan dos cosas: si la conexión de
-            lectura sigue autorizada y si los datos llegaron al día. No mide
-            qué tan bien rinde una campaña — eso está en Inversión.
+            lectura sigue autorizada y si los datos llegaron al día.
           </p>
         </div>
-        <Surface className="flex flex-col items-center gap-4 p-10 text-center">
-          <Select
-            value={client || undefined}
-            onValueChange={onClient}
-            disabled={portfolios.length === 0}
-          >
-            <SelectTrigger
-              aria-label="Seleccionar cliente para revisar su salud"
-              className="w-full bg-[#323330]/65 sm:w-72"
-            >
-              <SelectValue placeholder="Selecciona un cliente" />
-            </SelectTrigger>
-            <SelectContent>
-              {portfolios.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <Surface className="flex flex-col items-center gap-2 p-10 text-center">
+          <p className="text-sm leading-6 text-[#F8FAD7]/60">
+            Usa el selector de cliente de la barra superior para elegir a
+            quién revisar.
+          </p>
           {portfolios.length === 0 && (
             <p className="max-w-sm text-sm leading-6 text-[#F8FAD7]/50">
               Todavía no hay clientes con cuentas conectadas.
@@ -416,18 +392,18 @@ export function HealthView({
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <span
               className={cn(
                 "size-2 rounded-full",
                 checks.length > 0 && critical === 0 && warnings === 0
-                  ? "bg-emerald-500"
-                  : "bg-amber-500",
+                  ? "bg-ok-deep"
+                  : "bg-warn-deep",
               )}
             />
             Salud real de conexiones y frescura
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             {portfolio.name}
           </h2>
           <p className="mt-2 max-w-xl text-xs leading-5 text-[#F8FAD7]/50">
@@ -435,21 +411,6 @@ export function HealthView({
             al día? Esto no mide el rendimiento de las campañas.
           </p>
         </div>
-        <Select value={client} onValueChange={onClient}>
-          <SelectTrigger
-            aria-label="Seleccionar cliente para revisar su salud"
-            className="h-10 w-full bg-[#323330]/65 md:w-56"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {portfolios.map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                {item.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/*
@@ -468,14 +429,14 @@ export function HealthView({
       </div>
 
       {critical > 0 && (
-        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-red-500/25 bg-red-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-danger-deep/25 bg-danger-deep/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <LockKeyhole className="mt-0.5 size-5 shrink-0 text-red-600" />
+            <LockKeyhole className="mt-0.5 size-5 shrink-0 text-danger-deep" />
             <div>
-              <p className="text-sm font-bold text-red-200">
+              <p className="text-sm font-bold text-danger">
                 La fuente requiere atención
               </p>
-              <p className="mt-1 text-sm leading-6 text-red-300">
+              <p className="mt-1 text-sm leading-6 text-danger">
                 Los últimos datos válidos se conservan como históricos, pero no
                 se consideran actuales. Las automatizaciones siguen deshabilitadas.
               </p>
@@ -607,7 +568,7 @@ export function HealthView({
                   className={cn(
                     "text-sm",
                     check.state === "critical"
-                      ? "font-semibold text-red-300"
+                      ? "font-semibold text-danger"
                       : "text-[#F8FAD7]/66",
                   )}
                 >
@@ -659,11 +620,11 @@ export function PacingView({
     return (
       <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
         <div className="mb-5">
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <CircleDollarSign className="size-3 text-[#4242FF]" />
             Inversión por cliente
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             Elige un cliente
           </h2>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
@@ -710,18 +671,18 @@ export function PacingView({
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <span
               className={cn(
                 "size-2 rounded-full",
-                isCurrent ? "bg-emerald-500" : "bg-amber-500",
+                isCurrent ? "bg-ok-deep" : "bg-warn-deep",
               )}
             />
             {hasLiveData
               ? `${isCurrent ? "Inversión real" : "Inversión real · actualización pendiente"} · ${etiquetaPeriodo(performance)}`
               : "Sin datos de inversión"}
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             {portfolio.name}
           </h2>
         </div>
@@ -944,11 +905,11 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
             <span className="size-2 rounded-full bg-[#4242FF]" />
             Bitácora persistente · acciones registradas
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             El sistema recuerda
           </h2>
         </div>
@@ -1049,7 +1010,7 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
                       event.result.includes("Ejecut")
-                        ? "bg-emerald-500/10 text-emerald-300"
+                        ? "bg-ok-deep/10 text-ok"
                         : "bg-[#F8FAD7]/[0.07] text-[#F8FAD7]/66",
                     )}
                   >
@@ -1429,7 +1390,7 @@ function CampaignTable({ campaigns }: { campaigns: CampaignSummary[] }) {
                         className={cn(
                           "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
                           item.objetivoDeducido
-                            ? "bg-amber-500/12 text-amber-300"
+                            ? "bg-warn-deep/12 text-warn"
                             : "bg-[#4242FF]/12 text-[#4242FF]",
                         )}
                         title={
@@ -1455,7 +1416,7 @@ function CampaignTable({ campaigns }: { campaigns: CampaignSummary[] }) {
                       className={cn(
                         "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
                         isActive(item.status)
-                          ? "bg-emerald-500/12 text-emerald-300"
+                          ? "bg-ok-deep/12 text-ok"
                           : "bg-[#F8FAD7]/8 text-[#F8FAD7]/50",
                       )}
                     >
@@ -1526,7 +1487,7 @@ function ObjectiveBreakdown({
           Cada familia con su propia métrica · clasificadas por la sigla del
           nombre
           {sinSigla > 0 && (
-            <span className="text-amber-300">
+            <span className="text-warn">
               {" "}
               · {sinSigla}{" "}
               {sinSigla === 1 ? "campaña sin sigla queda" : "campañas sin sigla quedan"}{" "}

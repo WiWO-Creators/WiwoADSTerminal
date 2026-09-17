@@ -49,6 +49,7 @@ const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   set_campaign_geo_targeting: { campo: "campaign_id", de: "campaign" },
   create_adset: { campo: "campaign_id", de: "campaign" },
   create_ad: { campo: "adset_id", de: "adset" },
+  boost_post: { campo: "adset_id", de: "adset" },
 };
 
 /** Claves donde cada plataforma deja el id de lo que acaba de crear. */

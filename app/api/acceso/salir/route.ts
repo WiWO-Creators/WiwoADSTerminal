@@ -1,13 +1,8 @@
-import {
-  DEV_SESSION_COOKIE_NAME,
-  devLoginEnabled,
-} from "@/app/chatgpt-auth";
+import { DEV_SESSION_COOKIE_NAME } from "@/app/chatgpt-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (!devLoginEnabled()) return new Response("No disponible", { status: 404 });
-
   const returnTo = new URL(request.url).searchParams.get("return_to") ?? "/";
   const target =
     returnTo.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";

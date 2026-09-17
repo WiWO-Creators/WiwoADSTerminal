@@ -93,11 +93,11 @@ export function EjecucionesView() {
   return (
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-[0.62rem] text-[#F8FAD7]/60 shadow-sm backdrop-blur-md">
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
           <History className="size-3 text-[#4242FF]" />
           Historial de publicaciones
         </p>
-        <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F8FAD7] md:text-[2.8rem]">
+        <h2 className="neo-section-title">
           Lo que se creó de verdad
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
@@ -113,7 +113,7 @@ export function EjecucionesView() {
           Cargando bitácora…
         </Surface>
       ) : error ? (
-        <Surface className="border-red-500/25 bg-red-500/[0.06] p-5 text-sm text-red-300">
+        <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-5 text-sm text-danger">
           {error}
         </Surface>
       ) : ejecuciones.length === 0 ? (
@@ -201,7 +201,7 @@ function FilaEjecucion({
         {item.ok ? (
           <Check className="size-4 shrink-0 text-[#3BFF00]" />
         ) : (
-          <AlertCircle className="size-4 shrink-0 text-red-400" />
+          <AlertCircle className="size-4 shrink-0 text-danger" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -239,7 +239,7 @@ function FilaEjecucion({
                 {step.ok ? (
                   <Check className="size-3.5 shrink-0 text-[#3BFF00]" />
                 ) : (
-                  <AlertCircle className="size-3.5 shrink-0 text-red-400" />
+                  <AlertCircle className="size-3.5 shrink-0 text-danger" />
                 )}
                 <span className="font-micro rounded-full border border-[#F8FAD7]/12 px-2 py-0.5 text-[0.55rem] text-[#F8FAD7]/50">
                   {platformLabel(step.platform).toUpperCase()}
@@ -249,7 +249,7 @@ function FilaEjecucion({
                 </span>
               </div>
               {step.error && (
-                <p className="mt-1.5 text-xs leading-5 text-red-300">
+                <p className="mt-1.5 text-xs leading-5 text-danger">
                   {step.error}
                 </p>
               )}
