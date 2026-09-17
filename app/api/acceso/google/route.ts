@@ -1,10 +1,14 @@
 import { env } from "cloudflare:workers";
 
+import { respuestaCierrePopup } from "@/lib/acceso-popup";
+
 export const dynamic = "force-dynamic";
 
 export const GOOGLE_STATE_COOKIE = "wiwo-acceso-state";
 export const GOOGLE_VERIFIER_COOKIE = "wiwo-acceso-verifier";
 export const GOOGLE_RETURN_COOKIE = "wiwo-acceso-return";
+/** Marca que el flujo salió de una ventana emergente, para saber cómo volver. */
+export const GOOGLE_POPUP_COOKIE = "wiwo-acceso-popup";
 
 export function googleLoginConfigured(): boolean {
   return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
@@ -19,9 +23,14 @@ export function googleLoginConfigured(): boolean {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const returnTo = safePath(url.searchParams.get("return_to"));
+  const enPopup = url.searchParams.get("modo") === "popup";
 
   if (!googleLoginConfigured()) {
-    return backToLogin(request, "google_no_configurado", returnTo);
+    // En una emergente no sirve pintar el login otra vez: hay que devolverle
+    // el error a la ventana de atrás y cerrarse.
+    return enPopup
+      ? respuestaCierrePopup({ ok: false, error: "google_no_configurado" })
+      : backToLogin(request, "google_no_configurado", returnTo);
   }
 
   const state = randomToken(32);
@@ -46,6 +55,7 @@ export async function GET(request: Request) {
   headers.append("set-cookie", shortCookie(GOOGLE_STATE_COOKIE, state));
   headers.append("set-cookie", shortCookie(GOOGLE_VERIFIER_COOKIE, verifier));
   headers.append("set-cookie", shortCookie(GOOGLE_RETURN_COOKIE, returnTo));
+  if (enPopup) headers.append("set-cookie", shortCookie(GOOGLE_POPUP_COOKIE, "1"));
   return new Response(null, { status: 302, headers });
 }
 

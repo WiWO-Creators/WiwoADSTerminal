@@ -2,9 +2,11 @@ import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";
 
 import { DEV_SESSION_COOKIE_NAME } from "@/app/chatgpt-auth";
+import { respuestaCierrePopup } from "@/lib/acceso-popup";
 import {
   backToLogin,
   clearCookie,
+  GOOGLE_POPUP_COOKIE,
   GOOGLE_RETURN_COOKIE,
   GOOGLE_STATE_COOKIE,
   GOOGLE_VERIFIER_COOKIE,
@@ -30,8 +32,16 @@ export async function GET(request: Request) {
   const returnTo = safePath(store.get(GOOGLE_RETURN_COOKIE)?.value ?? null);
   const expectedState = store.get(GOOGLE_STATE_COOKIE)?.value;
   const verifier = store.get(GOOGLE_VERIFIER_COOKIE)?.value;
+  // La cookie la puso /api/acceso/google al arrancar: dice cómo entregar el
+  // resultado, no si el acceso es válido.
+  const enPopup = store.get(GOOGLE_POPUP_COOKIE)?.value === "1";
 
-  const fail = (reason: string) => withCleanup(backToLogin(request, reason, returnTo));
+  const fail = (reason: string) =>
+    withCleanup(
+      enPopup
+        ? respuestaCierrePopup({ ok: false, error: reason })
+        : backToLogin(request, reason, returnTo),
+    );
 
   if (url.searchParams.get("error")) return fail("google_cancelado");
   if (!googleLoginConfigured()) return fail("google_no_configurado");
@@ -86,13 +96,15 @@ export async function GET(request: Request) {
   // Quién puede entrar lo sigue decidiendo OAUTH_ADMIN_EMAILS/el equipo: el
   // dominio de arriba y Google prueban identidad, no permiso.
   return withCleanup(
-    new Response(null, {
-      status: 302,
-      headers: {
-        location: new URL(returnTo, request.url).toString(),
-        "cache-control": "no-store",
-      },
-    }),
+    enPopup
+      ? respuestaCierrePopup({ ok: true, destino: returnTo })
+      : new Response(null, {
+          status: 302,
+          headers: {
+            location: new URL(returnTo, request.url).toString(),
+            "cache-control": "no-store",
+          },
+        }),
     `${DEV_SESSION_COOKIE_NAME}=${encodeURIComponent(email)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_SECONDS}`,
   );
 }
@@ -103,5 +115,6 @@ function withCleanup(response: Response, sessionCookie?: string): Response {
   headers.append("set-cookie", clearCookie(GOOGLE_STATE_COOKIE));
   headers.append("set-cookie", clearCookie(GOOGLE_VERIFIER_COOKIE));
   headers.append("set-cookie", clearCookie(GOOGLE_RETURN_COOKIE));
+  headers.append("set-cookie", clearCookie(GOOGLE_POPUP_COOKIE));
   return new Response(response.body, { status: response.status, headers });
 }
