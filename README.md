@@ -1,93 +1,164 @@
-# vinext-starter
+# WiWO.ADS
 
-A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
+Sistema operativo de medios pagados de MGC/WiWO: unifica Google Ads y Meta
+Ads (TikTok y LinkedIn ya están en el registro de plataformas, pero
+desactivados) en un solo tablero. Permite crear y gestionar campañas reales
+desde una sola interfaz, y evalúa reglas de optimización que dejan
+recomendaciones para que una persona las apruebe — nunca ejecuta un cambio de
+presupuesto o una pausa por sí solo.
 
-## Prerequisites
+> Si vienes de la plantilla original de este repo (vinext-starter): este
+> README la reemplaza. Lo que describía la plantilla —scripts, bindings de
+> Cloudflare, headers de auth— sigue siendo cierto por debajo, pero acá se
+> explica en términos del producto, no del framework.
 
-- Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+## Empezar
 
-## Sites Lifecycle
-
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
-
-This starter does not use `wrangler.jsonc`.
-
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
-
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
-
-## Included Shape
-
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from `oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive `oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty `name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by `oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm run install:ci   # instala dependencias (usa el lockfile, no reintenta)
+npm run dev          # levanta vite en http://localhost:5173
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+Node `>=22.13.0`. En Windows, usa Git Bash o WSL para los scripts en `scripts/`
+(están escritos para Linux).
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs optional or required ChatGPT sign-in:
+### Variables de entorno
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send anonymous visitors through Sign in with ChatGPT.
-- In a Server Component, start sign-in with `<a href={chatGPTSignInPath(returnTo)} target="_top">`. The auth helper module is server-only; do not import it into a Client Component.
-- Do not use `fetch`, XHR, a client-side router, or a framework link that can prefetch the sign-in route. SIWC must start as a top-level navigation.
-- Never request the AuthAPI authorization endpoint directly. The dispatch-owned `/signin-with-chatgpt` route must start the SIWC flow.
-- Use `chatGPTSignOutPath(returnTo)` for browser sign-out links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because they depend on per-request identity headers.
+Van en `.dev.vars` en la raíz del repo (nunca se sube a git). La lista
+completa de nombres —sin valores— está en
+[`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md#5-variables-de-entorno).
+Pide los valores reales a alguien del equipo que ya tenga acceso.
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the OAuth cookies, and identity header injection. Do not implement app routes for those reserved paths. Routes that do not import and call the helper remain anonymous-compatible.
+### Iniciar sesión en local
 
-SIWC establishes identity only; it does not prove workspace membership. Use the Sites hosting platform's access policy controls for workspace-wide restrictions, or enforce explicit server-side membership or allowlist checks.
+En producción, la identidad la inyecta el hosting por la cabecera
+`oai-authenticated-user-email` (ChatGPT Sites) — eso no existe corriendo
+`npm run dev` a pelo. Dos formas de entrar en local:
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write actions tied to the current ChatGPT user. Leave public content anonymous.
+- **Simulando esa cabecera** (recomendado, se comporta como producción):
+  ```bash
+  pip install playwright && playwright install chromium
+  python scripts/open-in-chrome.py        # abre Chrome como techlab@mgcglobalgroup.com
+  ```
+- **Con Google** (`/acceso`): funciona siempre, pero solo entran correos
+  `@mgcglobalgroup.com`.
+- Si `DEV_LOGIN_ENABLED=true` en `.dev.vars`, también hay un formulario de
+  "escribe cualquier correo" en `/acceso` — es un backdoor de desarrollo, no
+  algo que deba estar prendido fuera de tu máquina.
 
-## Diagnostic Commands
+Estar autenticado no basta: además hay que existir en la tabla `users` con un
+rol asignado (ver [Roles](#roles-y-permisos)). Sin eso, la app muestra "no
+estás en el equipo" aunque el login haya funcionado.
 
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build and verify the rendered development-preview metadata
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+## Qué hay en la app
 
-Use build commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
+La navegación tiene dos grupos, en el sidebar:
 
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
+**Operación** (trabajo de campaña, día a día):
+| Sección | Qué hace |
+|---|---|
+| **Clientes** | Cartera de clientes, cuentas conectadas por cliente, tabla de campañas/conjuntos/anuncios con pausar/activar y gestión (ver abajo) |
+| **Constructor** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa, vista previa por plataforma. Todo nace **pausado** |
+| **Sala de control** | Resumen ejecutivo de la cartera completa |
+| **Salud de medición** | Diagnóstico de calidad de datos por cliente (píxeles, conversiones, cuentas sin sincronizar) |
+| **Audiencias** | Customer Match de Google Ads: crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios. Meta no tiene equivalente todavía — ver [Límites conocidos](#límites-conocidos) |
 
-## Learn More
+**Gestión** (administración de cuenta, no campaña):
+| Sección | Qué hace |
+|---|---|
+| **Publicaciones** | Bitácora de cada intento real de publicación (éxito o error), con el detalle completo de cada paso |
+| **Cuentas** | Conexión de cuentas publicitarias por cliente |
+| **Equipo** | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
+| **Ajustes** | Preferencias personales: vista inicial, rango de fechas por defecto, tema |
 
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+El selector de cliente vive **solo en el navbar superior** — cambiar ahí
+cambia el cliente activo en toda la app (Clientes, Salud de medición,
+Constructor). Ninguna vista debería tener su propio selector aparte; si ves
+uno, es un bug.
+
+## Gestionar campañas ya publicadas
+
+Desde **Clientes → tabla de campañas**, el ícono de ajustes junto a
+pausar/activar abre un panel por campaña o conjunto:
+
+- **Las dos plataformas**: presupuesto, nombre.
+- **Solo Google** (Windsor no expone estas acciones para Meta): estrategia
+  de puja (CPC manual / CPA objetivo / ROAS objetivo / maximizar
+  conversiones-valor-clics / gasto objetivo), idiomas, horario de entrega
+  (una ventana diaria por día marcado), palabras clave negativas,
+  extensiones de anuncio (sitelinks, callouts, fragmentos estructurados,
+  llamada).
+
+## Roles y permisos
+
+Definidos en [`lib/permisos.ts`](lib/permisos.ts). Dos ejes separados: el
+**rol** define qué se puede hacer, los **clientes asignados** definen sobre
+qué (vacío para admin/lead: ven todo).
+
+| Rol | Puede |
+|---|---|
+| `admin` | Todo, incluida la administración del equipo |
+| `lead` | Ve todos los clientes, aprueba cambios (publicar, pausar, gestionar) |
+| `buyer` | Trabaja los clientes asignados, propone cambios |
+| `analyst` | Solo lectura sobre los clientes asignados |
+| `client` | Solo ve el rendimiento de su propio portafolio |
+
+## Cómo está armado por dentro
+
+```
+app/                   vistas (Next.js App Router, "use client" casi todo)
+  dashboard.tsx         shell: sidebar, header, switch de vistas
+  constructor-view.tsx  wizard de creación de campañas
+  gestionar-campana.tsx panel de gestión de campaña/conjunto ya publicado
+  geo-map.tsx           mapa Leaflet de segmentación (país / radio / excluir)
+  audiencias-view.tsx   Customer Match de Google
+  clientes-view.tsx     cartera de clientes + ficha de cada uno
+  api/                  rutas de servidor (lectura de sesión, escritura real)
+lib/
+  windsor.ts            TODA la lectura y escritura contra Windsor.ai
+  constructor.ts        arma el plan de una campaña (buildPlan) sin ejecutarlo
+  geo.ts                países segmentables + su id de Google verificado
+  permisos.ts           roles y capacidades
+  reglas.ts             motor de recomendaciones (fase 1, sin autonomía)
+db/                     esquema Drizzle + bindings de D1
+docs/ARQUITECTURA.md    arquitectura técnica completa (lectura/escritura,
+                        variables de entorno, esquema de base de datos)
+```
+
+**Regla de oro del proyecto**: nunca se adivina un campo o una acción de
+Windsor. Antes de usar cualquiera, se verifica contra el MCP de Windsor
+(`get_fields`, `list_actions`) o su documentación oficial. Pedir un campo
+inexistente no da error — devuelve `null` en silencio, que es la peor forma
+de fallar. Lo mismo aplica a cualquier id de segmentación (país, idioma,
+extensión): si no hay una fuente verificada para un valor, la función
+correspondiente queda fuera de la interfaz en vez de inventarlo.
+
+## Límites conocidos
+
+No son bugs — son huecos reales de la integración actual, documentados para
+no tener que redescubrirlos:
+
+- **Meta no tiene Customer Match / audiencias personalizadas** en esta app.
+  Windsor no expone esa acción para el conector `facebook` (verificado
+  directamente contra su `list_actions`, no es un supuesto). Conectarlo de
+  verdad exigiría una integración aparte, directa contra la API de Meta
+  (app propia en Meta for Developers, credenciales nuevas, revisión de
+  permisos `ads_management`) — una decisión de infraestructura distinta a
+  todo lo que corre hoy sobre Windsor.
+- **Segmentación por ciudad o región** (Google y Meta) no está disponible:
+  las dos exigen buscar un id mediante un endpoint de búsqueda geográfica
+  que Windsor no expone. Sí está disponible por **país** y por **radio**
+  (círculo en el mapa, con coordenadas crudas — eso no exige buscar nada).
+- **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
+  las que ya existen (eso todavía se hace en Google Ads directamente).
+- **Edición de creativo de un anuncio ya publicado**: no implementada
+  todavía, aunque Windsor sí expone la acción (`update_ad_creative` en
+  Meta) — quedó fuera por alcance, no por imposibilidad.
+
+## Seguir leyendo
+
+[`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) tiene el detalle técnico
+completo: cómo se lee cada dato de Windsor, el flujo exacto de publicación
+de una campaña (encadenado de ids, auditoría, reintentos — o más bien, por
+qué nunca reintenta), el motor de reglas, y el esquema completo de base de
+datos.
