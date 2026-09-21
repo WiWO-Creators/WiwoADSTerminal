@@ -221,7 +221,7 @@ los nombres — los valores viven fuera del control de versiones.
 | Variable | Para qué |
 |---|---|
 | `OAUTH_ADMIN_EMAILS` | Lista de correos con acceso de administrador |
-| `DEV_LOGIN_ENABLED` | Habilita el login simplificado de desarrollo |
+| `DEV_LOGIN_ENABLED` | En local, fuerza la salida de sesión propia en vez de la del dispatch |
 | `OAUTH_TOKEN_KEY` | Clave para cifrar tokens de sesión/OAuth guardados en D1 |
 | `GOOGLE_CLIENT_ID` | OAuth2 de Google (login) |
 | `GOOGLE_CLIENT_SECRET` | OAuth2 de Google (login) |

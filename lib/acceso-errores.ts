@@ -4,13 +4,11 @@
  * Usado por: app/acceso/page.tsx (cuando el error llega por query string, en
  *   el flujo clásico de redirección) y app/acceso/boton-google.tsx (cuando
  *   llega por el canal de la ventana emergente).
- * NO hace: decidir quién puede entrar — eso vive en las rutas de /api/acceso
- *   y en lib/equipo.ts.
+ * NO hace: decidir quién puede entrar — eso vive en las rutas de
+ *   /api/acceso/google y en lib/equipo.ts.
  */
 
 export const ERRORES_ACCESO: Record<string, string> = {
-  vacio: "Escribe tu correo para continuar.",
-  invalido: "Ese correo no tiene un formato válido.",
   google_no_configurado:
     "Falta configurar GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET.",
   google_cancelado: "Cancelaste el inicio de sesión con Google.",

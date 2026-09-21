@@ -15,10 +15,12 @@ export function googleLoginConfigured(): boolean {
 }
 
 /**
- * Puerta de entrada alterna, siempre disponible (no depende de
- * DEV_LOGIN_ENABLED): a diferencia del formulario de correo sin verificar de
- * `/api/acceso`, esta sí prueba identidad real contra Google, y el callback
- * además exige el dominio de la empresa antes de dejar entrar a nadie.
+ * La única puerta de entrada de la app. Prueba identidad real contra Google
+ * —con PKCE, para que el código interceptado no le sirva a nadie más— y el
+ * callback además exige el dominio de la empresa antes de dejar entrar.
+ *
+ * Que sea la única es deliberado: mientras existió un formulario de "escribe
+ * tu correo", bastaba conocer una dirección para entrar.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);

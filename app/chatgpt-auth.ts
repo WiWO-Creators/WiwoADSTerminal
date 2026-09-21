@@ -23,14 +23,16 @@ const DEV_SIGN_IN_PATH = "/acceso";
 const DEV_SIGN_OUT_PATH = "/api/acceso/salir";
 
 /**
- * Sesión local de desarrollo — y, con DEV_LOGIN_ENABLED apagado, el único
- * respaldo del formulario de correo sin verificar en `/api/acceso`.
+ * Marca que estamos corriendo en local, donde las rutas del dispatch de
+ * ChatGPT Sites no existen.
  *
- * En producción la identidad normalmente la inyecta el dispatch de ChatGPT
- * Sites por cabeceras. `DEV_LOGIN_ENABLED` solo abre esa puerta insegura de
- * "escribe cualquier correo" para desarrollo local.
+ * La variable se sigue llamando `DEV_LOGIN_ENABLED` por compatibilidad con
+ * los `.dev.vars` que ya tiene el equipo, pero su viejo trabajo —abrir el
+ * formulario de "escribe cualquier correo"— desapareció junto con esa
+ * puerta: ahora solo se entra con Google. Lo único que sigue decidiendo es
+ * a qué salida mandar (ver `chatGPTSignOutPath`).
  */
-export function devLoginEnabled(): boolean {
+function enLocalSinDispatch(): boolean {
   return env.DEV_LOGIN_ENABLED === "true";
 }
 
@@ -45,11 +47,9 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const email = requestHeaders.get(USER_EMAIL_HEADER);
   if (!email) {
-    // Sin cabecera de ChatGPT Sites: puede haber una sesión de esta cookie
-    // igual — no solo por el formulario de desarrollo (ese sigue exigiendo
-    // DEV_LOGIN_ENABLED antes de poder escribirla), sino por haber entrado
-    // con Google en `/acceso`, que sí funciona siempre y verifica el
-    // dominio del correo antes de dejar escribir la cookie.
+    // Sin cabecera de ChatGPT Sites puede haber una sesión de esta cookie
+    // igual: la escribe el callback de Google en `/acceso`, que verifica el
+    // dominio del correo antes de dejarla. Es la única forma de obtenerla.
     return await getCookieSessionUser();
   }
   const id =
@@ -87,8 +87,9 @@ export async function requireChatGPTUser(
  * que la petición llegue acá. Pero si `getChatGPTUser` ya dijo que no hay
  * sesión, es porque esa cabecera nunca llegó — quien entra así nunca pasa
  * por ese dispatch, así que mandarlo ahí sería un enlace muerto. `/acceso`
- * (Google, con el dominio de la empresa) es la puerta que de verdad funciona
- * para ese caso, esté o no `DEV_LOGIN_ENABLED` prendido.
+ * (Google, con el dominio de la empresa) es la puerta que de verdad
+ * funciona para ese caso, y desde que se quitó el formulario de correo, la
+ * única.
  */
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
@@ -104,17 +105,17 @@ export function chatGPTSignInPath(returnTo: string): string {
  * propia en `/api/acceso/salir`. Mandar al primero al segundo no cerraría
  * nada — la cabecera volvería a llegar en la siguiente carga.
  *
- * `DEV_LOGIN_ENABLED` manda primero: en desarrollo local, la cabecera puede
- * venir simulada (el script que abre el navegador local la inyecta para
- * probar como si fuera ChatGPT Sites), pero `/signout-with-chatgpt` no
- * existe de verdad acá —lo intercepta el dispatch real, que en local no
- * corre— así que mandar ahí daba 404. Con el interruptor de desarrollo
- * prendido, siempre se usa la salida propia, sin mirar la cabecera.
+ * En local manda `enLocalSinDispatch`: la cabecera puede venir simulada (el
+ * script que abre el navegador la inyecta para probar como si fuera ChatGPT
+ * Sites), pero `/signout-with-chatgpt` no existe de verdad acá —lo
+ * intercepta el dispatch real, que en local no corre— así que mandar ahí
+ * daba 404. Con el interruptor prendido se usa siempre la salida propia,
+ * sin mirar la cabecera.
  */
 export async function chatGPTSignOutPath(returnTo = "/"): Promise<string> {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
   const conCabeceraReal =
-    !devLoginEnabled() && Boolean((await headers()).get(USER_EMAIL_HEADER));
+    !enLocalSinDispatch() && Boolean((await headers()).get(USER_EMAIL_HEADER));
   const base = conCabeceraReal ? SIGN_OUT_PATH : DEV_SIGN_OUT_PATH;
   return `${base}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }

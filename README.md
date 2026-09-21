@@ -42,9 +42,9 @@ En producción, la identidad la inyecta el hosting por la cabecera
   ```
 - **Con Google** (`/acceso`): funciona siempre, pero solo entran correos
   `@mgcglobalgroup.com`.
-- Si `DEV_LOGIN_ENABLED=true` en `.dev.vars`, también hay un formulario de
-  "escribe cualquier correo" en `/acceso` — es un backdoor de desarrollo, no
-  algo que deba estar prendido fuera de tu máquina.
+
+Es la única puerta: el formulario de "escribe cualquier correo" que existía
+en `/acceso` se quitó, porque dejaba entrar sin probar identidad.
 
 Estar autenticado no basta: además hay que existir en la tabla `users` con un
 rol asignado (ver [Roles](#roles-y-permisos)). Sin eso, la app muestra "no
