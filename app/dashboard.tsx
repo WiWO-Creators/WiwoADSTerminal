@@ -1,7 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Building2, Moon, RefreshCw, Search, Sun } from "lucide-react";
+import {
+  Building2,
+  Cog,
+  History,
+  LineChart,
+  Megaphone,
+  Moon,
+  Plug,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  Sun,
+  Target,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -49,7 +63,11 @@ import { EjecucionesView } from "./ejecuciones-view";
 import { AudienciasView } from "./audiencias-view";
 import { EquipoView } from "./equipo-view";
 import { IntegrationsView } from "./integrations-view";
-import { ControlRoomView, HealthView } from "./secondary-views";
+import {
+  ControlRoomView,
+  HealthView,
+  type ModuloInicio,
+} from "./secondary-views";
 import {
   DEFAULT_RANGO_STORAGE_KEY,
   DEFAULT_VIEW_STORAGE_KEY,
@@ -66,6 +84,10 @@ type ItemDeMenu = {
   adminOnly?: boolean;
   /** Roles que pueden ver la entrada. Vacío: todos. */
   roles?: string[];
+  /** Icono y resumen: solo los usan las tarjetas de Inicio, no el menú.
+   *  Viven acá para que renombrar un módulo sea un cambio en un solo lugar. */
+  icono?: LucideIcon;
+  resumen?: string;
 };
 
 const navItems: ItemDeMenu[] = [
@@ -76,18 +98,29 @@ const navItems: ItemDeMenu[] = [
     key: "clients",
     label: "Clientes",
     roles: ["admin", "lead", "buyer"],
+    icono: Building2,
+    resumen: "Ficha de cada cliente, sus cuentas y sus anuncios en vivo.",
   },
   {
     key: "builder",
-    label: "Constructor",
+    label: "Creador de campañas",
     roles: ["admin", "lead", "buyer"],
+    icono: Megaphone,
+    resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado.",
   },
   {
     key: "audiencias",
     label: "Audiencias",
     roles: ["admin", "lead", "buyer"],
+    icono: Target,
+    resumen: "Segmentos y cobertura geográfica por cuenta.",
   },
-  { key: "health", label: "Salud de medición" },
+  {
+    key: "health",
+    label: "Dashboard C-Level",
+    icono: LineChart,
+    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+  },
 ];
 
 /** Segunda sección del menú — gestión de cuenta, no trabajo de campaña día a
@@ -95,13 +128,61 @@ const navItems: ItemDeMenu[] = [
 const navItemsGestion: ItemDeMenu[] = [
   {
     key: "historial",
-    label: "Publicaciones",
+    label: "Auditoría",
     roles: ["admin", "lead", "buyer", "analyst"],
+    icono: History,
+    resumen: "Qué se publicó, quién lo mandó y qué respondió cada paso.",
   },
-  { key: "integrations", label: "Cuentas" },
-  { key: "team", label: "Equipo", adminOnly: true },
-  { key: "settings", label: "Ajustes" },
+  {
+    key: "integrations",
+    label: "Cuentas",
+    icono: Plug,
+    resumen: "Conecta Google y Meta, y elige qué cuentas se leen.",
+  },
+  {
+    key: "settings",
+    label: "Ajustes",
+    icono: SlidersHorizontal,
+    resumen: "Periodo por defecto, tema y preferencias del panel.",
+  },
 ];
+
+/**
+ * Equipo no viaja con el resto del menú: administrar quién entra es una
+ * tarea de cuenta, no de campaña, y se hace de vez en cuando. Va como
+ * engranaje pegado a la ficha del usuario, que es donde se lo busca —
+ * "mis cosas" y "quién más entra" viven juntas.
+ */
+const itemEquipo: ItemDeMenu = {
+  key: "team",
+  label: "Equipo",
+  adminOnly: true,
+  icono: Cog,
+  resumen: "Quién entra, con qué rol y a qué clientes.",
+};
+
+/**
+ * Las tarjetas de Inicio salen de las mismas entradas del menú: así el
+ * vestíbulo nunca ofrece un módulo que el menú ya no tiene, ni lo nombra
+ * distinto. Se excluye "Inicio" —sería una tarjeta hacia donde ya estás— y
+ * las entradas sin icono, que son las que todavía no se pensaron para acá.
+ */
+function modulosDeInicio(role: string): ModuloInicio[] {
+  return [...navItems, ...navItemsGestion, itemEquipo]
+    .filter((item) => item.key !== "control" && puedeVerItem(item, role))
+    .flatMap((item) =>
+      item.icono && item.resumen
+        ? [
+            {
+              key: item.key,
+              label: item.label,
+              icono: item.icono,
+              resumen: item.resumen,
+            },
+          ]
+        : [],
+    );
+}
 
 /** Radix Select no admite value="" — un id de portafolio real nunca vale esto. */
 const TODOS_LOS_CLIENTES = "__todos__";
@@ -481,7 +562,7 @@ export default function WiwoDashboard({
           onSelectCliente={(portfolioId) => {
             // Cambiar de cliente cambia con quién se trabaja, no dónde:
             // antes esto además mandaba siempre a Clientes, y quien estaba en
-            // Salud de medición o en el Constructor perdía su lugar.
+            // el Dashboard C-Level o en el Creador de campañas perdía su lugar.
             setClienteSeleccionado(
               portfolioId === TODOS_LOS_CLIENTES ? null : portfolioId,
             );
@@ -492,13 +573,8 @@ export default function WiwoDashboard({
             <ControlRoomView
               nombre={initialSnapshot.user.displayName.trim().split(/\s+/)[0] || "equipo"}
               performance={performance}
-              onOpenClientes={() => setView("clients")}
-              onOpenHealth={(client) => {
-                // Mismo selector que el navbar: abrir la salud de un cliente
-                // desde acá también lo deja marcado en todo el resto de la app.
-                setClienteSeleccionado(client);
-                setView("health");
-              }}
+              modulos={modulosDeInicio(initialSnapshot.user.role)}
+              onNavigate={setView}
               onOpenIntegrations={() => setView("integrations")}
             />
           )}
@@ -687,6 +763,27 @@ function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter className="gap-3 border-t border-sidebar-border px-4 py-4">
+        {puedeVerItem(itemEquipo, currentUser.role) && (
+          // Solo el engranaje. Sin texto visible, el nombre lo llevan
+          // `aria-label` (lectores de pantalla) y `title` (pista al pasar el
+          // mouse): un icono suelto sin ninguno de los dos es un botón que
+          // nadie sabe qué hace hasta que lo aprieta.
+          <button
+            type="button"
+            onClick={() => onNavigate(itemEquipo.key)}
+            aria-label={itemEquipo.label}
+            title={itemEquipo.label}
+            aria-current={view === itemEquipo.key ? "page" : undefined}
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center self-start rounded-full transition-colors",
+              view === itemEquipo.key
+                ? "bg-sidebar-accent text-foreground"
+                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+            )}
+          >
+            <Cog className="size-5" aria-hidden="true" />
+          </button>
+        )}
         <div className="min-w-0">
           <p className="truncate text-[0.95rem] font-bold text-foreground">
             {currentUser.displayName}

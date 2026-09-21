@@ -408,7 +408,7 @@ export function ConstructorView({
       <div className="mb-5">
         <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
           <Sparkles className="size-3 text-brand" />
-          Constructor · se revisa antes de publicar
+          Creador de campañas · se revisa antes de publicar
         </p>
         <h2 className="neo-section-title">
           {draft.existingAdset

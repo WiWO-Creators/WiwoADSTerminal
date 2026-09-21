@@ -100,9 +100,9 @@ export function EjecucionesView() {
           Lo que se creó de verdad
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
-          Cada fila es una ejecución real del Constructor contra Google o
-          Meta. Todo nace pausado en la plataforma; esto solo registra qué se
-          mandó, quién lo mandó y qué respondió cada paso.
+          Cada fila es una ejecución real del Creador de campañas contra
+          Google o Meta. Todo nace pausado en la plataforma; esto solo registra
+          qué se mandó, quién lo mandó y qué respondió cada paso.
         </p>
       </div>
 
@@ -119,7 +119,7 @@ export function EjecucionesView() {
             Todavía no se publicó nada
           </h3>
           <p className="max-w-sm text-sm leading-6 text-foreground/58">
-            Cuando alguien publique una campaña desde el Constructor,
+            Cuando alguien publique una campaña desde el Creador de campañas,
             aparecerá acá con cada paso que se ejecutó.
           </p>
         </Surface>

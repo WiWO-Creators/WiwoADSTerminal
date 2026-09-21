@@ -23,8 +23,8 @@ export const DEFAULT_RANGO_STORAGE_KEY = "wiwo-ads-default-rango";
 const OPCIONES_VISTA_INICIAL: Array<{ key: ViewKey; label: string }> = [
   { key: "control", label: "Sala de control" },
   { key: "clients", label: "Clientes" },
-  { key: "builder", label: "Constructor" },
-  { key: "health", label: "Salud de medición" },
+  { key: "builder", label: "Creador de campañas" },
+  { key: "health", label: "Dashboard C-Level" },
 ];
 
 /**
@@ -124,7 +124,7 @@ export function SettingsView({
                 Rango de fechas por defecto
               </p>
               <p className="mt-1 max-w-md text-xs leading-5 text-foreground/55">
-                El periodo con el que abren Sala de control, Salud de medición
+                El periodo con el que abren Sala de control, Dashboard C-Level
                 y el resto de pantallas con métricas.
               </p>
             </div>

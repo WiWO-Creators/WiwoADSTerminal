@@ -384,7 +384,7 @@ export function SegmentacionGeografica({
             Útil para dejar a mano una zona de control (comparar con/sin
             anuncio) o para no entrar a un mercado que ya cubre otro equipo.
             No mide nada por sí solo — la comparación se hace fuera de esta
-            pantalla, con Salud de medición o GA4.
+            pantalla, con el Dashboard C-Level o GA4.
           </p>
         </>
       )}
