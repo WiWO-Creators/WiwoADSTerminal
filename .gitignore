@@ -44,3 +44,6 @@ next-env.d.ts
 
 # local dev secrets
 .dev.vars
+
+# Datos del servidor Node (SQLite y creativos)
+/datos/

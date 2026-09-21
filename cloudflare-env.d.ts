@@ -60,6 +60,8 @@ declare module "cloudflare:workers" {
     OAUTH_TOKEN_KEY?: string;
     WINDSOR_API_KEY?: string;
     ANTHROPIC_API_KEY?: string;
+    SESSION_SECRET?: string;
+    WIWO_RUNTIME?: string;
     ANTHROPIC_MODEL?: string;
     APP_ORIGIN?: string;
     OAUTH_ADMIN_EMAILS?: string;

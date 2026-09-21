@@ -1,10 +1,7 @@
 import { env } from "cloudflare:workers";
 import { cookies } from "next/headers";
 
-import {
-  DEV_NAME_COOKIE_NAME,
-  DEV_SESSION_COOKIE_NAME,
-} from "@/app/chatgpt-auth";
+import { cookieDeSesion, DEV_NAME_COOKIE_NAME } from "@/app/chatgpt-auth";
 import { respuestaCierrePopup } from "@/lib/acceso-popup";
 import {
   backToLogin,
@@ -113,6 +110,14 @@ export async function GET(request: Request) {
     return fail("google_falla_red");
   }
 
+  // `Secure` solo si el sitio se sirve por HTTPS (detrás de un proxy, la URL
+  // interna puede ser http aunque el visitante entre por https).
+  const seguro = (env.APP_ORIGIN ?? request.url).startsWith("https://");
+  const cookieDeIdentidad = await cookieDeSesion(email, seguro);
+  // Sin secreto de sesión no se abre ninguna: mejor negar que dejar una
+  // cookie que cualquiera pueda falsificar.
+  if (!cookieDeIdentidad) return fail("google_no_configurado");
+
   // Quién puede entrar lo sigue decidiendo OAUTH_ADMIN_EMAILS/el equipo: el
   // dominio de arriba y Google prueban identidad, no permiso.
   return withCleanup(
@@ -125,9 +130,9 @@ export async function GET(request: Request) {
             "cache-control": "no-store",
           },
         }),
-    `${DEV_SESSION_COOKIE_NAME}=${encodeURIComponent(email)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_SECONDS}`,
+    cookieDeIdentidad,
     nombre
-      ? `${DEV_NAME_COOKIE_NAME}=${encodeURIComponent(nombre)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_SECONDS}`
+      ? `${DEV_NAME_COOKIE_NAME}=${encodeURIComponent(nombre)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_SECONDS}${seguro ? "; Secure" : ""}`
       : undefined,
   );
 }

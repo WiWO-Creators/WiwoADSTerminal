@@ -36,7 +36,7 @@ ejecutan.
 | Datos de plataformas | **Windsor.ai** (lectura y escritura). Ver `docs/ARQUITECTURA.md` |
 | Login | Google OAuth (única entrada), dominio `@mgcglobalgroup.com` |
 | IA | Anthropic SDK (`@anthropic-ai/sdk`), modelo `claude-sonnet-5` |
-| Tests | `node --test tests/*.test.mjs` (21 tests), `tsc`, `eslint` |
+| Tests | `node --test tests/*.test.mjs` (28 tests), `tsc`, `eslint` |
 
 Requiere **Node >= 22.13**.
 
@@ -59,58 +59,40 @@ docs/                 documentación
 thinking-orb.css, THINKING_ORB.md   kit del orbe de carga
 ```
 
-## 4. El obstáculo principal: acoplamiento a Cloudflare
+## 4. Correr en Node (VPS): resuelto con un puente
 
-Hoy el código **no corre en Node normal**. Estos 10 archivos importan
-`cloudflare:workers` (para leer variables y bindings):
+El build de vinext deja **una sola** importación de `cloudflare:workers` (un
+esquema que solo existe en Cloudflare) y ningún otro global exclusivo de
+Workers. Por eso no hace falta quitar vinext ni portar a Next estándar: basta un
+módulo que ocupe ese lugar en Node. Está en `servidor/`:
 
-```
-app/chatgpt-auth.ts            app/acceso/page.tsx
-app/api/acceso/google/route.ts app/api/acceso/google/callback/route.ts
-db/index.ts                    lib/almacenamiento.ts
-lib/equipo.ts                  lib/integration-store.ts
-lib/windsor.ts                 lib/asistente.ts
-```
+| Archivo | Qué hace |
+|---|---|
+| `registrar.mjs` + `hooks.mjs` | Hook de Node (`--import`) que resuelve `cloudflare:workers` hacia el puente |
+| `cloudflare-workers.mjs` | Exporta el `env` que la app espera: variables + `DB` + `MEDIA` (+ `WIWO_RUNTIME=node`) |
+| `d1.mjs` | Adaptador con la API de D1 (`prepare/bind/first/all/run/raw/batch/exec`) sobre **better-sqlite3** |
+| `r2.mjs` | Adaptador con `put/get` de R2 sobre una carpeta en disco (rechaza claves con `..`) |
+| `migrar.mjs` | Aplica `drizzle/*.sql` en orden, idempotente (tabla `_migraciones`) |
 
-Bindings que la plataforma inyecta y que en un VPS hay que reemplazar:
+El código de la app **no cambia** y en Cloudflare sigue funcionando igual: el
+puente solo se carga si se lo pides con `NODE_OPTIONS`.
 
-| Binding | Qué es | Reemplazo en VPS |
-|---|---|---|
-| `DB` | D1 | SQLite local (`better-sqlite3`) o Postgres |
-| `MEDIA` | R2 | Carpeta en disco o S3-compatible |
-| `IMAGES` | Optimización de imágenes (`/_vinext/image`) | `sharp`, o desactivar la ruta |
-| `ASSETS` | Archivos estáticos (`dist/client`) | Los sirve el proxy o el servidor |
-| `env.*` | Variables de entorno | `process.env` |
+**Probado** (Node 24, `vinext start` real): arranca, `/acceso` responde, las
+14 migraciones se aplican y no se repiten, Drizzle lee y escribe en SQLite
+(`/api/equipo`), un creativo se sube y se lee idéntico por `/api/media/...`
+sin sesión, y el asistente de IA hace streaming desde Node.
 
-### Enfoque recomendado
-
-Cortar el acoplamiento **en un solo punto**, sin tocar la lógica de negocio:
-
-1. Crear un módulo `lib/runtime` que entregue `env`, la base y el almacenamiento.
-2. Una implementación para Cloudflare (lo de hoy) y otra para Node:
-   - **Adaptador tipo D1 sobre SQLite**: implementar `prepare/bind/first/all/run/batch/exec`
-     sobre `better-sqlite3`. El código usa SQL crudo vía `getRawDb()` y Drizzle vía
-     `getDb()`; con el adaptador **no hay que reescribir consultas**.
-   - **Adaptador tipo R2 sobre disco**: `put(key, data, {httpMetadata})` y `get(key)`.
-3. Que `cloudflare:workers` se resuelva a ese módulo en el build para Node
-   (alias de Vite), o cambiar los 10 imports a `lib/runtime`.
-
-Ventaja: la app sigue corriendo también en Cloudflare, así se puede comparar.
-
-### Antes de comprometerse: prueba de arranque (spike)
-
-`vinext` trae `vinext start` (servidor de producción) pero **no está verificado**
-que genere una salida ejecutable en Node sin los bindings. Hacer primero:
-
-1. `npx vinext build` con el alias puesto.
-2. `npx vinext start` con las variables cargadas.
-3. Abrir `/acceso` y comprobar que la base y el login responden.
-
-Si vinext no lo permite, el plan B es quitar vinext y usar **Next.js estándar**
-(más trabajo, pero más estable en producción). Decidirlo con el resultado del spike.
-
-Alternativa que ya existe: `vinext deploy` publica en Cloudflare Workers sin
-tocar código (no es VPS).
+Notas:
+- `better-sqlite3` está como **dependencia opcional**: trae binario
+  precompilado para Linux x64. Si falta, `npm rebuild better-sqlite3` (o
+  instalar `build-essential` y `python3`).
+- Las rutas por defecto (`./datos/...`) son relativas al directorio desde el
+  que arranca el proceso. En producción usar **rutas absolutas fuera del
+  repositorio** (`WIWO_DB_PATH=/var/lib/wiwo-ads/wiwo.sqlite`,
+  `WIWO_MEDIA_DIR=/var/lib/wiwo-ads/creativos`), así un `git pull` o el
+  despliegue automático nunca tocan los datos. `/datos/` ya está en `.gitignore`.
+- Un solo proceso escribe en el SQLite (WAL activado). No correr varias
+  instancias sobre el mismo archivo.
 
 ## 5. Variables de entorno
 
@@ -121,7 +103,10 @@ variables del proceso (systemd `EnvironmentFile`, con permisos `600`).
 |---|---|---|---|
 | `APP_ORIGIN` | Sí | URL pública, p. ej. `https://ads.midominio.com`. Se usa en redirecciones OAuth | Dominio del VPS |
 | `OAUTH_ADMIN_EMAILS` | Sí | Administradores fundadores (coma). Sin esto nadie puede dar de alta al primer usuario | Lista de correos |
-| `OAUTH_TOKEN_KEY` | Sí | Llave AES-GCM de 32 bytes en **base64url**; cifra los tokens de las plataformas | `openssl rand -base64 32 \| tr '+/' '-_' \| tr -d '='` |
+| `OAUTH_TOKEN_KEY` | Sí | Llave AES-GCM de 32 bytes en **base64url**; cifra los tokens de las plataformas. Sirve también de secreto de sesión si no defines `SESSION_SECRET` | `openssl rand -base64 32 \| tr '+/' '-_' \| tr -d '='` |
+| `SESSION_SECRET` | Recomendada | Secreto con el que se firma la cookie de sesión (HMAC). Si falta, se usa `OAUTH_TOKEN_KEY`. **Sin ninguno de los dos nadie puede iniciar sesión** | `openssl rand -base64 32` |
+| `WIWO_DB_PATH` | Sí en VPS | Archivo SQLite (ruta absoluta) | p. ej. `/var/lib/wiwo-ads/wiwo.sqlite` |
+| `WIWO_MEDIA_DIR` | Sí en VPS | Carpeta de creativos (ruta absoluta) | p. ej. `/var/lib/wiwo-ads/creativos` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Sí | Login con Google y OAuth de Google Ads | Google Cloud Console |
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | Solo para OAuth directo de Google Ads | Token de desarrollador | Google Ads API Center |
 | `META_APP_ID` / `META_APP_SECRET` | Solo para OAuth directo de Meta | App de Meta | developers.facebook.com |
@@ -135,25 +120,30 @@ variables del proceso (systemd `EnvironmentFile`, con permisos `600`).
 La clave de Anthropic que se compartió por chat durante el desarrollo debe
 **rotarse**: usar una clave nueva en producción.
 
-## 6. Autenticación y seguridad — bloqueantes antes de exponerlo
+## 6. Autenticación y seguridad
 
-Hay dos huecos reales que hay que cerrar **antes** de abrir el puerto a internet:
+Los dos huecos que había están **cerrados** (`lib/sesion-firmada.ts`,
+`app/chatgpt-auth.ts`) y se probaron atacando un servidor real en Node:
 
-1. **La cookie de sesión es el correo en texto plano** (`wiwo-dev-user`), sin
-   firma y sin flag `Secure` (ver `app/api/acceso/google/callback/route.ts`).
-   Cualquiera puede escribir esa cookie con un correo de admin y entrar.
-   **Arreglo:** firmarla con HMAC (secreto nuevo, p. ej. `SESSION_SECRET`),
-   agregar `Secure`, y verificar la firma en `getCookieSessionUser`
-   (`app/chatgpt-auth.ts`).
-2. **La app confía en la cabecera `oai-authenticated-user-email`**
-   (`getChatGPTUser`): si existe, tiene prioridad sobre la cookie. Esa cabecera
-   la pone ChatGPT Sites; **en un VPS cualquiera puede mandarla** y suplantar a
-   un admin. **Arreglo:** ignorarla cuando no se corre en ChatGPT Sites, y
-   además borrarla en el proxy inverso (`request_header -oai-*` en Caddy).
+| Intento | Resultado |
+|---|---|
+| Cabecera `oai-authenticated-user-email` falsa | 403 |
+| Cookie `wiwo-dev-user=<correo>` (la vieja, sin firma) | 403 |
+| Cookie firmada con otro secreto | 403 |
+| Sin credenciales | 403 |
+| Cookie firmada por el servidor | 200 |
 
-Además:
+- **Cookie de sesión firmada** con HMAC-SHA256 y vencimiento de 12 h; con flag
+  `Secure` cuando `APP_ORIGIN` (o la URL) es https. Al desplegar esto, las
+  sesiones abiertas antes se invalidan: todos tendrán que volver a entrar.
+- **Cabecera `oai-*` ignorada en el VPS**: cuando corre el puente
+  (`WIWO_RUNTIME=node`) la app no confía en ella. En ChatGPT Sites sigue
+  funcionando igual que antes.
 
-- Servir **solo por HTTPS** (Caddy o Nginx con certificado).
+Sigue pendiente de tu lado:
+
+- Servir **solo por HTTPS** (Apache/Caddy/Nginx con certificado) y definir
+  `APP_ORIGIN` con `https://`.
 - `DEV_LOGIN_ENABLED` fuera o en `false`.
 - El dominio permitido (`@mgcglobalgroup.com`) está fijo en el código
   (`DOMINIO_PERMITIDO`, callback de Google). Además hay que estar en el equipo:
@@ -200,21 +190,45 @@ pública. El VPS debe tener dominio público con HTTPS; el Constructor rechaza
   (`ejecuciones`, migración 0011).
 - **Respaldar** la base y la carpeta de creativos (ver §11).
 
-## 9. Ejecución en el VPS (esbozo, a validar con el spike)
+## 9. Ejecución en el VPS
 
 ```bash
-node -v                       # >= 22.13
+node -v                          # >= 22.13
 npm ci
-npx vinext build              # usar esto y no `npm run build`: ese script usa
-                              # scripts/sites-env.sh, propio de ChatGPT Sites
-npx vinext start              # revisar `--help` para puerto/host
+npx vinext build                 # no `npm run build`: ese script usa sites-env.sh (ChatGPT Sites)
+node servidor/migrar.mjs         # crea/actualiza la base (idempotente)
+NODE_OPTIONS="--import /ruta/absoluta/servidor/registrar.mjs" npx vinext start -p 3030
 ```
 
-- Proceso gestionado con **systemd** o **pm2**, con reinicio automático.
-- Proxy inverso (Caddy/Nginx) con HTTPS hacia el puerto de la app, **desactivando
-  el buffering** en `/api/asistente` (es streaming SSE).
-- Timeouts del proxy holgados (>= 120 s) para `/api/constructor/ejecutar` y
-  `/api/actualizar` (la reconstrucción del catálogo tarda ~1 minuto).
+Con **PM2** (`ecosystem.config.cjs`), el puente va en `NODE_OPTIONS` y las
+variables en `env` (o cargadas desde un archivo con permisos `600`):
+
+```js
+module.exports = {
+  apps: [{
+    name: "wiwo-ads",
+    cwd: "/root/wiwo-ads",
+    script: "node_modules/.bin/vinext",
+    args: "start -p 3030",
+    env: {
+      NODE_OPTIONS: "--import /root/wiwo-ads/servidor/registrar.mjs",
+      WIWO_DB_PATH: "/var/lib/wiwo-ads/wiwo.sqlite",
+      WIWO_MEDIA_DIR: "/var/lib/wiwo-ads/creativos",
+      // + el resto de variables de la sección 5
+    },
+  }],
+};
+```
+
+**Despliegue automático** (`.github/workflows/deploy.yaml`): agregar
+`node servidor/migrar.mjs` después de `npx vinext build` y antes del
+`pm2 restart`, para que las migraciones nuevas se apliquen solas.
+
+- Proxy inverso (Apache/Nginx/Caddy) con HTTPS hacia el puerto de la app,
+  **sin buffering** en `/api/asistente` (es streaming SSE) y pasando
+  `X-Forwarded-Proto`.
+- Timeouts del proxy holgados (>= 120 s) para `/api/constructor/ejecutar`,
+  `/api/actualizar` y `/api/clientes` (en frío puede tardar ~15 s).
 
 ## 10. Tareas de fondo
 
@@ -237,8 +251,9 @@ de servicio). No es bloqueante.
 
 ## 12. Verificación antes de dar por lista la producción
 
-- [ ] Spike de arranque en Node resuelto (o decisión de pasar a Next estándar).
-- [ ] Cookie de sesión firmada + `Secure`; cabecera `oai-*` ignorada/borrada.
+- [x] Arranque en Node resuelto con `servidor/` (probado).
+- [x] Cookie de sesión firmada; cabecera `oai-*` ignorada en el VPS (probado).
+- [ ] Iniciar sesión con Google de verdad en el dominio final (no se puede probar sin el dominio y el redirect URI).
 - [ ] `DEV_LOGIN_ENABLED` en `false`; claves nuevas (Anthropic rotada).
 - [ ] HTTPS y `APP_ORIGIN` con el dominio real; redirect URI de Google registrada.
 - [ ] Migraciones aplicadas; backups configurados y restauración probada.
