@@ -1,0 +1,30 @@
+name: Deploy WiWO-ADs
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [closed]
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: server.wiwo.center
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            cd /root/wiwo-ads
+            git fetch origin
+            git checkout main
+            git pull origin main
+            npm ci
+            npx vinext build
+            pm2 restart wiwo-ads || pm2 start ecosystem.config.cjs
+            pm2 save
