@@ -8,10 +8,7 @@
 
 export type ViewKey =
   | "control"
-  | "decisions"
   | "health"
-  | "pacing"
-  | "audit"
   | "integrations"
   | "team"
   | "builder"

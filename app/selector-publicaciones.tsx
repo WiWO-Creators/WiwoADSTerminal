@@ -233,7 +233,7 @@ export function SelectorDePublicaciones({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-4xl">
+      <DialogContent className="border-foreground/12 bg-card sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Elegir publicación existente</DialogTitle>
           <DialogDescription>
@@ -242,7 +242,7 @@ export function SelectorDePublicaciones({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2.5 border-b border-[#F8FAD7]/10 pb-3">
+        <div className="space-y-2.5 border-b border-foreground/10 pb-3">
           <div className="flex flex-wrap items-center gap-2">
             {(
               [
@@ -258,14 +258,14 @@ export function SelectorDePublicaciones({
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                   plataforma === item.id
-                    ? "border-[#4242FF] bg-[#4242FF]/12 text-[#F8FAD7]"
-                    : "border-[#F8FAD7]/12 text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                    ? "border-brand bg-brand/12 text-foreground"
+                    : "border-foreground/12 text-foreground/55 hover:text-foreground",
                 )}
               >
                 {item.id !== "todas" && <MarcaPlataforma plataforma={item.id} tamano="xs" />}
                 {item.label}
                 {entrada && (
-                  <span className="metric-number text-[#F8FAD7]/40">{item.n}</span>
+                  <span className="metric-number text-foreground/40">{item.n}</span>
                 )}
               </button>
             ))}
@@ -276,7 +276,7 @@ export function SelectorDePublicaciones({
               <div
                 role="group"
                 aria-label="Ordenar publicaciones"
-                className="flex items-center gap-0.5 rounded-full bg-[#292929]/40 p-1"
+                className="flex items-center gap-0.5 rounded-full bg-field/40 p-1"
               >
                 {(
                   [
@@ -292,8 +292,8 @@ export function SelectorDePublicaciones({
                     className={cn(
                       "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors",
                       orden === item.id
-                        ? "bg-[#4242FF] text-[#F8FAD7]"
-                        : "text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                        ? "bg-primary text-primary-foreground"
+                        : "text-foreground/55 hover:text-foreground",
                     )}
                   >
                     {item.icon && <item.icon className="size-3" />}
@@ -320,8 +320,8 @@ export function SelectorDePublicaciones({
                   className={cn(
                     "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
                     formato === item.id
-                      ? "bg-[#F8FAD7]/12 text-[#F8FAD7]"
-                      : "text-[#F8FAD7]/50 hover:text-[#F8FAD7]",
+                      ? "bg-foreground/12 text-foreground"
+                      : "text-foreground/50 hover:text-foreground",
                   )}
                 >
                   <Icon className="size-3.5" />
@@ -333,7 +333,7 @@ export function SelectorDePublicaciones({
         </div>
 
         {entrada?.aviso && (
-          <p className="flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/50">
+          <p className="flex items-start gap-2 text-xs leading-5 text-foreground/50">
             <Info className="mt-0.5 size-3.5 shrink-0" />
             {entrada.aviso}
           </p>
@@ -346,7 +346,7 @@ export function SelectorDePublicaciones({
         >
           {cargando ? (
             <div>
-              <div className="flex items-center justify-center gap-2 pb-3 text-sm text-[#F8FAD7]/55">
+              <div className="flex items-center justify-center gap-2 pb-3 text-sm text-foreground/55">
                 <ThinkingOrb size="md" state="thinking" label="" />
                 Buscando publicaciones…
               </div>
@@ -361,8 +361,8 @@ export function SelectorDePublicaciones({
               {error}
             </div>
           ) : filtrados.length === 0 ? (
-            <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-sm text-[#F8FAD7]/55">
-              <Images className="size-6 text-[#F8FAD7]/30" />
+            <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-sm text-foreground/55">
+              <Images className="size-6 text-foreground/30" />
               No hay publicaciones con este filtro en el periodo elegido.
             </div>
           ) : (
@@ -379,13 +379,13 @@ export function SelectorDePublicaciones({
               </div>
               {hayMas ? (
                 <div
-                  className="flex items-center justify-center gap-2 py-4 text-xs text-[#F8FAD7]/45"
+                  className="flex items-center justify-center gap-2 py-4 text-xs text-foreground/45"
                 >
                   <ThinkingOrb size="sm" state="thinking" label="" />
                   Cargando más…
                 </div>
               ) : (
-                <p className="py-3 text-center text-[0.68rem] text-[#F8FAD7]/35">
+                <p className="py-3 text-center text-[0.68rem] text-foreground/35">
                   {filtrados.length} publicaciones
                 </p>
               )}
@@ -399,15 +399,15 @@ export function SelectorDePublicaciones({
 
 function EsqueletoPublicacion() {
   return (
-    <div className="animate-pulse overflow-hidden rounded-xl border border-[#F8FAD7]/8 bg-[#292929]/50">
+    <div className="animate-pulse overflow-hidden rounded-xl border border-foreground/8 bg-field/50">
       <div className="flex items-center gap-2 p-2.5">
-        <div className="size-7 rounded-full bg-[#F8FAD7]/10" />
-        <div className="h-2.5 w-20 rounded bg-[#F8FAD7]/10" />
+        <div className="size-7 rounded-full bg-foreground/10" />
+        <div className="h-2.5 w-20 rounded bg-foreground/10" />
       </div>
-      <div className="aspect-[4/5] bg-[#F8FAD7]/[0.06]" />
+      <div className="aspect-[4/5] bg-foreground/[0.06]" />
       <div className="space-y-2 p-2.5">
-        <div className="h-2.5 w-full rounded bg-[#F8FAD7]/10" />
-        <div className="h-7 w-full rounded-md bg-[#F8FAD7]/10" />
+        <div className="h-2.5 w-full rounded bg-foreground/10" />
+        <div className="h-7 w-full rounded-md bg-foreground/10" />
       </div>
     </div>
   );
@@ -493,14 +493,14 @@ function TarjetaPublicacion({
     post.platform === "instagram" && (post.format === "reel" || post.format === "video");
 
   return (
-    <article className="group flex flex-col overflow-hidden rounded-xl border border-[#F8FAD7]/10 bg-[#292929]/60 transition-colors hover:border-[#4242FF]/40">
+    <article className="group flex flex-col overflow-hidden rounded-xl border border-foreground/10 bg-field/60 transition-colors hover:border-brand/40">
       <header className="flex items-center gap-2 px-2.5 py-2">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[#4242FF]/25 text-[0.6rem] font-extrabold text-[#F8FAD7]">
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-brand/25 text-[0.6rem] font-extrabold text-foreground">
           {iniciales(nombre)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-bold leading-tight text-[#F8FAD7]">{nombre}</p>
-          <p className="text-[0.62rem] leading-tight text-[#F8FAD7]/45">
+          <p className="truncate text-xs font-bold leading-tight text-foreground">{nombre}</p>
+          <p className="text-[0.62rem] leading-tight text-foreground/45">
             {post.createdAt ? formatoFecha(post.createdAt) : "Sin fecha"} ·{" "}
             {ETIQUETA_FORMATO[post.format]}
           </p>
@@ -510,10 +510,10 @@ function TarjetaPublicacion({
 
       <div className="relative aspect-[4/5] w-full overflow-hidden bg-[#1c1c1a]">
         {!cargada && !rota && (
-          <div className="absolute inset-0 animate-pulse bg-[#F8FAD7]/[0.05]" />
+          <div className="absolute inset-0 animate-pulse bg-foreground/[0.05]" />
         )}
         {rota ? (
-          <div className="absolute inset-0 grid place-items-center px-3 text-center text-[0.65rem] leading-4 text-[#F8FAD7]/40">
+          <div className="absolute inset-0 grid place-items-center px-3 text-center text-[0.65rem] leading-4 text-foreground/40">
             Ya no está disponible en el CDN
           </div>
         ) : esArchivoDeVideo ? (
@@ -572,9 +572,9 @@ function TarjetaPublicacion({
 
       <div className="flex flex-1 flex-col p-2.5">
         {post.caption ? (
-          <p className="line-clamp-2 text-xs leading-5 text-[#F8FAD7]/70">{post.caption}</p>
+          <p className="line-clamp-2 text-xs leading-5 text-foreground/70">{post.caption}</p>
         ) : (
-          <p className="text-xs italic text-[#F8FAD7]/30">Sin texto</p>
+          <p className="text-xs italic text-foreground/30">Sin texto</p>
         )}
         {usable ? (
           <Button type="button" size="sm" onClick={onUsar} className="mt-2 w-full font-bold">

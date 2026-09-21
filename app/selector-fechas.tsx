@@ -124,27 +124,27 @@ export function SelectorDeFechas({
           disabled={disabled}
           aria-label="Elegir periodo"
           className={cn(
-            "inline-flex h-8 items-center gap-2 rounded-md border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 text-sm text-[#F8FAD7] transition-colors hover:border-[#4242FF]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4242FF] disabled:opacity-50",
+            "inline-flex h-8 items-center gap-2 rounded-md border border-foreground/10 bg-card/55 px-3 text-sm text-foreground transition-colors hover:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4242FF] disabled:opacity-50",
             className,
           )}
         >
           {cargando ? (
             <ThinkingOrb size="xs" state="thinking" label="" />
           ) : (
-            <CalendarRange className="size-3.5 text-[#4242FF]" />
+            <CalendarRange className="size-3.5 text-brand" />
           )}
           <span className="truncate">{actual.label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent
         align={alinear}
-        className="w-auto max-w-[calc(100vw-1.5rem)] border-[#F8FAD7]/12 bg-[#2a2b29] p-0 text-[#F8FAD7]"
+        className="w-auto max-w-[calc(100vw-1.5rem)] border-foreground/12 bg-[#2a2b29] p-0 text-foreground"
       >
         <div className="flex flex-col md:flex-row">
           <div
             role="radiogroup"
             aria-label="Periodos"
-            className="scrollbar-thin flex max-h-72 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-[#F8FAD7]/10 p-2 md:max-h-[27rem] md:w-52 md:border-r md:border-b-0"
+            className="scrollbar-thin flex max-h-72 shrink-0 flex-col gap-0.5 overflow-y-auto border-b border-foreground/10 p-2 md:max-h-[27rem] md:w-52 md:border-r md:border-b-0"
           >
             {periodos.map((id) => {
               const activo = nombrado === id;
@@ -158,17 +158,17 @@ export function SelectorDeFechas({
                   className={cn(
                     "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
                     activo
-                      ? "bg-[#4242FF]/15 text-[#F8FAD7]"
-                      : "text-[#F8FAD7]/75 hover:bg-[#F8FAD7]/[0.06]",
+                      ? "bg-brand/15 text-foreground"
+                      : "text-foreground/75 hover:bg-foreground/[0.06]",
                   )}
                 >
                   <span
                     className={cn(
                       "grid size-4 shrink-0 place-items-center rounded-full border",
-                      activo ? "border-[#4242FF]" : "border-[#F8FAD7]/30",
+                      activo ? "border-brand" : "border-foreground/30",
                     )}
                   >
-                    {activo && <span className="size-2 rounded-full bg-[#4242FF]" />}
+                    {activo && <span className="size-2 rounded-full bg-primary" />}
                   </span>
                   {RANGO_LABELS[id]}
                 </button>
@@ -197,9 +197,9 @@ export function SelectorDeFechas({
                     : [],
               }}
               modifiersClassNames={{
-                inicio: "[&>button]:!bg-[#4242FF] [&>button]:!text-white [&>button]:!rounded-md",
-                fin: "[&>button]:!bg-[#4242FF] [&>button]:!text-white [&>button]:!rounded-md",
-                medio: "[&>button]:!bg-[#4242FF]/20 [&>button]:!text-[#F8FAD7] [&>button]:!rounded-none",
+                inicio: "[&>button]:!bg-primary [&>button]:!text-primary-foreground [&>button]:!rounded-md",
+                fin: "[&>button]:!bg-primary [&>button]:!text-primary-foreground [&>button]:!rounded-md",
+                medio: "[&>button]:!bg-brand/20 [&>button]:!text-foreground [&>button]:!rounded-none",
               }}
               // El comportamiento de rango que trae el calendario (mover el
               // extremo más cercano) desconcierta: aquí un toque abre un rango
@@ -220,17 +220,17 @@ export function SelectorDeFechas({
               disabled={{ after: hoy }}
               className="[--cell-size:--spacing(9)]"
             />
-            <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[#F8FAD7]/10 px-4 py-3">
+            <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-foreground/10 px-4 py-3">
               <div className="flex items-center gap-2 text-xs">
-                <span className="rounded-md border border-[#F8FAD7]/12 bg-[#292929]/60 px-2.5 py-1.5 text-[#F8FAD7]/85">
+                <span className="rounded-md border border-foreground/12 bg-field/60 px-2.5 py-1.5 text-foreground/85">
                   {desdeMostrado ? fechaCorta(desdeMostrado) : "—"}
                 </span>
-                <span className="text-[#F8FAD7]/40">–</span>
-                <span className="rounded-md border border-[#F8FAD7]/12 bg-[#292929]/60 px-2.5 py-1.5 text-[#F8FAD7]/85">
+                <span className="text-foreground/40">–</span>
+                <span className="rounded-md border border-foreground/12 bg-field/60 px-2.5 py-1.5 text-foreground/85">
                   {hastaMostrado ? fechaCorta(hastaMostrado) : "—"}
                 </span>
               </div>
-              <p className="basis-full text-[0.65rem] text-[#F8FAD7]/40 md:basis-auto md:flex-1">
+              <p className="basis-full text-[0.65rem] text-foreground/40 md:basis-auto md:flex-1">
                 Las fechas se cuentan por día calendario, hasta hoy.
               </p>
               <div className="ml-auto flex gap-2">
@@ -239,7 +239,7 @@ export function SelectorDeFechas({
                   variant="outline"
                   size="sm"
                   onClick={() => setAbierto(false)}
-                  className="border-[#F8FAD7]/15 bg-transparent"
+                  className="border-foreground/15 bg-transparent"
                 >
                   Cancelar
                 </Button>

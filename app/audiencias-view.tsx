@@ -25,7 +25,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PortfolioSummary } from "@/lib/portafolios";
-import { Surface, ThinkingOrb } from "./ui";
+import type { AdSummary } from "@/lib/performance-store";
+import { MensajeriaView } from "./mensajeria-view";
+import { OrbeDeBoton, Surface } from "./ui";
 
 type CuentaGoogle = {
   portfolioName: string;
@@ -74,11 +76,73 @@ async function ejecutar(
  */
 export function AudienciasView({
   portfolios,
+  ads,
+  clienteSeleccionado,
+  puedeAprobar,
+}: {
+  portfolios: PortfolioSummary[];
+  ads: AdSummary[];
+  /** El cliente del navbar: es el único selector de cliente de la app, así que
+   * acá solo se ofrecen sus cuentas. Sin cliente elegido, se ven todas. */
+  clienteSeleccionado: string | null;
+  puedeAprobar: boolean;
+}) {
+  const [pestana, setPestana] = useState<"mensajeria" | "listas">("mensajeria");
+  const cuentasDelCliente = new Set(
+    portfolios
+      .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
+      .flatMap((p) => p.accounts.map((a) => a.id)),
+  );
+  const adsDelCliente = ads.filter((ad) => cuentasDelCliente.has(ad.accountKey));
+
+  return (
+    <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
+      <div className="mb-5">
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+          <Users className="size-3 text-brand" />
+          Audiencias y mensajería
+        </p>
+        <h2 className="neo-section-title">Audiencias</h2>
+      </div>
+      <div className="mb-4 flex gap-2">
+        {(
+          [
+            { id: "mensajeria" as const, label: "Mensajería (WhatsApp y llamadas)" },
+            { id: "listas" as const, label: "Listas de contactos" },
+          ]
+        ).map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => setPestana(item.id)}
+            className={
+              "rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors " +
+              (pestana === item.id
+                ? "border-brand bg-brand/12 text-foreground"
+                : "border-foreground/12 text-foreground/55 hover:text-foreground")
+            }
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {pestana === "mensajeria" ? (
+        <MensajeriaView ads={adsDelCliente} puedeAprobar={puedeAprobar} />
+      ) : (
+        <ListasDeContactos
+          portfolios={portfolios}
+          clienteSeleccionado={clienteSeleccionado}
+        />
+      )}
+    </div>
+  );
+}
+
+function ListasDeContactos({
+  portfolios,
   clienteSeleccionado,
 }: {
   portfolios: PortfolioSummary[];
-  /** El cliente del navbar: es el único selector de cliente de la app, así que
-   * acá solo se ofrecen sus cuentas. Sin cliente elegido, se ven todas. */
   clienteSeleccionado: string | null;
 }) {
   const cuentasGoogle: CuentaGoogle[] = portfolios
@@ -107,20 +171,15 @@ export function AudienciasView({
   const [listas, setListas] = useState<ListaConocida[]>([]);
 
   return (
-    <div className="mx-auto w-full max-w-[900px] p-4 md:p-6">
+    <div className="w-full">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-          <Users className="size-3 text-[#4242FF]" />
-          Audiencias propias
-        </p>
-        <h2 className="neo-section-title">Audiencias</h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+        <p className="max-w-2xl text-sm leading-6 text-foreground/58">
           Sube listas de contactos (correo, teléfono o domicilio) para
           segmentar o excluir a personas específicas. Los datos se hashean acá
           mismo, en el propio servidor de Windsor, antes de llegar a la
           plataforma — nunca se guardan en WiWO.ADS.
         </p>
-        <p className="mt-2 max-w-2xl text-xs leading-5 text-[#F8FAD7]/40">
+        <p className="mt-2 max-w-2xl text-xs leading-5 text-foreground/40">
           Por ahora solo Google Ads (Customer Match). Meta tiene el mismo tipo
           de audiencia en su propia plataforma, pero Windsor —el proveedor que
           conecta esta app con las plataformas— todavía no expone esa acción
@@ -129,11 +188,11 @@ export function AudienciasView({
       </div>
 
       <Surface className="mb-4 p-4">
-        <label className="font-micro block text-[0.6rem] text-[#F8FAD7]/50">
+        <label className="font-micro block text-[0.6rem] text-foreground/50">
           CUENTA DE GOOGLE ADS
         </label>
         <Select value={cuentaId} onValueChange={setCuentaId}>
-          <SelectTrigger className="mt-1.5 w-full bg-[#292929]/60 sm:w-96">
+          <SelectTrigger className="mt-1.5 w-full bg-field/60 sm:w-96">
             <SelectValue placeholder="Elige una cuenta…" />
           </SelectTrigger>
           <SelectContent>
@@ -145,7 +204,7 @@ export function AudienciasView({
           </SelectContent>
         </Select>
         {cuentasGoogle.length === 0 && (
-          <p className="mt-2 text-xs text-[#F8FAD7]/45">
+          <p className="mt-2 text-xs text-foreground/45">
             Ningún cliente tiene todavía una cuenta de Google Ads conectada.
           </p>
         )}
@@ -216,21 +275,21 @@ function TarjetaCrearLista({
 
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-[#F8FAD7]">Crear lista</h3>
+      <h3 className="text-sm font-bold text-foreground">Crear lista</h3>
       <div className="mt-3 space-y-2">
         <Input
           value={nombre}
           onChange={(e) => setNombre(e.target.value)}
           placeholder="Nombre de la lista"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         <Input
           value={descripcion}
           onChange={(e) => setDescripcion(e.target.value)}
           placeholder="Descripción (opcional)"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
-        <label className="flex items-center gap-2 text-xs text-[#F8FAD7]/70">
+        <label className="flex items-center gap-2 text-xs text-foreground/70">
           <input
             type="checkbox"
             checked={sinExpiracion}
@@ -240,7 +299,7 @@ function TarjetaCrearLista({
           Sin expiración (si no, cada miembro cae de la lista a los 540 días)
         </label>
         <Button onClick={() => void crear()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           Crear
         </Button>
       </div>
@@ -310,13 +369,13 @@ function TarjetaSubirContactos({
 
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-[#F8FAD7]">Subir contactos</h3>
+      <h3 className="text-sm font-bold text-foreground">Subir contactos</h3>
       <div className="mt-3 space-y-2">
         <Input
           value={listaId}
           onChange={(e) => setListaId(e.target.value)}
           placeholder="Id de la lista (de «Crear lista» o de Google Ads)"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         {listas.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -325,7 +384,7 @@ function TarjetaSubirContactos({
                 key={l.id}
                 type="button"
                 onClick={() => setListaId(l.id)}
-                className="rounded-full border border-[#F8FAD7]/10 bg-[#292929]/50 px-2 py-0.5 text-[0.65rem] text-[#F8FAD7]/60 hover:text-[#F8FAD7]/85"
+                className="rounded-full border border-foreground/10 bg-field/50 px-2 py-0.5 text-[0.65rem] text-foreground/60 hover:text-foreground/85"
               >
                 {l.nombre}
               </button>
@@ -337,15 +396,15 @@ function TarjetaSubirContactos({
           onChange={(e) => setTexto(e.target.value)}
           rows={5}
           placeholder={"persona@correo.com\n+56912345678"}
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         <div className="flex flex-wrap gap-3">
           <div>
-            <label className="font-micro block text-[0.58rem] text-[#F8FAD7]/45">
+            <label className="font-micro block text-[0.58rem] text-foreground/45">
               CONSENTIMIENTO · PUBLICIDAD PERSONALIZADA
             </label>
             <Select value={consentAds} onValueChange={setConsentAds}>
-              <SelectTrigger className="mt-1 w-52 bg-[#292929]/60">
+              <SelectTrigger className="mt-1 w-52 bg-field/60">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -358,11 +417,11 @@ function TarjetaSubirContactos({
             </Select>
           </div>
           <div>
-            <label className="font-micro block text-[0.58rem] text-[#F8FAD7]/45">
+            <label className="font-micro block text-[0.58rem] text-foreground/45">
               CONSENTIMIENTO · USO DE DATOS
             </label>
             <Select value={consentUser} onValueChange={setConsentUser}>
-              <SelectTrigger className="mt-1 w-52 bg-[#292929]/60">
+              <SelectTrigger className="mt-1 w-52 bg-field/60">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -375,16 +434,16 @@ function TarjetaSubirContactos({
             </Select>
           </div>
         </div>
-        <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+        <p className="text-[0.65rem] leading-5 text-foreground/35">
           Declarar el consentimiento real de cada contacto es responsabilidad
           de quien sube la lista, no algo que esta pantalla pueda verificar.
         </p>
         <Button onClick={() => void subir()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           Subir
         </Button>
         {ultimoRequestId && (
-          <p className="text-[0.68rem] text-[#F8FAD7]/50">
+          <p className="text-[0.68rem] text-foreground/50">
             Último id de subida: <code>{ultimoRequestId}</code>
           </p>
         )}
@@ -418,25 +477,25 @@ function TarjetaEstadoSubida({ cuenta }: { cuenta: CuentaGoogle }) {
 
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-[#F8FAD7]">Ver estado de una subida</h3>
+      <h3 className="text-sm font-bold text-foreground">Ver estado de una subida</h3>
       <div className="mt-3 flex items-end gap-3">
         <Input
           value={requestId}
           onChange={(e) => setRequestId(e.target.value)}
           placeholder="Id de la subida"
-          className="min-w-0 flex-1 bg-[#292929]/60"
+          className="min-w-0 flex-1 bg-field/60"
         />
         <Button onClick={() => void consultar()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           Consultar
         </Button>
       </div>
       {estado && (
-        <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-[#1c1d1b] p-3 text-[0.7rem] text-[#F8FAD7]/70">
+        <pre className="mt-3 max-h-40 overflow-auto rounded-lg bg-[#1c1d1b] p-3 text-[0.7rem] text-foreground/70">
           {JSON.stringify(estado, null, 2)}
         </pre>
       )}
-      <p className="mt-2 text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+      <p className="mt-2 text-[0.65rem] leading-5 text-foreground/35">
         &quot;PROCESSING&quot; puede tardar hasta 24 horas — no conviene
         consultar más de una vez por minuto, comparte cupo con la lectura de
         métricas.
@@ -481,7 +540,7 @@ function TarjetaAdjuntar({
 
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-[#F8FAD7]">
+      <h3 className="text-sm font-bold text-foreground">
         Adjuntar a un grupo de anuncios
       </h3>
       <div className="mt-3 space-y-2">
@@ -489,7 +548,7 @@ function TarjetaAdjuntar({
           value={listaId}
           onChange={(e) => setListaId(e.target.value)}
           placeholder="Id de la lista"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         {listas.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -498,7 +557,7 @@ function TarjetaAdjuntar({
                 key={l.id}
                 type="button"
                 onClick={() => setListaId(l.id)}
-                className="rounded-full border border-[#F8FAD7]/10 bg-[#292929]/50 px-2 py-0.5 text-[0.65rem] text-[#F8FAD7]/60 hover:text-[#F8FAD7]/85"
+                className="rounded-full border border-foreground/10 bg-field/50 px-2 py-0.5 text-[0.65rem] text-foreground/60 hover:text-foreground/85"
               >
                 {l.nombre}
               </button>
@@ -509,9 +568,9 @@ function TarjetaAdjuntar({
           value={adGroupId}
           onChange={(e) => setAdGroupId(e.target.value)}
           placeholder="Id del grupo de anuncios (Publicaciones o Google Ads)"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
-        <label className="flex items-center gap-2 text-xs text-[#F8FAD7]/70">
+        <label className="flex items-center gap-2 text-xs text-foreground/70">
           <input
             type="checkbox"
             checked={excluir}
@@ -522,7 +581,7 @@ function TarjetaAdjuntar({
           segmentar
         </label>
         <Button onClick={() => void adjuntar()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           {excluir ? "Excluir" : "Adjuntar"}
         </Button>
       </div>
@@ -579,13 +638,13 @@ function TarjetaAdministrarLista({
 
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-[#F8FAD7]">Renombrar o eliminar</h3>
+      <h3 className="text-sm font-bold text-foreground">Renombrar o eliminar</h3>
       <div className="mt-3 space-y-2">
         <Input
           value={listaId}
           onChange={(e) => setListaId(e.target.value)}
           placeholder="Id de la lista"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         {listas.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -594,7 +653,7 @@ function TarjetaAdministrarLista({
                 key={l.id}
                 type="button"
                 onClick={() => setListaId(l.id)}
-                className="rounded-full border border-[#F8FAD7]/10 bg-[#292929]/50 px-2 py-0.5 text-[0.65rem] text-[#F8FAD7]/60 hover:text-[#F8FAD7]/85"
+                className="rounded-full border border-foreground/10 bg-field/50 px-2 py-0.5 text-[0.65rem] text-foreground/60 hover:text-foreground/85"
               >
                 {l.nombre}
               </button>
@@ -606,10 +665,10 @@ function TarjetaAdministrarLista({
             value={nombreNuevo}
             onChange={(e) => setNombreNuevo(e.target.value)}
             placeholder="Nombre nuevo"
-            className="min-w-0 flex-1 bg-[#292929]/60"
+            className="min-w-0 flex-1 bg-field/60"
           />
           <Button onClick={() => void renombrar()} disabled={enviando}>
-            {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+            {enviando ? <OrbeDeBoton /> : null}
             Renombrar
           </Button>
           <Button
@@ -627,7 +686,7 @@ function TarjetaAdministrarLista({
             Eliminar
           </Button>
         </div>
-        <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+        <p className="text-[0.65rem] leading-5 text-foreground/35">
           Eliminar no se puede deshacer: se pierden todos los miembros de la
           lista y se desvincula de cualquier grupo de anuncios que la use.
         </p>

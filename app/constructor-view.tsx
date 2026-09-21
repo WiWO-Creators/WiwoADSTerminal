@@ -19,6 +19,16 @@ import {
   Wand2,
 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -58,7 +68,7 @@ import {
   precargarPublicaciones,
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
-import { Surface, ThinkingOrb } from "./ui";
+import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
 
 /**
  * El mapa de segmentación carga Leaflet, que toca `window`/`document` al
@@ -71,7 +81,7 @@ const SegmentacionGeografica = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-[320px] flex-col items-center justify-center gap-3 rounded-xl border border-[#F8FAD7]/10 bg-[#292929]/40 text-xs text-[#F8FAD7]/40">
+      <div className="flex h-[320px] flex-col items-center justify-center gap-3 rounded-xl border border-foreground/10 bg-field/40 text-xs text-foreground/40">
         <ThinkingOrb size="md" state="thinking" label="" />
         Cargando mapa…
       </div>
@@ -124,6 +134,10 @@ type Resultado = {
   }>;
   ids: Record<string, string>;
   error?: string;
+  /** "duplicado": ya se publicó algo igual hace poco (respuesta 409). */
+  codigo?: string;
+  creado?: string[];
+  hace?: number;
 };
 
 type Fase = "campana" | "conjunto" | "anuncio";
@@ -234,8 +248,12 @@ export function ConstructorView({
   attachTo,
   clienteGlobal,
   onCambiarClienteGlobal,
+  onPublicado,
 }: {
   attachTo?: ConstructorAttachTo;
+  /** Se llama cuando algo llegó a crearse, para que el resto de la app
+   * relea sus datos y la campaña nueva aparezca sin recargar. */
+  onPublicado?: () => void;
   /** El cliente marcado en el selector del navbar — punto de partida cuando
    * no se llega con un destino concreto ya elegido. */
   clienteGlobal?: string | null;
@@ -254,6 +272,7 @@ export function ConstructorView({
   const [plan, setPlan] = useState<Plan | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
+  const [duplicado, setDuplicado] = useState<{ creado: string[]; hace: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Qué plataforma se ve en el selector tipo carrusel de Conjunto y Anuncio,
@@ -351,18 +370,24 @@ export function ConstructorView({
    * Publica de verdad. El servidor vuelve a armar el plan con este mismo
    * borrador, así que lo que se ve en pantalla es lo que se ejecuta.
    */
-  async function publicar() {
+  async function publicar(duplicar = false) {
     setPublicando(true);
     setError(null);
     try {
       const response = await fetch("/api/constructor/ejecutar", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ draft, confirmacion: "CREAR" }),
+        body: JSON.stringify({ draft, confirmacion: "CREAR", duplicar }),
       });
       const body = (await response.json()) as Resultado;
+      if (response.status === 409 && body.codigo === "duplicado") {
+        // No es un fallo: es una pregunta. Nada se envió todavía.
+        setDuplicado({ creado: body.creado ?? [], hace: body.hace ?? 0 });
+        return;
+      }
       setResultado(body);
       if (!response.ok && body.error) setError(body.error);
+      if (body.steps?.some((paso) => paso.ok)) onPublicado?.();
     } catch (issue) {
       setError(
         issue instanceof Error
@@ -381,8 +406,8 @@ export function ConstructorView({
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-          <Sparkles className="size-3 text-[#4242FF]" />
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+          <Sparkles className="size-3 text-brand" />
           Constructor · se revisa antes de publicar
         </p>
         <h2 className="neo-section-title">
@@ -392,14 +417,14 @@ export function ConstructorView({
               ? "Añade un conjunto de anuncios, revísalo antes de publicar"
               : "Arma una campaña, revísala antes de publicar"}
         </h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           {draft.existingCampaign ? (
             <>
-              Sobre <strong className="text-[#F8FAD7]/80">{draft.existingCampaign.campaignName}</strong>
+              Sobre <strong className="text-foreground/80">{draft.existingCampaign.campaignName}</strong>
               {draft.existingAdset ? (
                 <>
                   {" "}
-                  · <strong className="text-[#F8FAD7]/80">{draft.existingAdset.adsetName}</strong>
+                  · <strong className="text-foreground/80">{draft.existingAdset.adsetName}</strong>
                 </>
               ) : null}
               . Lo que ya está definido en la campaña no se vuelve a pedir.
@@ -411,9 +436,9 @@ export function ConstructorView({
       </div>
 
       <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-[#3BFF00]/25 bg-[#3BFF00]/[0.06] px-4 py-3">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#3BFF00]" />
-        <p className="text-xs leading-5 text-[#F8FAD7]/70">
-          <strong className="text-[#F8FAD7]">Nada sale sin que lo apruebes.</strong>{" "}
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
+        <p className="text-xs leading-5 text-foreground/70">
+          <strong className="text-foreground">Nada sale sin que lo apruebes.</strong>{" "}
           Armar y revisar el plan no toca ninguna plataforma. Solo el botón de
           publicar, al final, crea de verdad — y todo nace pausado, así que no
           gasta hasta que lo actives en la plataforma.
@@ -431,25 +456,25 @@ export function ConstructorView({
               className={cn(
                 "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors",
                 fase === item.id
-                  ? "bg-[#4242FF]/12 text-[#F8FAD7]"
-                  : "text-[#F8FAD7]/55 hover:bg-[#F8FAD7]/6 hover:text-[#F8FAD7]",
+                  ? "bg-brand/12 text-foreground"
+                  : "text-foreground/55 hover:bg-foreground/6 hover:text-foreground",
               )}
             >
               <span
                 className={cn(
                   "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.62rem] font-bold",
                   index < indiceFase
-                    ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-[#3BFF00]"
+                    ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-brand"
                     : fase === item.id
-                      ? "border-[#4242FF] text-[#4242FF]"
-                      : "border-[#F8FAD7]/20 text-[#F8FAD7]/40",
+                      ? "border-brand text-brand"
+                      : "border-foreground/20 text-foreground/40",
                 )}
               >
                 {index < indiceFase ? <Check className="size-3" /> : index + 1}
               </span>
               <span>
                 <span className="block text-sm font-bold">{item.label}</span>
-                <span className="mt-0.5 block text-[0.68rem] text-[#F8FAD7]/45">
+                <span className="mt-0.5 block text-[0.68rem] text-foreground/45">
                   {item.detalle}
                 </span>
               </span>
@@ -490,13 +515,13 @@ export function ConstructorView({
             />
           )}
 
-          <div className="mt-6 flex items-center justify-between border-t border-[#F8FAD7]/10 pt-4">
+          <div className="mt-6 flex items-center justify-between border-t border-foreground/10 pt-4">
             <Button
               type="button"
               variant="ghost"
               disabled={indiceFase === 0}
               onClick={() => setFase(FASES[Math.max(0, indiceFase - 1)].id)}
-              className="text-[#F8FAD7]/60"
+              className="text-foreground/60"
             >
               Atrás
             </Button>
@@ -537,15 +562,15 @@ export function ConstructorView({
             <>
               {plan.budget.basis && (
                 <Surface className="p-4">
-                  <p className="font-micro text-[0.6rem] text-[#F8FAD7]/45">
+                  <p className="font-micro text-[0.6rem] text-foreground/45">
                     PRESUPUESTO SUGERIDO
                   </p>
-                  <p className="metric-number mt-1 text-2xl font-bold text-[#F8FAD7]">
+                  <p className="metric-number mt-1 text-2xl font-bold text-foreground">
                     {plan.budget.suggested === null
                       ? "Sin dato"
                       : `${plan.budget.currency ?? ""} ${plan.budget.suggested.toLocaleString("es-CL")}`}
                   </p>
-                  <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/50">
+                  <p className="mt-1 text-xs leading-5 text-foreground/50">
                     {plan.budget.basis}
                   </p>
                 </Surface>
@@ -553,7 +578,7 @@ export function ConstructorView({
 
               {bloqueantes.length > 0 && (
                 <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-4">
-                  <p className="text-sm font-bold text-[#F8FAD7]">
+                  <p className="text-sm font-bold text-foreground">
                     Falta resolver {bloqueantes.length}
                   </p>
                   <ul className="mt-2 space-y-1.5">
@@ -587,32 +612,32 @@ export function ConstructorView({
               )}
 
               <Surface className="overflow-hidden">
-                <div className="border-b border-[#F8FAD7]/10 px-4 py-3">
-                  <h3 className="font-bold text-[#F8FAD7]">
+                <div className="border-b border-foreground/10 px-4 py-3">
+                  <h3 className="font-bold text-foreground">
                     Lo que se ejecutaría
                   </h3>
-                  <p className="mt-1 text-xs text-[#F8FAD7]/50">
+                  <p className="mt-1 text-xs text-foreground/50">
                     {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
                     {resultado ? "ya ejecutado" : "todavía sin enviar"}
                   </p>
                 </div>
-                <ol className="divide-y divide-[#F8FAD7]/8">
+                <ol className="divide-y divide-foreground/8">
                   {plan.steps.map((step, index) => (
                     <li key={index} className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-micro rounded-full border border-[#F8FAD7]/12 px-2 py-0.5 text-[0.55rem] text-[#F8FAD7]/50">
+                        <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
                           {platformLabel(step.platform).toUpperCase()}
                         </span>
-                        <span className="text-sm font-bold text-[#F8FAD7]">
+                        <span className="text-sm font-bold text-foreground">
                           {step.label}
                         </span>
                         {step.informativo && (
-                          <span className="font-micro rounded-full border border-[#4242FF]/25 bg-[#4242FF]/10 px-1.5 py-0.5 text-[0.52rem] text-[#4242FF]">
+                          <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[0.52rem] text-brand">
                             INFORMATIVO
                           </span>
                         )}
                       </div>
-                      <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-[#292929]/70 p-2.5 text-[0.68rem] leading-5 text-[#F8FAD7]/62">
+                      <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
                         {JSON.stringify(step.params, null, 2)}
                       </pre>
                     </li>
@@ -626,22 +651,22 @@ export function ConstructorView({
                   con el borrador, no confía en lo que mande el navegador.
                 */}
                 {bloqueantes.length === 0 && !resultado && (
-                  <div className="border-t border-[#F8FAD7]/10 p-4">
+                  <div className="border-t border-foreground/10 p-4">
                     <Button
                       type="button"
-                      onClick={() => void publicar()}
+                      onClick={() => void publicar(false)}
                       disabled={publicando}
                       className="w-full font-extrabold"
                     >
                       {publicando ? (
-                        <ThinkingOrb size="xs" state="generating" label="" />
+                        <OrbeDeBoton />
                       ) : (
                         <Rocket />
                       )}
                       Publicar pausado en{" "}
                       {draft.platforms.map(platformLabel).join(" y ")}
                     </Button>
-                    <p className="mt-2 text-center text-[0.68rem] leading-5 text-[#F8FAD7]/45">
+                    <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
                       Se crea de verdad en la cuenta del cliente, en estado
                       pausado. No empieza a gastar hasta que lo actives en la
                       plataforma.
@@ -659,29 +684,33 @@ export function ConstructorView({
                       : "border-danger-deep/25 bg-danger-deep/[0.06]",
                   )}
                 >
-                  <div className="border-b border-[#F8FAD7]/10 px-4 py-3">
-                    <h3 className="flex items-center gap-2 font-bold text-[#F8FAD7]">
+                  <div className="border-b border-foreground/10 px-4 py-3">
+                    <h3 className="flex items-center gap-2 font-bold text-foreground">
                       {resultado.ok ? (
-                        <Check className="size-4 text-[#3BFF00]" />
+                        <Check className="size-4 text-brand" />
                       ) : (
                         <AlertCircle className="size-4 text-danger" />
                       )}
                       {resultado.ok ? "Creado" : "Se detuvo"}
                     </h3>
-                    <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/62">
+                    <p className="mt-1 text-xs leading-5 text-foreground/62">
                       {resultado.error ?? resultado.aviso}
                     </p>
                   </div>
-                  <ul className="divide-y divide-[#F8FAD7]/8">
+                  <JerarquiaCreada
+                    pasosEsperados={plan.steps.filter((paso) => !paso.informativo)}
+                    resultado={resultado}
+                  />
+                  <ul className="divide-y divide-foreground/8">
                     {resultado.steps.map((paso, index) => (
                       <li key={index} className="flex items-start gap-2 px-4 py-2.5">
                         {paso.ok ? (
-                          <Check className="mt-0.5 size-3.5 shrink-0 text-[#3BFF00]" />
+                          <Check className="mt-0.5 size-3.5 shrink-0 text-brand" />
                         ) : (
                           <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-danger" />
                         )}
                         <span className="min-w-0">
-                          <span className="block text-sm text-[#F8FAD7]/82">
+                          <span className="block text-sm text-foreground/82">
                             {paso.label}
                           </span>
                           {paso.error && (
@@ -694,11 +723,11 @@ export function ConstructorView({
                     ))}
                   </ul>
                   {Object.keys(resultado.ids).length > 0 && (
-                    <div className="border-t border-[#F8FAD7]/10 px-4 py-3">
-                      <p className="font-micro text-[0.58rem] text-[#F8FAD7]/45">
+                    <div className="border-t border-foreground/10 px-4 py-3">
+                      <p className="font-micro text-[0.58rem] text-foreground/45">
                         IDENTIFICADORES CREADOS
                       </p>
-                      <pre className="metric-number mt-1.5 overflow-x-auto text-[0.68rem] leading-5 text-[#F8FAD7]/62">
+                      <pre className="metric-number mt-1.5 overflow-x-auto text-[0.68rem] leading-5 text-foreground/62">
                         {JSON.stringify(resultado.ids, null, 2)}
                       </pre>
                     </div>
@@ -709,6 +738,151 @@ export function ConstructorView({
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={duplicado !== null}
+        onOpenChange={(abierto) => !abierto && setDuplicado(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Esto ya se publicó hace poco</AlertDialogTitle>
+            <AlertDialogDescription>
+              Una campaña con este nombre se publicó hace{" "}
+              {duplicado ? Math.max(1, Math.round(duplicado.hace / 60_000)) : 0} min
+              y algo quedó creado en la plataforma. Publicarla otra vez la
+              duplica, y no hay forma de borrarla desde acá.
+            </AlertDialogDescription>
+            {duplicado && duplicado.creado.length > 0 && (
+              <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs text-foreground/70">
+                {duplicado.creado.map((linea, indice) => (
+                  <li key={indice}>· {linea}</li>
+                ))}
+              </ul>
+            )}
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>No publicar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setDuplicado(null);
+                void publicar(true);
+              }}
+            >
+              Publicar igual
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+/**
+ * Qué nivel de cada plataforma llegó a crearse: campaña → conjunto → anuncio.
+ *
+ * El detalle paso a paso ya estaba, pero un plan que se cortaba a mitad de
+ * camino dejaba campañas sin conjunto ni anuncio y había que descubrirlo
+ * leyendo la lista. Sin el conjunto de anuncios (grupo de anuncios en Google)
+ * una campaña no puede entregar nada, así que ese es el nivel que se marca
+ * más fuerte cuando falta.
+ */
+const NIVELES_DE_CREACION: Array<{
+  id: "campana" | "conjunto" | "anuncio";
+  acciones: string[];
+  etiqueta: (plataforma: string) => string;
+}> = [
+  { id: "campana", acciones: ["create_campaign"], etiqueta: () => "Campaña" },
+  {
+    id: "conjunto",
+    acciones: ["create_adset", "create_ad_group"],
+    etiqueta: (plataforma) =>
+      plataforma === "google" ? "Grupo de anuncios" : "Conjunto de anuncios",
+  },
+  {
+    id: "anuncio",
+    acciones: ["create_ad", "create_responsive_search_ad", "boost_post"],
+    etiqueta: () => "Anuncio",
+  },
+];
+
+function JerarquiaCreada({
+  pasosEsperados,
+  resultado,
+}: {
+  pasosEsperados: Array<{ platform: string; action: string }>;
+  resultado: Resultado;
+}) {
+  const plataformas = [...new Set(pasosEsperados.map((paso) => paso.platform))];
+  return (
+    <div className="space-y-3 border-b border-foreground/10 px-4 py-3">
+      {plataformas.map((plataforma) => {
+        const niveles = NIVELES_DE_CREACION.filter((nivel) =>
+          pasosEsperados.some(
+            (paso) => paso.platform === plataforma && nivel.acciones.includes(paso.action),
+          ),
+        ).map((nivel) => {
+          const hechos = resultado.steps.filter(
+            (paso) => paso.platform === plataforma && nivel.acciones.includes(paso.action),
+          );
+          const estado: "listo" | "fallo" | "pendiente" =
+            hechos.length === 0
+              ? "pendiente"
+              : hechos.every((paso) => paso.ok)
+                ? "listo"
+                : "fallo";
+          return { ...nivel, estado };
+        });
+        const faltaConjunto = niveles.some(
+          (nivel) => nivel.id === "conjunto" && nivel.estado !== "listo",
+        );
+        return (
+          <div key={plataforma}>
+            <p className="font-micro text-[0.58rem] text-foreground/45">
+              {platformLabel(plataforma).toUpperCase()}
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {niveles.map((nivel, indice) => (
+                <span key={nivel.id} className="flex items-center gap-1.5">
+                  {indice > 0 && <ChevronRight className="size-3 text-foreground/25" />}
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold",
+                      nivel.estado === "listo" &&
+                        "border-[#3BFF00]/30 bg-[#3BFF00]/10 text-brand",
+                      nivel.estado === "fallo" &&
+                        "border-danger-deep/40 bg-danger-deep/15 text-danger",
+                      nivel.estado === "pendiente" &&
+                        "border-foreground/12 text-foreground/40",
+                    )}
+                  >
+                    {nivel.estado === "listo" ? (
+                      <Check className="size-3" />
+                    ) : nivel.estado === "fallo" ? (
+                      <AlertCircle className="size-3" />
+                    ) : null}
+                    {nivel.etiqueta(plataforma)}
+                    <span className="font-medium opacity-70">
+                      {nivel.estado === "listo"
+                        ? "creado"
+                        : nivel.estado === "fallo"
+                          ? "falló"
+                          : "no se llegó"}
+                    </span>
+                  </span>
+                </span>
+              ))}
+            </div>
+            {faltaConjunto && (
+              <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-danger">
+                <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+                {plataforma === "google" ? "El grupo de anuncios" : "El conjunto de anuncios"} no se
+                creó: sin él la campaña no puede entregar nada. Usa &quot;+ Conjunto&quot; sobre la
+                campaña, o vuelve a publicar tras borrar la que quedó.
+              </p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -727,16 +901,16 @@ function Seccion({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-[#F8FAD7]/8 py-4 first:pt-0 last:border-0 last:pb-0">
+    <div className="border-b border-foreground/8 py-4 first:pt-0 last:border-0 last:pb-0">
       <div className="mb-2.5 flex items-center gap-2">
-        <h3 className="text-sm font-bold text-[#F8FAD7]">{titulo}</h3>
+        <h3 className="text-sm font-bold text-foreground">{titulo}</h3>
         {soloPlataforma && (
-          <span className="font-micro rounded-full border border-[#F8FAD7]/12 px-2 py-0.5 text-[0.55rem] text-[#F8FAD7]/45">
+          <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/45">
             SOLO {soloPlataforma.toUpperCase()}
           </span>
         )}
         {informativo && (
-          <span className="font-micro rounded-full border border-[#4242FF]/25 bg-[#4242FF]/10 px-2 py-0.5 text-[0.55rem] text-[#4242FF]">
+          <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[0.55rem] text-brand">
             INFORMATIVO
           </span>
         )}
@@ -757,7 +931,7 @@ function Campo({
 }) {
   return (
     <div className={className}>
-      <label className="font-micro mb-1.5 block text-[0.6rem] text-[#F8FAD7]/50">
+      <label className="font-micro mb-1.5 block text-[0.6rem] text-foreground/50">
         {etiqueta}
       </label>
       {children}
@@ -783,7 +957,7 @@ function SelectorPlataforma({
 }) {
   if (plataformas.length <= 1) return null;
   return (
-    <div className="mb-4 flex gap-1 rounded-full bg-[#292929]/40 p-1">
+    <div className="mb-4 flex gap-1 rounded-full bg-field/40 p-1">
       {plataformas.map((p) => (
         <button
           key={p}
@@ -792,8 +966,8 @@ function SelectorPlataforma({
           className={cn(
             "flex-1 rounded-full px-3 py-1.5 text-xs font-bold transition-colors",
             activa === p
-              ? "bg-[#4242FF] text-[#F8FAD7]"
-              : "text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+              ? "bg-primary text-primary-foreground"
+              : "text-foreground/55 hover:text-foreground",
           )}
         >
           {platformLabel(p)}
@@ -825,7 +999,7 @@ function SelectorCuenta({
   }
   if (delPlatform.length === 1) {
     return (
-      <p className="mt-2 text-xs text-[#F8FAD7]/50">
+      <p className="mt-2 text-xs text-foreground/50">
         Se publica en {delPlatform[0].name} — es la única cuenta de{" "}
         {platformLabel(platform)}.
       </p>
@@ -841,7 +1015,7 @@ function SelectorCuenta({
           })
         }
       >
-        <SelectTrigger className="w-full bg-[#292929]/60">
+        <SelectTrigger className="w-full bg-field/60">
           <SelectValue placeholder={`Elige entre ${delPlatform.length} cuentas`} />
         </SelectTrigger>
         <SelectContent>
@@ -879,16 +1053,16 @@ function FaseCampana({
   if (draft.existingCampaign) {
     return (
       <Seccion titulo="Campaña existente">
-        <p className="text-sm leading-6 text-[#F8FAD7]/70">
+        <p className="text-sm leading-6 text-foreground/70">
           {platformLabel(draft.existingCampaign.platform)} ·{" "}
-          <strong className="text-[#F8FAD7]">
+          <strong className="text-foreground">
             {draft.existingCampaign.campaignName}
           </strong>
           {draft.existingAdset && (
             <>
               {" "}
-              <ChevronRight className="inline size-3 text-[#F8FAD7]/30" />{" "}
-              <strong className="text-[#F8FAD7]">
+              <ChevronRight className="inline size-3 text-foreground/30" />{" "}
+              <strong className="text-foreground">
                 {draft.existingAdset.adsetName}
               </strong>
             </>
@@ -917,7 +1091,7 @@ function FaseCampana({
                 onCambiarClienteGlobal?.(value);
               }}
             >
-              <SelectTrigger className="w-full bg-[#292929]/60">
+              <SelectTrigger className="w-full bg-field/60">
                 <SelectValue
                   placeholder={cargandoClientes ? "Cargando…" : "Elige un cliente"}
                 />
@@ -936,7 +1110,7 @@ function FaseCampana({
               value={draft.objective}
               onValueChange={(value) => onChange({ objective: value as Objective })}
             >
-              <SelectTrigger className="w-full bg-[#292929]/60">
+              <SelectTrigger className="w-full bg-field/60">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -978,10 +1152,10 @@ function FaseCampana({
                   className={cn(
                     "flex items-center gap-1.5 rounded-full border px-4 py-2 text-sm font-bold transition-colors",
                     sinCuenta && !activa
-                      ? "cursor-not-allowed border-[#F8FAD7]/8 text-[#F8FAD7]/25"
+                      ? "cursor-not-allowed border-foreground/8 text-foreground/25"
                       : activa
-                        ? "border-[#4242FF] bg-[#4242FF]/12 text-[#F8FAD7]"
-                        : "border-[#F8FAD7]/12 text-[#F8FAD7]/50 hover:border-[#F8FAD7]/25",
+                        ? "border-brand bg-brand/12 text-foreground"
+                        : "border-foreground/12 text-foreground/50 hover:border-foreground/25",
                   )}
                 >
                   {sinCuenta && !activa && <Lock className="size-3.5" />}
@@ -996,7 +1170,7 @@ function FaseCampana({
               !cuentas.some((c) => c.provider === value) &&
               !draft.platforms.includes(value),
           ) && (
-            <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/40">
+            <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-foreground/40">
               <Info className="mt-0.5 size-3.5 shrink-0" />
               Las plataformas bloqueadas no tienen ninguna cuenta conectada
               para este cliente. Vincúlala primero en la ficha del cliente
@@ -1022,7 +1196,7 @@ function FaseCampana({
           value={draft.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="Campaña Halloween 2026"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
         {/*
           Las siglas no se escriben acá: el sistema las antepone al publicar,
@@ -1033,10 +1207,10 @@ function FaseCampana({
           {draft.platforms.map((platform) => (
             <p
               key={platform}
-              className="metric-number text-[0.68rem] text-[#F8FAD7]/45"
+              className="metric-number text-[0.68rem] text-foreground/45"
             >
               {platformLabel(platform)}:{" "}
-              <span className="text-[#4242FF]">
+              <span className="text-brand">
                 {nombreCompuesto(
                   OBJECTIVES[draft.objective].sigla,
                   platform,
@@ -1054,7 +1228,7 @@ function FaseCampana({
           onChange={(e) => onChange({ details: e.target.value })}
           rows={2}
           placeholder="Nota interna para el equipo — no se envía a ninguna plataforma"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
       </Seccion>
 
@@ -1065,7 +1239,7 @@ function FaseCampana({
             onChange({ specialAdCategory: value as SpecialAdCategory })
           }
         >
-          <SelectTrigger className="w-full bg-[#292929]/60 sm:w-72">
+          <SelectTrigger className="w-full bg-field/60 sm:w-72">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -1078,7 +1252,7 @@ function FaseCampana({
             )}
           </SelectContent>
         </Select>
-        <p className="mt-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+        <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
           Vivienda, empleo, crédito y temas sociales tienen reglas de
           segmentación distintas en Meta. Google no tiene este concepto.
         </p>
@@ -1105,9 +1279,9 @@ function FaseConjunto({
   if (draft.existingAdset) {
     return (
       <Seccion titulo="Conjunto de anuncios existente">
-        <p className="text-sm leading-6 text-[#F8FAD7]/70">
+        <p className="text-sm leading-6 text-foreground/70">
           El presupuesto, el público y las ubicaciones de{" "}
-          <strong className="text-[#F8FAD7]">{draft.existingAdset.adsetName}</strong>{" "}
+          <strong className="text-foreground">{draft.existingAdset.adsetName}</strong>{" "}
           ya están definidos. El anuncio se añade directo ahí.
         </p>
       </Seccion>
@@ -1125,7 +1299,7 @@ function FaseConjunto({
             value={draft.name}
             onChange={(e) => onChange({ name: e.target.value })}
             placeholder="Nombre del conjunto de anuncios"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </Seccion>
       )}
@@ -1176,12 +1350,12 @@ function FaseConjunto({
               }
               className="grid-flow-col justify-start gap-6"
             >
-              <label className="flex items-center gap-2 text-sm text-[#F8FAD7]/80">
-                <RadioGroupItem value="sitio_web" className="border-[#F8FAD7]/30" />
+              <label className="flex items-center gap-2 text-sm text-foreground/80">
+                <RadioGroupItem value="sitio_web" className="border-foreground/30" />
                 Sitio web
               </label>
-              <label className="flex items-center gap-2 text-sm text-[#F8FAD7]/80">
-                <RadioGroupItem value="mensajes" className="border-[#F8FAD7]/30" />
+              <label className="flex items-center gap-2 text-sm text-foreground/80">
+                <RadioGroupItem value="mensajes" className="border-foreground/30" />
                 Mensajes
               </label>
             </RadioGroup>
@@ -1196,27 +1370,27 @@ function FaseConjunto({
                 }
                 className="gap-3"
               >
-                <label className="flex items-start gap-2 text-sm text-[#F8FAD7]/80">
+                <label className="flex items-start gap-2 text-sm text-foreground/80">
                   <RadioGroupItem
                     value="campana"
-                    className="mt-0.5 border-[#F8FAD7]/30"
+                    className="mt-0.5 border-foreground/30"
                   />
                   <span>
                     De campaña (Advantage Campaign Budget)
-                    <span className="block text-[0.68rem] text-[#F8FAD7]/45">
+                    <span className="block text-[0.68rem] text-foreground/45">
                       La campaña reparte el gasto entre sus conjuntos. Es el
                       default real de Meta hoy.
                     </span>
                   </span>
                 </label>
-                <label className="flex items-start gap-2 text-sm text-[#F8FAD7]/80">
+                <label className="flex items-start gap-2 text-sm text-foreground/80">
                   <RadioGroupItem
                     value="conjunto"
-                    className="mt-0.5 border-[#F8FAD7]/30"
+                    className="mt-0.5 border-foreground/30"
                   />
                   <span>
                     De este conjunto
-                    <span className="block text-[0.68rem] text-[#F8FAD7]/45">
+                    <span className="block text-[0.68rem] text-foreground/45">
                       Cada conjunto de la campaña tiene su propio monto, en vez
                       de compartir uno.
                     </span>
@@ -1234,7 +1408,7 @@ function FaseConjunto({
                   onChange({ budgetMode: value as "diaria" | "total" })
                 }
               >
-                <SelectTrigger className="w-full bg-[#292929]/60">
+                <SelectTrigger className="w-full bg-field/60">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1249,7 +1423,7 @@ function FaseConjunto({
                   type="date"
                   value={draft.endDate ?? ""}
                   onChange={(e) => onChange({ endDate: e.target.value || null })}
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
             )}
@@ -1264,7 +1438,7 @@ function FaseConjunto({
                   max={65}
                   value={draft.ageMin}
                   onChange={(e) => onChange({ ageMin: Number(e.target.value) })}
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
               <Campo etiqueta="EDAD MÁXIMA">
@@ -1274,7 +1448,7 @@ function FaseConjunto({
                   max={65}
                   value={draft.ageMax}
                   onChange={(e) => onChange({ ageMax: Number(e.target.value) })}
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
               <Campo etiqueta="GÉNERO">
@@ -1282,7 +1456,7 @@ function FaseConjunto({
                   value={draft.gender}
                   onValueChange={(value) => onChange({ gender: value as Gender })}
                 >
-                  <SelectTrigger className="w-full bg-[#292929]/60">
+                  <SelectTrigger className="w-full bg-field/60">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1293,7 +1467,7 @@ function FaseConjunto({
                 </Select>
               </Campo>
             </div>
-            <p className="mt-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+            <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
               Los países de segmentación se definen por cuenta en la ficha del
               cliente, no acá.
             </p>
@@ -1309,10 +1483,10 @@ function FaseConjunto({
                   })
                 }
                 placeholder="ids de Meta separados por coma, ej. 6003107902433"
-                className="bg-[#292929]/60"
+                className="bg-field/60"
               />
             </Campo>
-            <p className="mt-2 flex items-start gap-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+            <p className="mt-2 flex items-start gap-2 text-[0.68rem] leading-5 text-foreground/40">
               <Info className="mt-0.5 size-3 shrink-0" />
               Son ids reales de interés de Meta, no el nombre — todavía no hay
               forma de buscarlos por palabra desde acá. Se consiguen desde
@@ -1321,21 +1495,21 @@ function FaseConjunto({
           </Seccion>
 
           <Seccion titulo="Transparencia de anuncios" informativo>
-            <p className="text-xs leading-5 text-[#F8FAD7]/55">
+            <p className="text-xs leading-5 text-foreground/55">
               Meta publica todo anuncio activo en su Biblioteca de Anuncios de
               forma automática. No es un ajuste que se pueda enviar desde acá.
             </p>
           </Seccion>
 
           <Seccion titulo="Ubicaciones">
-            <p className="font-micro mb-1.5 text-[0.58rem] text-[#F8FAD7]/45">
+            <p className="font-micro mb-1.5 text-[0.58rem] text-foreground/45">
               VACÍO ES AUTOMÁTICAS
             </p>
             <div className="flex flex-wrap gap-4">
               {Object.entries(META_PLACEMENTS).map(([id, label]) => (
                 <label
                   key={id}
-                  className="flex items-center gap-2 text-sm text-[#F8FAD7]/80"
+                  className="flex items-center gap-2 text-sm text-foreground/80"
                 >
                   <Checkbox
                     checked={draft.metaPlacements.includes(id)}
@@ -1346,20 +1520,20 @@ function FaseConjunto({
                           : draft.metaPlacements.filter((p) => p !== id),
                       })
                     }
-                    className="border-[#F8FAD7]/30"
+                    className="border-foreground/30"
                   />
                   {label}
                 </label>
               ))}
             </div>
-            <p className="font-micro mb-1.5 mt-4 text-[0.58rem] text-[#F8FAD7]/45">
+            <p className="font-micro mb-1.5 mt-4 text-[0.58rem] text-foreground/45">
               FORMATO DE ENTREGA · VACÍO ES AUTOMÁTICO
             </p>
             <div className="flex flex-wrap gap-4">
               {Object.entries(META_SURFACES).map(([id, item]) => (
                 <label
                   key={id}
-                  className="flex items-center gap-2 text-sm text-[#F8FAD7]/80"
+                  className="flex items-center gap-2 text-sm text-foreground/80"
                 >
                   <Checkbox
                     checked={draft.metaSurfaces.includes(id)}
@@ -1370,7 +1544,7 @@ function FaseConjunto({
                           : draft.metaSurfaces.filter((p) => p !== id),
                       })
                     }
-                    className="border-[#F8FAD7]/30"
+                    className="border-foreground/30"
                   />
                   {item.label}
                 </label>
@@ -1385,7 +1559,7 @@ function FaseConjunto({
                 onChange({ brandSafety: value as CampaignDraft["brandSafety"] })
               }
             >
-              <SelectTrigger className="w-full bg-[#292929]/60 sm:w-60">
+              <SelectTrigger className="w-full bg-field/60 sm:w-60">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1394,7 +1568,7 @@ function FaseConjunto({
                 <SelectItem value="ampliado">Ampliado</SelectItem>
               </SelectContent>
             </Select>
-            <p className="mt-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+            <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
               Queda como nota para el equipo: el filtro real se administra en
               la herramienta de Seguridad de Marca de Meta, no al crear el
               conjunto.
@@ -1412,12 +1586,12 @@ function FaseConjunto({
             }
             className="grid-flow-col justify-start gap-6"
           >
-            <label className="flex items-center gap-2 text-sm text-[#F8FAD7]/80">
-              <RadioGroupItem value="search" className="border-[#F8FAD7]/30" />
+            <label className="flex items-center gap-2 text-sm text-foreground/80">
+              <RadioGroupItem value="search" className="border-foreground/30" />
               Red de búsqueda
             </label>
-            <label className="flex items-center gap-2 text-sm text-[#F8FAD7]/80">
-              <RadioGroupItem value="display" className="border-[#F8FAD7]/30" />
+            <label className="flex items-center gap-2 text-sm text-foreground/80">
+              <RadioGroupItem value="display" className="border-foreground/30" />
               Red de Display
             </label>
           </RadioGroup>
@@ -1441,9 +1615,9 @@ function FaseConjunto({
             }
             rows={4}
             placeholder={'zapatillas running\n"zapatillas running mujer"\n[comprar zapatillas running]'}
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
-          <p className="mt-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
             Una por línea, con la sintaxis de Google Ads: <code>palabra</code>{" "}
             es concordancia amplia, <code>&quot;palabra&quot;</code> de frase,{" "}
             <code>[palabra]</code> exacta. Sin al menos una, el grupo de
@@ -1481,7 +1655,7 @@ function PresupuestoPorPlataforma({
           }
           inputMode="numeric"
           placeholder="0"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
       </Campo>
     );
@@ -1498,7 +1672,7 @@ function PresupuestoPorPlataforma({
             }
             inputMode="numeric"
             placeholder="0"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </Campo>
       ) : (
@@ -1517,7 +1691,7 @@ function PresupuestoPorPlataforma({
                 }
                 inputMode="numeric"
                 placeholder="0"
-                className="bg-[#292929]/60"
+                className="bg-field/60"
               />
             </Campo>
           ))}
@@ -1534,7 +1708,7 @@ function PresupuestoPorPlataforma({
                 ),
           })
         }
-        className="mt-2 text-[0.68rem] font-bold text-[#4242FF] hover:underline"
+        className="mt-2 text-[0.68rem] font-bold text-brand hover:underline"
       >
         {distinto
           ? "Usar el mismo presupuesto para todas"
@@ -1578,7 +1752,7 @@ function FaseAnuncio({
             value={draft.name}
             onChange={(e) => onChange({ name: e.target.value })}
             placeholder="Nombre del anuncio"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </Seccion>
       )}
@@ -1590,7 +1764,7 @@ function FaseAnuncio({
             value={draft.landingUrl}
             onChange={(e) => onChange({ landingUrl: e.target.value })}
             placeholder="https://"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </Campo>
       </Seccion>
@@ -1604,7 +1778,7 @@ function FaseAnuncio({
       {conMeta && (
         <>
           <Seccion titulo="Identidad">
-            <p className="text-sm text-[#F8FAD7]/75">
+            <p className="text-sm text-foreground/75">
               {cuentaMeta?.pageId
                 ? `Publica como la página ${cuentaMeta.pageId}.`
                 : "Elige la cuenta de Meta en el paso de Campaña para resolver su página."}
@@ -1620,7 +1794,7 @@ function FaseAnuncio({
                     onChange({ mediaType: value as "none" | "image" | "video" })
                   }
                 >
-                  <SelectTrigger className="w-full bg-[#292929]/60">
+                  <SelectTrigger className="w-full bg-field/60">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1637,7 +1811,7 @@ function FaseAnuncio({
                     onChange({ callToAction: value as CallToAction })
                   }
                 >
-                  <SelectTrigger className="w-full bg-[#292929]/60">
+                  <SelectTrigger className="w-full bg-field/60">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1658,7 +1832,7 @@ function FaseAnuncio({
                 value={draft.message}
                 onChange={(e) => onChange({ message: e.target.value })}
                 rows={3}
-                className="bg-[#292929]/60"
+                className="bg-field/60"
               />
             </Campo>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -1667,7 +1841,7 @@ function FaseAnuncio({
                   value={draft.metaHeadline}
                   onChange={(e) => onChange({ metaHeadline: e.target.value })}
                   placeholder="La línea en negrita bajo la imagen"
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
               <Campo etiqueta="DESCRIPCIÓN (OPCIONAL)">
@@ -1675,7 +1849,7 @@ function FaseAnuncio({
                   value={draft.metaDescription}
                   onChange={(e) => onChange({ metaDescription: e.target.value })}
                   placeholder="La línea chica bajo el título"
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
             </div>
@@ -1690,7 +1864,7 @@ function FaseAnuncio({
                       onChange({ mediaUrl: e.target.value, boostPostId: null })
                     }
                     placeholder="https://"
-                    className="min-w-0 flex-1 bg-[#292929]/60"
+                    className="min-w-0 flex-1 bg-field/60"
                   />
                   <SubidaDeArchivo
                     portfolioId={draft.portfolioId}
@@ -1703,7 +1877,7 @@ function FaseAnuncio({
                       type="button"
                       variant="outline"
                       onClick={() => setSelectorAbierto(true)}
-                      className="shrink-0 border-[#F8FAD7]/15 bg-[#323330]/60"
+                      className="shrink-0 border-foreground/15 bg-card/60"
                     >
                       <Images className="size-4" />
                       Elegir publicación
@@ -1718,7 +1892,7 @@ function FaseAnuncio({
                     crear una pieza nueva desde cero.
                   </p>
                 ) : (
-                  <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-[#F8FAD7]/45">
+                  <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-foreground/45">
                     <Info className="mt-0.5 size-3.5 shrink-0" />
                     Meta va a buscar el archivo en esta dirección. Si el sitio
                     todavía no está publicado en un dominio real, un archivo
@@ -1764,7 +1938,7 @@ function FaseAnuncio({
       {conGoogle && (
         <>
           <Seccion titulo="Identidad">
-            <p className="text-sm text-[#F8FAD7]/75">
+            <p className="text-sm text-foreground/75">
               Google no tiene un concepto de identidad: publica desde la
               cuenta elegida en el paso de Campaña.
             </p>
@@ -1783,7 +1957,7 @@ function FaseAnuncio({
                 }
                 rows={4}
                 placeholder={"Envío gratis en 24 horas\nCompra directa\nGarantía de un año"}
-                className="bg-[#292929]/60"
+                className="bg-field/60"
               />
               <Contador lineas={draft.headlines} limite={30} minimo={3} maximo={15} />
             </Campo>
@@ -1798,7 +1972,7 @@ function FaseAnuncio({
                   })
                 }
                 rows={3}
-                className="bg-[#292929]/60"
+                className="bg-field/60"
               />
               <Contador lineas={draft.descriptions} limite={90} minimo={2} maximo={4} />
             </Campo>
@@ -1810,7 +1984,7 @@ function FaseAnuncio({
                     onChange({ pathDisplay1: e.target.value.slice(0, 15) })
                   }
                   placeholder="servicios"
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                 />
               </Campo>
               <Campo etiqueta="RUTA 2 (OPCIONAL) · MÁX 15 CARACTERES">
@@ -1820,12 +1994,12 @@ function FaseAnuncio({
                     onChange({ pathDisplay2: e.target.value.slice(0, 15) })
                   }
                   placeholder="contacto"
-                  className="bg-[#292929]/60"
+                  className="bg-field/60"
                   disabled={!draft.pathDisplay1.trim()}
                 />
               </Campo>
             </div>
-            <p className="mt-2 text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+            <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
               Se ven pegadas al dominio en el anuncio: {dominioDe(draft.landingUrl)}
               {draft.pathDisplay1.trim() ? ` › ${draft.pathDisplay1.trim()}` : ""}
               {draft.pathDisplay2.trim() ? ` › ${draft.pathDisplay2.trim()}` : ""}
@@ -1912,10 +2086,10 @@ function SubidaDeArchivo({
         variant="outline"
         disabled={subiendo || !portfolioId}
         onClick={() => inputRef.current?.click()}
-        className="shrink-0 border-[#F8FAD7]/15 bg-[#323330]/60"
+        className="shrink-0 border-foreground/15 bg-card/60"
       >
         {subiendo ? (
-          <ThinkingOrb size="xs" state="generating" label="" />
+          <OrbeDeBoton />
         ) : (
           <Upload className="size-4" />
         )}
@@ -2209,15 +2383,15 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
   return (
     <Surface className="overflow-hidden p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="font-micro flex items-center gap-1.5 text-[0.6rem] text-[#F8FAD7]/45">
-          <Megaphone className="size-3 text-[#4242FF]" />
+        <p className="font-micro flex items-center gap-1.5 text-[0.6rem] text-foreground/45">
+          <Megaphone className="size-3 text-brand" />
           VISTA PREVIA · ASÍ SE VERÍA EN CADA RED
         </p>
         {vistas.length > 0 && (
           <button
             type="button"
             onClick={() => setAmpliada(true)}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-2.5 py-1 text-[0.62rem] font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/15"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand/20 bg-brand/8 px-2.5 py-1 text-[0.62rem] font-bold text-brand transition-colors hover:bg-brand/15"
           >
             <Maximize2 className="size-3" />
             Ampliar vista previa
@@ -2226,7 +2400,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
       </div>
 
       {vistas.length === 0 ? (
-        <p className="text-xs text-[#F8FAD7]/40">Elige al menos una plataforma.</p>
+        <p className="text-xs text-foreground/40">Elige al menos una plataforma.</p>
       ) : (
         <>
           {/* Apiladas hacia abajo, no en tira horizontal: en la columna
@@ -2236,7 +2410,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
           <div className="space-y-4">
             {vistas.slice(0, 2).map((v) => (
               <div key={v.id}>
-                <p className="font-micro mb-1.5 truncate text-[0.55rem] text-[#F8FAD7]/40">
+                <p className="font-micro mb-1.5 truncate text-[0.55rem] text-foreground/40">
                   {v.etiqueta.toUpperCase()}
                 </p>
                 <TarjetaDeVista id={v.id} draft={draft} cuentaMeta={cuentaMeta} />
@@ -2247,7 +2421,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
             <button
               type="button"
               onClick={() => setAmpliada(true)}
-              className="mt-3 w-full text-center text-xs font-semibold text-[#F8FAD7]/45 transition-colors hover:text-[#F8FAD7]/70"
+              className="mt-3 w-full text-center text-xs font-semibold text-foreground/45 transition-colors hover:text-foreground/70"
             >
               +{vistas.length - 2} vista{vistas.length - 2 === 1 ? "" : "s"} más
               en &ldquo;Ampliar vista previa&rdquo;
@@ -2257,7 +2431,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
       )}
 
       <Dialog open={ampliada} onOpenChange={setAmpliada}>
-        <DialogContent className="border-[#F8FAD7]/12 bg-[#252624] sm:max-w-3xl">
+        <DialogContent className="border-foreground/12 bg-card sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Vista previa</DialogTitle>
             <DialogDescription>
@@ -2266,7 +2440,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-wrap items-center gap-2 border-b border-[#F8FAD7]/10 pb-3">
+          <div className="flex flex-wrap items-center gap-2 border-b border-foreground/10 pb-3">
             {FILTROS_VISTA.map((item) => (
               <button
                 key={item.id}
@@ -2275,8 +2449,8 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
                 className={cn(
                   "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                   filtro === item.id
-                    ? "border-[#4242FF] bg-[#4242FF]/12 text-[#4242FF]"
-                    : "border-[#F8FAD7]/12 text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                    ? "border-brand bg-brand/12 text-brand"
+                    : "border-foreground/12 text-foreground/55 hover:text-foreground",
                 )}
               >
                 {item.label}
@@ -2286,13 +2460,13 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
 
           <div className="scrollbar-thin grid max-h-[65vh] gap-5 overflow-y-auto pt-1 sm:grid-cols-2">
             {vistasFiltradas.length === 0 && (
-              <p className="py-6 text-center text-sm text-[#F8FAD7]/45 sm:col-span-2">
+              <p className="py-6 text-center text-sm text-foreground/45 sm:col-span-2">
                 No hay vistas para ese filtro.
               </p>
             )}
             {vistasFiltradas.map((v) => (
               <div key={v.id}>
-                <p className="font-micro mb-1.5 text-[0.55rem] text-[#F8FAD7]/40">
+                <p className="font-micro mb-1.5 text-[0.55rem] text-foreground/40">
                   {v.etiqueta.toUpperCase()}
                 </p>
                 <TarjetaDeVista id={v.id} draft={draft} cuentaMeta={cuentaMeta} />
@@ -2325,7 +2499,7 @@ function Contador({
     <p
       className={cn(
         "mt-1.5 text-xs",
-        excedidas || !enRango ? "text-warn" : "text-[#F8FAD7]/45",
+        excedidas || !enRango ? "text-warn" : "text-foreground/45",
       )}
     >
       {items.length} de {minimo}–{maximo}

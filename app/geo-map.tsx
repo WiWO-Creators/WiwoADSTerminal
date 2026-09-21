@@ -160,7 +160,7 @@ function GeoMap({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#F8FAD7]/10">
+    <div className="overflow-hidden rounded-xl border border-foreground/10">
       <MapContainer
         center={[-15, -68]}
         zoom={3}
@@ -285,7 +285,7 @@ export function SegmentacionGeografica({
 
   return (
     <div className="space-y-3">
-      <div className="inline-flex rounded-full border border-[#F8FAD7]/10 bg-[#292929]/60 p-1">
+      <div className="inline-flex rounded-full border border-foreground/10 bg-field/60 p-1">
         {(
           [
             { id: "paises" as const, label: "Por país" },
@@ -300,8 +300,8 @@ export function SegmentacionGeografica({
             className={cn(
               "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
               modo === tab.id
-                ? "bg-[#4242FF] text-white shadow-sm"
-                : "text-[#F8FAD7]/50 hover:text-[#F8FAD7]/80",
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-foreground/50 hover:text-foreground/80",
             )}
           >
             {tab.label}
@@ -321,7 +321,7 @@ export function SegmentacionGeografica({
 
       {modo === "paises" && (
         <>
-          <p className="font-micro text-[0.58rem] text-[#F8FAD7]/45">
+          <p className="font-micro text-[0.58rem] text-foreground/45">
             TOCA UN PAÍS EN EL MAPA O ACÁ ABAJO · VACÍO USA LOS PAÍSES YA
             DECLARADOS EN LA CUENTA
           </p>
@@ -336,8 +336,8 @@ export function SegmentacionGeografica({
                   className={cn(
                     "rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
                     activo
-                      ? "border-[#4242FF]/40 bg-[#4242FF]/15 text-[#4242FF]"
-                      : "border-[#F8FAD7]/10 bg-[#292929]/50 text-[#F8FAD7]/60 hover:text-[#F8FAD7]/85",
+                      ? "border-brand/40 bg-brand/15 text-brand"
+                      : "border-foreground/10 bg-field/50 text-foreground/60 hover:text-foreground/85",
                   )}
                 >
                   {pais.label}
@@ -345,7 +345,7 @@ export function SegmentacionGeografica({
               );
             })}
           </div>
-          <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+          <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
             Solo aparecen los países con id de destino geográfico de Google ya
             verificado — ciudad y región todavía no, porque esas exigen
             buscar un id que ninguna de las dos plataformas expone hoy desde
@@ -356,7 +356,7 @@ export function SegmentacionGeografica({
 
       {modo === "excluir" && (
         <>
-          <p className="font-micro text-[0.58rem] text-[#F8FAD7]/45">
+          <p className="font-micro text-[0.58rem] text-foreground/45">
             ESTOS PAÍSES QUEDAN FUERA A PROPÓSITO, AUNQUE ESTÉN EN LA CUENTA O
             EN &quot;POR PAÍS&quot;
           </p>
@@ -372,7 +372,7 @@ export function SegmentacionGeografica({
                     "rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
                     activo
                       ? "border-red-500/40 bg-red-500/15 text-red-400"
-                      : "border-[#F8FAD7]/10 bg-[#292929]/50 text-[#F8FAD7]/60 hover:text-[#F8FAD7]/85",
+                      : "border-foreground/10 bg-field/50 text-foreground/60 hover:text-foreground/85",
                   )}
                 >
                   {pais.label}
@@ -380,7 +380,7 @@ export function SegmentacionGeografica({
               );
             })}
           </div>
-          <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+          <p className="text-[0.65rem] leading-5 text-foreground/35">
             Útil para dejar a mano una zona de control (comparar con/sin
             anuncio) o para no entrar a un mercado que ya cubre otro equipo.
             No mide nada por sí solo — la comparación se hace fuera de esta
@@ -393,7 +393,7 @@ export function SegmentacionGeografica({
         <>
           {geoRadius ? (
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-micro text-[0.58rem] text-[#F8FAD7]/45">
+              <span className="font-micro text-[0.58rem] text-foreground/45">
                 RADIO
               </span>
               <Slider
@@ -406,23 +406,23 @@ export function SegmentacionGeografica({
                 }
                 className="max-w-[14rem]"
               />
-              <span className="text-xs font-semibold text-[#F8FAD7]">
+              <span className="text-xs font-semibold text-foreground">
                 {geoRadius.radiusKm} km
               </span>
               <button
                 type="button"
                 onClick={() => onGeoRadiusChange(null)}
-                className="text-[0.7rem] font-semibold text-[#F8FAD7]/45 underline-offset-2 hover:text-danger hover:underline"
+                className="text-[0.7rem] font-semibold text-foreground/45 underline-offset-2 hover:text-danger hover:underline"
               >
                 Quitar círculo
               </button>
             </div>
           ) : (
-            <p className="text-xs text-[#F8FAD7]/45">
+            <p className="text-xs text-foreground/45">
               Toca el mapa para marcar el centro del círculo.
             </p>
           )}
-          <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+          <p className="text-[0.65rem] leading-5 text-foreground/35">
             Máximo {RADIO_MAXIMO_KM} km — el límite real de Meta para este
             tipo de segmentación; Google acepta más, pero se deja el mismo
             tope para que un solo círculo sirva en las dos.

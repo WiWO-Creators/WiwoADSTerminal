@@ -31,7 +31,7 @@ import { parsearPalabraClave } from "@/lib/constructor";
 import { unidadesMenoresMeta } from "@/lib/monedas";
 import type { Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
-import { ThinkingOrb } from "./ui";
+import { OrbeDeBoton } from "./ui";
 
 export type CampanaGestionable = {
   provider: Platform;
@@ -221,11 +221,11 @@ function TarjetaPresupuesto({ campana }: { campana: CampanaGestionable }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <label className="font-micro block text-[0.6rem] text-[#F8FAD7]/50">
+          <label className="font-micro block text-[0.6rem] text-foreground/50">
             TIPO
           </label>
           <Select value={tipo} onValueChange={(v) => setTipo(v as "daily" | "lifetime")}>
-            <SelectTrigger className="mt-1.5 w-40 bg-[#292929]/60">
+            <SelectTrigger className="mt-1.5 w-40 bg-field/60">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -235,7 +235,7 @@ function TarjetaPresupuesto({ campana }: { campana: CampanaGestionable }) {
           </Select>
         </div>
         <div className="min-w-0 flex-1">
-          <label className="font-micro block text-[0.6rem] text-[#F8FAD7]/50">
+          <label className="font-micro block text-[0.6rem] text-foreground/50">
             MONTO {campana.currency ? `(${campana.currency})` : ""}
           </label>
           <Input
@@ -243,11 +243,11 @@ function TarjetaPresupuesto({ campana }: { campana: CampanaGestionable }) {
             onChange={(e) => setMonto(e.target.value)}
             inputMode="numeric"
             placeholder="0"
-            className="mt-1.5 bg-[#292929]/60"
+            className="mt-1.5 bg-field/60"
           />
         </div>
         <Button onClick={() => void guardar()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           Guardar
         </Button>
       </div>
@@ -298,10 +298,10 @@ function TarjetaNombre({ campana }: { campana: CampanaGestionable }) {
       <Input
         value={nombre}
         onChange={(e) => setNombre(e.target.value)}
-        className="min-w-0 flex-1 bg-[#292929]/60"
+        className="min-w-0 flex-1 bg-field/60"
       />
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+        {enviando ? <OrbeDeBoton /> : null}
         Guardar
       </Button>
     </div>
@@ -379,7 +379,7 @@ function TarjetaPuja({ campana }: { campana: CampanaGestionable }) {
   return (
     <div className="space-y-3">
       <Select value={estrategia} onValueChange={setEstrategia}>
-        <SelectTrigger className="w-full bg-[#292929]/60">
+        <SelectTrigger className="w-full bg-field/60">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -396,11 +396,11 @@ function TarjetaPuja({ campana }: { campana: CampanaGestionable }) {
           onChange={(e) => setValor(e.target.value)}
           inputMode="decimal"
           placeholder={config.etiquetaCampo}
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
       )}
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+        {enviando ? <OrbeDeBoton /> : null}
         Guardar
       </Button>
     </div>
@@ -481,7 +481,7 @@ function TarjetaIdiomas({ campana }: { campana: CampanaGestionable }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+      <p className="text-[0.68rem] leading-5 text-foreground/40">
         Este cambio reemplaza toda la segmentación de idioma de la campaña:
         incluye acá todos los idiomas que deben quedar activos, no solo el que
         quieras sumar.
@@ -490,7 +490,7 @@ function TarjetaIdiomas({ campana }: { campana: CampanaGestionable }) {
         {Object.entries(IDIOMAS_GOOGLE).map(([codigo, label]) => (
           <label
             key={codigo}
-            className="flex items-center gap-1.5 text-xs text-[#F8FAD7]/75"
+            className="flex items-center gap-1.5 text-xs text-foreground/75"
           >
             <Checkbox
               checked={elegidos.includes(codigo)}
@@ -501,14 +501,14 @@ function TarjetaIdiomas({ campana }: { campana: CampanaGestionable }) {
                     : actual.filter((c) => c !== codigo),
                 )
               }
-              className="border-[#F8FAD7]/30"
+              className="border-foreground/30"
             />
             {label}
           </label>
         ))}
       </div>
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+        {enviando ? <OrbeDeBoton /> : null}
         Guardar ({elegidos.length === 0 ? "todos los idiomas" : `${elegidos.length} elegido${elegidos.length === 1 ? "" : "s"}`})
       </Button>
     </div>
@@ -587,8 +587,8 @@ function TarjetaHorario({ campana }: { campana: CampanaGestionable }) {
               className={cn(
                 "rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
                 activo
-                  ? "border-[#4242FF]/40 bg-[#4242FF]/15 text-[#4242FF]"
-                  : "border-[#F8FAD7]/10 bg-[#292929]/50 text-[#F8FAD7]/60",
+                  ? "border-brand/40 bg-brand/15 text-brand"
+                  : "border-foreground/10 bg-field/50 text-foreground/60",
               )}
             >
               {dia.label}
@@ -598,36 +598,36 @@ function TarjetaHorario({ campana }: { campana: CampanaGestionable }) {
       </div>
       <div className="flex items-end gap-3">
         <div>
-          <label className="font-micro block text-[0.6rem] text-[#F8FAD7]/50">
+          <label className="font-micro block text-[0.6rem] text-foreground/50">
             DESDE
           </label>
           <Input
             value={desde}
             onChange={(e) => setDesde(Math.min(Math.max(Number(e.target.value) || 0, 0), 23))}
             inputMode="numeric"
-            className="mt-1.5 w-20 bg-[#292929]/60"
+            className="mt-1.5 w-20 bg-field/60"
           />
         </div>
         <div>
-          <label className="font-micro block text-[0.6rem] text-[#F8FAD7]/50">
+          <label className="font-micro block text-[0.6rem] text-foreground/50">
             HASTA
           </label>
           <Input
             value={hasta}
             onChange={(e) => setHasta(Math.min(Math.max(Number(e.target.value) || 0, 1), 24))}
             inputMode="numeric"
-            className="mt-1.5 w-20 bg-[#292929]/60"
+            className="mt-1.5 w-20 bg-field/60"
           />
         </div>
         <Button onClick={() => void guardar()} disabled={enviando}>
-          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+          {enviando ? <OrbeDeBoton /> : null}
           Guardar
         </Button>
         <Button variant="ghost" onClick={() => void quitar()} disabled={enviando}>
           Quitar horario
         </Button>
       </div>
-      <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+      <p className="text-[0.65rem] leading-5 text-foreground/35">
         Una sola ventana igual todos los días marcados — no varias ventanas
         distintas por día. Reemplaza el horario completo de la campaña.
       </p>
@@ -664,16 +664,16 @@ function TarjetaNegativas({ campana }: { campana: CampanaGestionable }) {
         onChange={(e) => setTexto(e.target.value)}
         rows={4}
         placeholder={'competidor\n"marca ajena"\n[gratis]'}
-        className="bg-[#292929]/60"
+        className="bg-field/60"
       />
-      <p className="text-[0.68rem] leading-5 text-[#F8FAD7]/40">
+      <p className="text-[0.68rem] leading-5 text-foreground/40">
         Misma sintaxis que las palabras clave del constructor: <code>palabra</code>{" "}
         amplia, <code>&quot;palabra&quot;</code> de frase, <code>[palabra]</code>{" "}
         exacta. Solo suma — quitar una negativa ya cargada se sigue haciendo
         desde Google Ads.
       </p>
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+        {enviando ? <OrbeDeBoton /> : null}
         Añadir
       </Button>
     </div>
@@ -788,7 +788,7 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
   return (
     <div className="space-y-3">
       <Select value={tipo} onValueChange={(v) => setTipo(v as TipoExtension)}>
-        <SelectTrigger className="w-full bg-[#292929]/60">
+        <SelectTrigger className="w-full bg-field/60">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -805,26 +805,26 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
             value={linkText}
             onChange={(e) => setLinkText(e.target.value.slice(0, 25))}
             placeholder="Texto visible (máx. 25 caracteres)"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
           <Input
             value={finalUrl}
             onChange={(e) => setFinalUrl(e.target.value)}
             placeholder="https://tusitio.com/destino"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
           <div className="grid grid-cols-2 gap-2">
             <Input
               value={descripcion1}
               onChange={(e) => setDescripcion1(e.target.value.slice(0, 35))}
               placeholder="Descripción 1 (opcional)"
-              className="bg-[#292929]/60"
+              className="bg-field/60"
             />
             <Input
               value={descripcion2}
               onChange={(e) => setDescripcion2(e.target.value.slice(0, 35))}
               placeholder="Descripción 2 (opcional)"
-              className="bg-[#292929]/60"
+              className="bg-field/60"
             />
           </div>
         </div>
@@ -834,13 +834,13 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
           value={calloutText}
           onChange={(e) => setCalloutText(e.target.value.slice(0, 25))}
           placeholder="Ej. Envío gratis (máx. 25 caracteres)"
-          className="bg-[#292929]/60"
+          className="bg-field/60"
         />
       )}
       {tipo === "structured_snippet" && (
         <div className="space-y-2">
           <Select value={header} onValueChange={setHeader}>
-            <SelectTrigger className="w-full bg-[#292929]/60">
+            <SelectTrigger className="w-full bg-field/60">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -855,7 +855,7 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
             value={valores}
             onChange={(e) => setValores(e.target.value)}
             placeholder="3 a 10 valores separados por coma"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </div>
       )}
@@ -865,22 +865,22 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
             value={telefono}
             onChange={(e) => setTelefono(e.target.value)}
             placeholder="(650) 253-0000"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
           <Input
             value={paisTelefono}
             onChange={(e) => setPaisTelefono(e.target.value.slice(0, 2))}
             placeholder="CL"
-            className="bg-[#292929]/60"
+            className="bg-field/60"
           />
         </div>
       )}
 
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+        {enviando ? <OrbeDeBoton /> : null}
         Añadir extensión
       </Button>
-      <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">
+      <p className="text-[0.65rem] leading-5 text-foreground/35">
         Cada clic añade una extensión más a la campaña — no reemplaza las que
         ya existen. Los sitelinks y la llamada pasan por la revisión de
         políticas de Google antes de mostrarse.

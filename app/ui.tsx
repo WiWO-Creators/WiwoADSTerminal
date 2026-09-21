@@ -1,16 +1,25 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import {
   Activity,
-  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { HealthState, Severity } from "./data";
+import type { HealthState } from "./data";
 
-const ORB_SIZE_PX = { xs: 12, sm: 16, md: 24 } as const;
+const ORB_SIZE_PX = { xs: 12, sm: 16, md: 24, lg: 40, xl: 72 } as const;
+/** Tamaño del orbe volumétrico. Su lienzo es de 600px y se escala con `--orb-fit`. */
+const STAGE_PX = { md: 84, lg: 112, xl: 208 } as const;
+const ORB_CANVAS = 600;
+
+const SPARKS = [
+  { sx: "70%", sy: "18%", size: 18, color: "rgba(248, 250, 215, .92)", speed: "5600ms", delay: "-900ms" },
+  { sx: "25%", sy: "72%", size: 13, color: "rgba(66, 66, 255, .92)", speed: "6800ms", delay: "-2400ms" },
+  { sx: "79%", sy: "68%", size: 22, color: "rgba(59, 255, 0, .9)", speed: "6200ms", delay: "-1800ms" },
+  { sx: "34%", sy: "24%", size: 11, color: "rgba(248, 250, 215, .72)", speed: "7400ms", delay: "-3100ms" },
+] as const;
 
 export type OrbState =
   | "idle"
@@ -36,24 +45,92 @@ const ORB_STATE_LABEL: Record<OrbState, string> = {
 /**
  * La señal propia de WiWO para "algo inteligente está pasando" — no un
  * spinner genérico, una presencia que respira, razona y vuelve a la calma.
- * Portado desde WiwoMetriQ (ver el bloque `.wiwo-orb` en globals.css).
+ * Portado de MetriQ (kit en THINKING_ORB.md).
  *
- * Solo la variante inline (xs/sm/md), para botones e indicadores junto a
- * texto — el orbe volumétrico grande de MetriQ no se portó todavía.
+ * Dos variantes: la *inline* (xs/sm/md) —una bolita para botones y filas— y
+ * la *stage* (lg/xl), el orbe volumétrico grande de las pantallas de carga.
+ * `bare` la deja sin caja propia, para ponerla sobre una superficie ya lista
+ * (ver `PantallaDeCarga`).
  */
 export function ThinkingOrb({
   size = "md",
   state = "thinking",
+  variant = "auto",
+  bare = false,
   className,
   label,
 }: {
   size?: keyof typeof ORB_SIZE_PX;
   state?: OrbState;
+  variant?: "auto" | "inline" | "stage";
+  bare?: boolean;
   className?: string;
   /** aria-label accesible; por defecto el del estado. Pasa "" para decorativo. */
   label?: string;
 }) {
   const a11yLabel = label ?? ORB_STATE_LABEL[state];
+  const useStage =
+    variant === "stage" || (variant === "auto" && (size === "lg" || size === "xl"));
+
+  if (useStage) {
+    const px = STAGE_PX[size === "lg" || size === "xl" ? size : "md"];
+    return (
+      <span
+        role={a11yLabel ? "status" : undefined}
+        aria-label={a11yLabel || undefined}
+        aria-hidden={a11yLabel ? undefined : "true"}
+        data-thinking-state={state}
+        className={cn("wiwo-orb-stage", bare && "wiwo-orb-stage--bare", className)}
+        style={{ width: px, height: px, "--orb-fit": px / ORB_CANVAS } as CSSProperties}
+      >
+        <span className="wiwo-orb-canvas" aria-hidden="true">
+          <span className="orb-state-field">
+            <span className="orb-state-ring" />
+            <span className="orb-state-ring alt" />
+            <span className="orb-scan-line" />
+            <span className="orb-output-trail one" />
+            <span className="orb-output-trail two" />
+            <span className="orb-output-trail three" />
+            <span className="orb-success-burst" />
+            <span className="orb-retry-notch" />
+          </span>
+          <span className="wiwo-thinking-orb">
+            <span className="orb-pulse" />
+            <span className="orb-pulse" />
+            <span className="orb-pulse" />
+            <span className="orb-liquid-veil" />
+            <span className="orb-caustic" />
+            <span className="orb-light-field" />
+            <span className="orb-aurora orb-aurora-one" />
+            <span className="orb-aurora orb-aurora-two" />
+            <span className="orb-aurora orb-aurora-three" />
+            <span className="orb-core" />
+            <span className="orb-glint" />
+          </span>
+          <span className="orb-particle" />
+          <span className="orb-particle" />
+          <span className="orb-particle" />
+          {SPARKS.map((spark) => (
+            <span
+              key={`${spark.sx}-${spark.sy}`}
+              className="orb-spark"
+              style={
+                {
+                  "--sx": spark.sx,
+                  "--sy": spark.sy,
+                  "--spark-size": `${spark.size}px`,
+                  "--spark-color": spark.color,
+                  "--spark-speed": spark.speed,
+                  "--spark-delay": spark.delay,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </span>
+      </span>
+    );
+  }
+
   const px = ORB_SIZE_PX[size];
   // thinking es el estilo base (.wiwo-orb sin modificador).
   const stateClass = state === "thinking" ? "" : `wiwo-orb--${state}`;
@@ -68,27 +145,50 @@ export function ThinkingOrb({
   );
 }
 
-export function SeverityBadge({ severity }: { severity: Severity }) {
-  const labels = {
-    critical: "Crítica",
-    high: "Alta",
-    medium: "Media",
-    info: "Informativa",
-  };
-
+/**
+ * Carga de pantalla completa: el orbe grande sobre su pozo de sombra difusa
+ * (`wiwo-orb-aura`), como en MetriQ. Para cuando una vista entera espera datos.
+ */
+export function PantallaDeCarga({
+  mensaje,
+  className,
+}: {
+  mensaje?: string;
+  className?: string;
+}) {
   return (
-    <Badge
+    <div
       className={cn(
-        "gap-1 border px-2.5 py-1 text-[0.7rem] font-bold uppercase tracking-[0.07em] [&>svg]:size-3",
-        severity === "critical" && "border-danger-deep/20 bg-danger-deep/10 text-danger",
-        severity === "high" && "border-warn-deep/20 bg-warn-deep/10 text-warn",
-        severity === "medium" && "border-[#4242FF]/20 bg-[#4242FF]/10 text-[#4242FF]",
-        severity === "info" && "border-[#F8FAD7]/12 bg-[#F8FAD7]/[0.04] text-[#F8FAD7]/60",
+        "flex min-h-[60vh] flex-col items-center justify-center gap-6 p-8",
+        className,
       )}
     >
-      {severity === "critical" && <AlertTriangle />}
-      {labels[severity]}
-    </Badge>
+      <div className="wiwo-orb-aura" style={{ width: 280, height: 280 }}>
+        <ThinkingOrb size="xl" state="thinking" bare label={mensaje ?? "Cargando"} />
+      </div>
+      {mensaje && (
+        <p className="relative z-10 mt-6 text-center text-sm font-semibold text-foreground/70">{mensaje}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * El orbe para dentro de un botón. El botón principal es verde neón y el orbe
+ * también lo es: sin fondo propio se perdía y parecía que no pasaba nada. Va
+ * sobre una pastilla oscura, así se ve igual en cualquier variante de botón.
+ */
+export function OrbeDeBoton({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "grid size-[18px] shrink-0 place-items-center rounded-full bg-[#292929] shadow-[0_0_0_1px_rgba(248,250,215,0.16)]",
+        className,
+      )}
+    >
+      <ThinkingOrb size="xs" state="generating" label="" />
+    </span>
   );
 }
 
@@ -113,7 +213,7 @@ export function HealthBadge({
         state === "critical" && "bg-danger-deep/10 text-danger",
         state === "warning" && "bg-warn-deep/10 text-warn",
         state === "healthy" && "bg-ok-deep/10 text-ok",
-        state === "inactive" && "bg-[#F8FAD7]/[0.07] text-[#F8FAD7]/58",
+        state === "inactive" && "bg-foreground/[0.07] text-foreground/58",
       )}
     >
       <span
@@ -122,18 +222,10 @@ export function HealthBadge({
           state === "critical" && "bg-danger-deep",
           state === "warning" && "bg-warn-deep",
           state === "healthy" && "bg-ok-deep",
-          state === "inactive" && "bg-[#F8FAD7]/35",
+          state === "inactive" && "bg-foreground/35",
         )}
       />
       {label ?? labels[state]}
-    </span>
-  );
-}
-
-export function AutonomyBadge({ level }: { level: string }) {
-  return (
-    <span className="inline-flex min-w-8 items-center justify-center rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-2.5 py-1 text-xs font-bold text-[#4242FF]">
-      {level}
     </span>
   );
 }
@@ -148,21 +240,9 @@ export function Surface({
   return (
     <section
       className={cn(
-        // Elevación en dos capas —un contacto interno apenas visible y la
-        // sombra ambiental real de Neo (`--shadow-soft`)— en vez de un solo
-        // borde blanco casi opaco. Eso último se leía como un reflejo de
-        // plástico en cada tarjeta de la app; esto se lee como una
-        // superficie apenas levantada sobre el lienzo, que es lo que Neo
-        // pide con "Beige como mundo": el fondo manda, la tarjeta no compite
-        // contra él.
-        //
-        // El borde bajó de 9% a 5% de opacidad: a 9%, dos tarjetas juntas (o
-        // una dentro de otra) se leían como cajas apiladas, cada una
-        // compitiendo por atención con su propio contorno. WiwoMetriQ separa
-        // sus tarjetas casi sin borde, apoyándose en la sombra y en que el
-        // fondo de la tarjeta ya es un tono distinto del lienzo — el borde
-        // queda solo como el contacto más fino, no como el límite visual.
-        "rounded-[16px] border border-[#F8FAD7]/[0.05] bg-[#323330]/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),var(--shadow-soft)] backdrop-blur-md",
+        // Tarjeta de MetriQ: relleno sólido más claro que el lienzo (oscuro) o
+        // crema (claro), contorno fino y sombra suave.
+        "rounded-[16px] border border-border bg-card shadow-[var(--shadow-1)]",
         className,
       )}
     >
@@ -188,13 +268,13 @@ export function StatCard({
     <Surface className="neo-card-accent p-5">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <p className="font-micro text-[0.62rem] text-[#F8FAD7]/45">
+          <p className="font-micro text-[0.62rem] text-foreground/45">
             {label}
           </p>
-          <p className="metric-number mt-2.5 text-[1.8rem] font-extrabold leading-none text-[#F8FAD7]">
+          <p className="metric-number mt-2.5 text-[1.8rem] font-extrabold leading-none text-foreground">
             {value}
           </p>
-          <p className="mt-2.5 text-xs leading-5 text-[#F8FAD7]/50">{note}</p>
+          <p className="mt-2.5 text-xs leading-5 text-foreground/50">{note}</p>
         </div>
         <span
           className={cn(
@@ -202,9 +282,9 @@ export function StatCard({
             // propio contorno se leía como una caja adentro de otra caja. El
             // color de fondo ya basta para distinguirlo.
             "grid size-9 shrink-0 place-items-center rounded-full",
-            tone === "blue" && "bg-[#4242FF]/12 text-[#4242FF]",
+            tone === "blue" && "bg-brand/12 text-brand",
             tone === "red" && "bg-danger-deep/12 text-danger",
-            tone === "cyan" && "bg-[#3BFF00]/12 text-[#3BFF00]",
+            tone === "cyan" && "bg-[#3BFF00]/12 text-brand",
           )}
         >
           <Icon className="size-4" />

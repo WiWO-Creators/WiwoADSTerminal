@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { platformLabel } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
-import { Surface, StatCard, ThinkingOrb } from "./ui";
+import { PantallaDeCarga, Surface, StatCard } from "./ui";
 
 type PasoEjecucion = {
   platform: string;
@@ -92,14 +92,14 @@ export function EjecucionesView() {
   return (
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-          <History className="size-3 text-[#4242FF]" />
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+          <History className="size-3 text-brand" />
           Historial de publicaciones
         </p>
         <h2 className="neo-section-title">
           Lo que se creó de verdad
         </h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Cada fila es una ejecución real del Constructor contra Google o
           Meta. Todo nace pausado en la plataforma; esto solo registra qué se
           mandó, quién lo mandó y qué respondió cada paso.
@@ -107,21 +107,18 @@ export function EjecucionesView() {
       </div>
 
       {loading ? (
-        <Surface className="flex min-h-56 flex-col items-center justify-center gap-3 text-[#F8FAD7]/55">
-          <ThinkingOrb size="md" state="thinking" label="" />
-          Cargando bitácora…
-        </Surface>
+        <PantallaDeCarga mensaje="Cargando bitácora…" />
       ) : error ? (
         <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-5 text-sm text-danger">
           {error}
         </Surface>
       ) : ejecuciones.length === 0 ? (
         <Surface className="flex min-h-56 flex-col items-center justify-center gap-2 px-6 text-center">
-          <Rocket className="size-6 text-[#F8FAD7]/35" />
-          <h3 className="text-lg font-bold text-[#F8FAD7]">
+          <Rocket className="size-6 text-foreground/35" />
+          <h3 className="text-lg font-bold text-foreground">
             Todavía no se publicó nada
           </h3>
-          <p className="max-w-sm text-sm leading-6 text-[#F8FAD7]/58">
+          <p className="max-w-sm text-sm leading-6 text-foreground/58">
             Cuando alguien publique una campaña desde el Constructor,
             aparecerá acá con cada paso que se ejecutó.
           </p>
@@ -152,7 +149,7 @@ export function EjecucionesView() {
           </div>
 
           <Surface className="mb-4 flex items-center gap-2 p-3">
-            <Search className="ml-1 size-4 shrink-0 text-[#4242FF]" />
+            <Search className="ml-1 size-4 shrink-0 text-brand" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -198,25 +195,25 @@ function FilaEjecucion({
         className="flex w-full items-center gap-3 px-4 py-3 text-left"
       >
         {item.ok ? (
-          <Check className="size-4 shrink-0 text-[#3BFF00]" />
+          <Check className="size-4 shrink-0 text-brand" />
         ) : (
           <AlertCircle className="size-4 shrink-0 text-danger" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-bold text-[#F8FAD7]">
+            <span className="text-sm font-bold text-foreground">
               {item.campaignName}
             </span>
             {item.platforms.map((platform) => (
               <span
                 key={platform}
-                className="font-micro rounded-full border border-[#F8FAD7]/12 px-2 py-0.5 text-[0.55rem] text-[#F8FAD7]/50"
+                className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50"
               >
                 {platformLabel(platform).toUpperCase()}
               </span>
             ))}
           </div>
-          <p className="mt-1 text-xs text-[#F8FAD7]/50">
+          <p className="mt-1 text-xs text-foreground/50">
             {item.portfolioName} · {item.actorEmail} ·{" "}
             {formatFecha(item.createdAt)} · {pasosOk}/{item.steps.length} pasos
             correctos
@@ -224,26 +221,26 @@ function FilaEjecucion({
         </div>
         <ChevronDown
           className={cn(
-            "size-4 shrink-0 text-[#F8FAD7]/40 transition-transform",
+            "size-4 shrink-0 text-foreground/40 transition-transform",
             abierta && "rotate-180",
           )}
         />
       </button>
 
       {abierta && (
-        <ol className="divide-y divide-[#F8FAD7]/8 border-t border-[#F8FAD7]/10">
+        <ol className="divide-y divide-foreground/8 border-t border-foreground/10">
           {item.steps.map((step, index) => (
             <li key={index} className="px-4 py-3">
               <div className="flex items-center gap-2">
                 {step.ok ? (
-                  <Check className="size-3.5 shrink-0 text-[#3BFF00]" />
+                  <Check className="size-3.5 shrink-0 text-brand" />
                 ) : (
                   <AlertCircle className="size-3.5 shrink-0 text-danger" />
                 )}
-                <span className="font-micro rounded-full border border-[#F8FAD7]/12 px-2 py-0.5 text-[0.55rem] text-[#F8FAD7]/50">
+                <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
                   {platformLabel(step.platform).toUpperCase()}
                 </span>
-                <span className="text-sm font-bold text-[#F8FAD7]">
+                <span className="text-sm font-bold text-foreground">
                   {step.label}
                 </span>
               </div>
@@ -252,7 +249,7 @@ function FilaEjecucion({
                   {step.error}
                 </p>
               )}
-              <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-[#292929]/70 p-2.5 text-[0.68rem] leading-5 text-[#F8FAD7]/62">
+              <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
                 {JSON.stringify(step.params, null, 2)}
               </pre>
             </li>

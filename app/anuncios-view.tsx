@@ -35,7 +35,7 @@ import type { AdSummary, PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
 import { GestionarCampanaDialog, type CampanaGestionable } from "./gestionar-campana";
-import { Surface } from "./ui";
+import { OrbeDeBoton, Surface } from "./ui";
 
 type Nivel = "campana" | "conjunto" | "anuncio";
 
@@ -315,7 +315,7 @@ export function AnunciosView({
     if (!id) {
       return (
         <span
-          className="text-[0.6rem] text-[#F8FAD7]/25"
+          className="text-[0.6rem] text-foreground/25"
           title="Falta el identificador nativo para esta fila"
         >
           —
@@ -339,7 +339,13 @@ export function AnunciosView({
             : "border-ok-deep/30 text-ok hover:bg-ok-deep/10",
         )}
       >
-        {cargando ? "…" : activaAhora ? "Pausar" : "Activar"}
+        {cargando ? (
+          <OrbeDeBoton className="mx-3" />
+        ) : activaAhora ? (
+          "Pausar"
+        ) : (
+          "Activar"
+        )}
       </button>
     );
   }
@@ -368,7 +374,7 @@ export function AnunciosView({
             currency: fila.currency,
           });
         }}
-        className="rounded-full border border-[#F8FAD7]/12 p-1.5 text-[#F8FAD7]/50 transition-colors hover:border-[#4242FF]/30 hover:text-[#4242FF]"
+        className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
       >
         <Settings2 className="size-3.5" />
       </button>
@@ -381,7 +387,7 @@ export function AnunciosView({
       const campaignId = fila.campaignId;
       if (!campaignId) {
         return (
-          <span className="text-[0.6rem] text-[#F8FAD7]/30" title="Falta el id nativo de esta campaña">
+          <span className="text-[0.6rem] text-foreground/30" title="Falta el id nativo de esta campaña">
             —
           </span>
         );
@@ -399,7 +405,7 @@ export function AnunciosView({
               campaignName: fila.campaignName,
             });
           }}
-          className="rounded-full border border-[#4242FF]/25 px-2.5 py-1 text-[0.62rem] font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/10"
+          className="rounded-full border border-brand/25 px-2.5 py-1 text-[0.62rem] font-bold text-brand transition-colors hover:bg-brand/10"
         >
           + Conjunto
         </button>
@@ -410,7 +416,7 @@ export function AnunciosView({
       const adsetId = fila.adsetId;
       if (!campaignId || !adsetId) {
         return (
-          <span className="text-[0.6rem] text-[#F8FAD7]/30" title="Falta el id nativo de este conjunto">
+          <span className="text-[0.6rem] text-foreground/30" title="Falta el id nativo de este conjunto">
             —
           </span>
         );
@@ -430,7 +436,7 @@ export function AnunciosView({
               adsetName: fila.nombre,
             });
           }}
-          className="rounded-full border border-[#4242FF]/25 px-2.5 py-1 text-[0.62rem] font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/10"
+          className="rounded-full border border-brand/25 px-2.5 py-1 text-[0.62rem] font-bold text-brand transition-colors hover:bg-brand/10"
         >
           + Anuncio
         </button>
@@ -445,7 +451,7 @@ export function AnunciosView({
         {/* Sin borde propio: ya vive dentro de una tarjeta con su propio
             contorno — ponerle uno más adentro se leía como una caja adentro
             de otra. El fondo del grupo alcanza para distinguir los botones. */}
-        <div className="flex gap-1 rounded-full bg-[#292929]/40 p-1">
+        <div className="flex gap-1 rounded-full bg-field/40 p-1">
           {NIVELES.map((item) => (
             <button
               key={item.id}
@@ -454,8 +460,8 @@ export function AnunciosView({
               className={cn(
                 "rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
                 nivel === item.id
-                  ? "bg-[#4242FF] text-[#F8FAD7]"
-                  : "text-[#F8FAD7]/55 hover:text-[#F8FAD7]",
+                  ? "bg-primary text-primary-foreground"
+                  : "text-foreground/55 hover:text-foreground",
               )}
             >
               {item.label}
@@ -464,12 +470,12 @@ export function AnunciosView({
         </div>
 
         <div className="flex min-w-40 flex-1 items-center gap-2 sm:min-w-52">
-          <Search className="ml-1 size-4 shrink-0 text-[#4242FF]" />
+          <Search className="ml-1 size-4 shrink-0 text-brand" />
           <Input
             value={busqueda}
             onChange={(event) => setBusqueda(event.target.value)}
             placeholder="Buscar por nombre"
-            className="h-9 bg-[#292929]/60 text-xs"
+            className="h-9 bg-field/60 text-xs"
           />
         </div>
 
@@ -477,7 +483,7 @@ export function AnunciosView({
           <button
             type="button"
             onClick={() => onCrearCampana(portfolioId)}
-            className="shrink-0 rounded-full bg-[#4242FF] px-4 py-2 text-xs font-bold text-[#F8FAD7] transition-colors hover:bg-[#4242FF]/85"
+            className="shrink-0 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/85"
           >
             + Crear campaña
           </button>
@@ -487,7 +493,7 @@ export function AnunciosView({
           value={estadoFiltro}
           onValueChange={(valor) => setEstadoFiltro(valor as EstadoFiltro)}
         >
-          <SelectTrigger size="sm" className="w-full bg-[#292929]/60 lg:w-52">
+          <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -502,12 +508,12 @@ export function AnunciosView({
         {seleccion ? (
           // Con una campaña abierta la plataforma ya está determinada: se
           // muestra en vez de ofrecerse.
-          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#4242FF]/30 bg-[#4242FF]/12 px-3 py-1.5 text-[0.68rem] font-bold text-[#4242FF]">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-brand/30 bg-brand/12 px-3 py-1.5 text-[0.68rem] font-bold text-brand">
             {platformLabel(seleccion.provider)}
           </span>
         ) : (
           <Select value={provider} onValueChange={setProvider}>
-            <SelectTrigger size="sm" className="w-full bg-[#292929]/60 lg:w-40">
+            <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -527,19 +533,19 @@ export function AnunciosView({
           <button
             type="button"
             onClick={() => verNivel("campana")}
-            className="rounded-full px-2.5 py-1 text-[#F8FAD7]/50 transition-colors hover:bg-[#F8FAD7]/8 hover:text-[#F8FAD7]"
+            className="rounded-full px-2.5 py-1 text-foreground/50 transition-colors hover:bg-foreground/8 hover:text-foreground"
           >
             Todas las campañas
           </button>
-          <ChevronRight className="size-3 text-[#F8FAD7]/25" />
+          <ChevronRight className="size-3 text-foreground/25" />
           <button
             type="button"
             onClick={() => verNivel("conjunto")}
             className={cn(
               "max-w-[340px] truncate rounded-full px-2.5 py-1 font-bold transition-colors",
               seleccion.conjunto === null
-                ? "bg-[#F8FAD7]/10 text-[#F8FAD7]"
-                : "text-[#F8FAD7]/55 hover:bg-[#F8FAD7]/8 hover:text-[#F8FAD7]",
+                ? "bg-foreground/10 text-foreground"
+                : "text-foreground/55 hover:bg-foreground/8 hover:text-foreground",
             )}
             title={`${seleccion.accountName} · ${seleccion.campana}`}
           >
@@ -547,8 +553,8 @@ export function AnunciosView({
           </button>
           {seleccion.conjunto !== null ? (
             <>
-              <ChevronRight className="size-3 text-[#F8FAD7]/25" />
-              <span className="max-w-[340px] truncate rounded-full bg-[#F8FAD7]/10 px-2.5 py-1 font-bold text-[#F8FAD7]">
+              <ChevronRight className="size-3 text-foreground/25" />
+              <span className="max-w-[340px] truncate rounded-full bg-foreground/10 px-2.5 py-1 font-bold text-foreground">
                 {seleccion.conjunto || "Sin conjunto"}
               </span>
             </>
@@ -556,7 +562,7 @@ export function AnunciosView({
           <button
             type="button"
             onClick={() => verNivel("campana")}
-            className="ml-1 inline-flex items-center gap-1 rounded-full border border-[#F8FAD7]/12 px-2.5 py-1 text-[0.62rem] text-[#F8FAD7]/50 transition-colors hover:text-[#F8FAD7]"
+            className="ml-1 inline-flex items-center gap-1 rounded-full border border-foreground/12 px-2.5 py-1 text-[0.62rem] text-foreground/50 transition-colors hover:text-foreground"
           >
             <X className="size-3" />
             Quitar
@@ -565,16 +571,16 @@ export function AnunciosView({
       ) : null}
 
       <Surface className="overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F8FAD7]/10 px-4 py-3">
-          <h3 className="font-bold text-[#F8FAD7]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-foreground/10 px-4 py-3">
+          <h3 className="font-bold text-foreground">
             {NIVELES.find((n) => n.id === nivel)?.label}
             {seleccion ? (
-              <span className="ml-2 text-xs font-normal text-[#F8FAD7]/45">
+              <span className="ml-2 text-xs font-normal text-foreground/45">
                 de {seleccion.conjunto || seleccion.campana}
               </span>
             ) : null}
           </h3>
-          <span className="font-micro text-[0.58rem] text-[#F8FAD7]/40">
+          <span className="font-micro text-[0.58rem] text-foreground/40">
             {filas.length} FILAS
             {sinActividad > 0
               ? ` · ${sinActividad} SIN ACTIVIDAD EN EL RANGO`
@@ -583,40 +589,40 @@ export function AnunciosView({
         </div>
 
         {filas.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-[#F8FAD7]/45">
+          <p className="px-4 py-10 text-center text-sm text-foreground/45">
             Sin filas con los filtros actuales.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-[#F8FAD7]/[0.03] hover:bg-[#F8FAD7]/[0.04]">
-                  <TableHead className="pl-4 text-xs text-[#F8FAD7]/58">
+                <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.04]">
+                  <TableHead className="pl-4 text-xs text-foreground/58">
                     Nombre
                   </TableHead>
-                  <TableHead className="text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-xs text-foreground/58">
                     Objetivo
                   </TableHead>
-                  <TableHead className="text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-xs text-foreground/58">
                     Estado
                   </TableHead>
-                  <TableHead className="text-right text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-right text-xs text-foreground/58">
                     Invertido
                   </TableHead>
-                  <TableHead className="text-right text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-right text-xs text-foreground/58">
                     Impresiones
                   </TableHead>
-                  <TableHead className="text-right text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-right text-xs text-foreground/58">
                     Clics
                   </TableHead>
-                  <TableHead className="pr-4 text-right text-xs text-[#F8FAD7]/58">
+                  <TableHead className="pr-4 text-right text-xs text-foreground/58">
                     Resultados
                   </TableHead>
                   {puedeAprobar && (
-                    <TableHead className="text-right text-xs text-[#F8FAD7]/58" />
+                    <TableHead className="text-right text-xs text-foreground/58" />
                   )}
                   {mostrarColumnaAgregar && (
-                    <TableHead className="pr-4 text-right text-xs text-[#F8FAD7]/58" />
+                    <TableHead className="pr-4 text-right text-xs text-foreground/58" />
                   )}
                 </TableRow>
               </TableHeader>
@@ -626,19 +632,19 @@ export function AnunciosView({
                     key={fila.clave}
                     onClick={puedeAbrir ? () => abrir(fila) : undefined}
                     className={cn(
-                      "h-16 bg-[#323330] hover:bg-[#F8FAD7]/[0.04]",
+                      "h-16 bg-card hover:bg-foreground/[0.04]",
                       puedeAbrir && "cursor-pointer",
                       !fila.conActividad && "opacity-70",
                     )}
                   >
                     <TableCell className="pl-4">
                       <span
-                        className="block max-w-[420px] truncate text-sm font-bold text-[#F8FAD7]"
+                        className="block max-w-[420px] truncate text-sm font-bold text-foreground"
                         title={fila.nombre}
                       >
                         {fila.nombre}
                       </span>
-                      <span className="mt-1 block max-w-[420px] truncate text-xs text-[#F8FAD7]/45">
+                      <span className="mt-1 block max-w-[420px] truncate text-xs text-foreground/45">
                         {platformLabel(fila.provider)} · {fila.contexto} ·{" "}
                         <span
                           className="metric-number"
@@ -650,13 +656,13 @@ export function AnunciosView({
                     </TableCell>
                     <TableCell>
                       {fila.objetivo ? (
-                        <span className="inline-flex rounded-full bg-[#4242FF]/12 px-2 py-0.5 text-[0.62rem] font-bold text-[#4242FF]">
+                        <span className="inline-flex rounded-full bg-brand/12 px-2 py-0.5 text-[0.62rem] font-bold text-brand">
                           {OBJETIVO_CORTO[
                             fila.objetivo as keyof typeof OBJETIVO_CORTO
                           ] ?? fila.objetivo}
                         </span>
                       ) : (
-                        <span className="text-[0.62rem] text-[#F8FAD7]/38">
+                        <span className="text-[0.62rem] text-foreground/38">
                           Sin sigla
                         </span>
                       )}
@@ -667,7 +673,7 @@ export function AnunciosView({
                           "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
                           activo(estadosLocales[fila.clave] ?? fila.status)
                             ? "bg-ok-deep/12 text-ok"
-                            : "bg-[#F8FAD7]/8 text-[#F8FAD7]/50",
+                            : "bg-foreground/8 text-foreground/50",
                         )}
                       >
                         {estado(estadosLocales[fila.clave] ?? fila.status)}
@@ -678,18 +684,18 @@ export function AnunciosView({
                       se lee como "no rindió", y lo que ocurre es que la
                       plataforma no reporta nada para algo que estuvo apagado.
                     */}
-                    <TableCell className="metric-number text-right text-sm font-bold text-[#F8FAD7]/82">
+                    <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
                       {fila.conActividad
                         ? dinero(fila.spendMicros, fila.currency)
                         : "—"}
                     </TableCell>
-                    <TableCell className="metric-number text-right text-sm text-[#F8FAD7]/66">
+                    <TableCell className="metric-number text-right text-sm text-foreground/66">
                       {fila.conActividad ? entero(fila.impressions) : "—"}
                     </TableCell>
-                    <TableCell className="metric-number text-right text-sm text-[#F8FAD7]/66">
+                    <TableCell className="metric-number text-right text-sm text-foreground/66">
                       {fila.conActividad ? entero(fila.clicks) : "—"}
                     </TableCell>
-                    <TableCell className="metric-number pr-4 text-right text-sm font-bold text-[#F8FAD7]/82">
+                    <TableCell className="metric-number pr-4 text-right text-sm font-bold text-foreground/82">
                       {!fila.conActividad || fila.resultado === null
                         ? "—"
                         : decimal(fila.resultado)}

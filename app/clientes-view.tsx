@@ -22,7 +22,7 @@ import {
   type AttachToCampana,
   type AttachToConjunto,
 } from "./anuncios-view";
-import { Surface, ThinkingOrb } from "./ui";
+import { OrbeDeBoton, Surface } from "./ui";
 
 type CuentaVinculada = {
   externalId: string;
@@ -259,14 +259,14 @@ export function ClientesView({
   return (
     <div className="mx-auto w-full max-w-[1700px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-          <Building2 className="size-3 text-[#4242FF]" />
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+          <Building2 className="size-3 text-brand" />
           Cartera · clientes y sus anuncios
         </p>
         <h2 className="neo-section-title">
           Clientes
         </h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Usa el selector de cliente de la barra superior para abrir uno y ver
           sus campañas o crear nuevas. La página de Facebook y los países son
           obligatorios para publicar en Meta.
@@ -292,7 +292,7 @@ export function ClientesView({
                 value={nuevo}
                 onChange={(e) => setNuevo(e.target.value)}
                 placeholder="Nombre del cliente"
-                className="h-9 w-56 bg-[#292929]/60 text-xs"
+                className="h-9 w-56 bg-field/60 text-xs"
               />
               <Button
                 size="sm"
@@ -301,7 +301,7 @@ export function ClientesView({
                 className="h-9 font-extrabold"
               >
                 {saving === "nuevo" ? (
-                  <ThinkingOrb size="xs" state="generating" label="" />
+                  <OrbeDeBoton />
                 ) : (
                   <Plus />
                 )}
@@ -311,7 +311,7 @@ export function ClientesView({
                 size="sm"
                 variant="ghost"
                 onClick={() => setCreando(false)}
-                className="h-9 text-[#F8FAD7]/50"
+                className="h-9 text-foreground/50"
               >
                 Cancelar
               </Button>
@@ -321,7 +321,7 @@ export function ClientesView({
               <button
                 type="button"
                 onClick={() => setCreando(true)}
-                className="inline-flex items-center gap-1.5 rounded-full border border-[#4242FF]/20 bg-[#4242FF]/8 px-3 py-1.5 text-xs font-bold text-[#4242FF] transition-colors hover:bg-[#4242FF]/15"
+                className="inline-flex items-center gap-1.5 rounded-full border border-brand/20 bg-brand/8 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-brand/15"
               >
                 <Plus className="size-3.5" />
                 Crear un cliente
@@ -350,10 +350,10 @@ export function ClientesView({
                       key={account.externalId}
                       className="rounded-lg px-2 py-1.5"
                     >
-                      <p className="truncate text-xs font-semibold text-[#F8FAD7]/70">
+                      <p className="truncate text-xs font-semibold text-foreground/70">
                         {account.name}
                       </p>
-                      <p className="metric-number mt-0.5 text-[0.6rem] text-[#F8FAD7]/40">
+                      <p className="metric-number mt-0.5 text-[0.6rem] text-foreground/40">
                         {platformLabel(account.provider)} · {account.externalId}
                       </p>
                     </div>
@@ -366,19 +366,19 @@ export function ClientesView({
       )}
 
       {(porRevisar.length > 0 || pendientes.length > 0) && !seleccionado && (
-        <div className="mb-4 flex items-start gap-2 rounded-[16px] border border-[#4242FF]/25 bg-[#4242FF]/[0.07] px-4 py-3">
-          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-[#4242FF]" />
-          <p className="text-xs leading-5 text-[#F8FAD7]/70">
+        <div className="mb-4 flex items-start gap-2 rounded-[16px] border border-brand/25 bg-brand/[0.07] px-4 py-3">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-brand" />
+          <p className="text-xs leading-5 text-foreground/70">
             {porRevisar.length > 0 && (
               <>
-                <strong className="text-[#F8FAD7]">
+                <strong className="text-foreground">
                   {porRevisar.length} con datos deducidos, no confirmados.
                 </strong>{" "}
               </>
             )}
             {pendientes.length > 0 && (
               <>
-                <strong className="text-[#F8FAD7]">
+                <strong className="text-foreground">
                   {pendientes.length}
                 </strong>{" "}
                 con página, país o correo pendiente.{" "}
@@ -397,7 +397,7 @@ export function ClientesView({
           <button
             type="button"
             onClick={() => onSeleccionar(null)}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#4242FF] transition-colors hover:text-[#4242FF]/75"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-brand transition-colors hover:text-brand/75"
           >
             <ChevronLeft className="size-3.5" />
             Todos los clientes
@@ -411,7 +411,7 @@ export function ClientesView({
               type="button"
               onClick={() => setVerFicha(!verFicha)}
               aria-expanded={verFicha}
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#F8FAD7]/10 bg-[#323330]/55 px-3 py-1.5 text-xs font-semibold text-[#F8FAD7]/65 transition-colors hover:text-[#F8FAD7]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-card/55 px-3 py-1.5 text-xs font-semibold text-foreground/65 transition-colors hover:text-foreground"
             >
               <Settings className="size-3.5" />
               Ficha del cliente
@@ -498,17 +498,17 @@ function Ficha({
 
   return (
     <Surface className="overflow-hidden">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#F8FAD7]/10 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-foreground/10 p-4">
         <div className="min-w-0">
-          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-[#F8FAD7]">
+          <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-foreground">
             {portfolio.name}
             {portfolio.needsReview && (
-              <span className="font-micro rounded-full border border-[#4242FF]/30 bg-[#4242FF]/10 px-2 py-0.5 text-[0.55rem] text-[#4242FF]">
+              <span className="font-micro rounded-full border border-brand/30 bg-brand/10 px-2 py-0.5 text-[0.55rem] text-brand">
                 POR CONFIRMAR
               </span>
             )}
           </h3>
-          <p className="metric-number mt-1 text-[0.62rem] text-[#F8FAD7]/40">
+          <p className="metric-number mt-1 text-[0.62rem] text-foreground/40">
             {portfolio.id}
             {portfolio.contactEmail ? ` · ${portfolio.contactEmail}` : ""}
           </p>
@@ -516,14 +516,14 @@ function Ficha({
 
         <div className="flex shrink-0 items-center gap-1.5">
           {porPlataforma.length === 0 ? (
-            <span className="font-micro rounded-full border border-[#F8FAD7]/12 px-2.5 py-1 text-[0.58rem] text-[#F8FAD7]/45">
+            <span className="font-micro rounded-full border border-foreground/12 px-2.5 py-1 text-[0.58rem] text-foreground/45">
               SIN CUENTAS
             </span>
           ) : (
             porPlataforma.map(([provider, total]) => (
               <span
                 key={provider}
-                className="rounded-full border border-[#4242FF]/30 bg-[#4242FF]/12 px-2.5 py-1 text-[0.62rem] font-bold text-[#4242FF]"
+                className="rounded-full border border-brand/30 bg-brand/12 px-2.5 py-1 text-[0.62rem] font-bold text-brand"
               >
                 {platformLabel(provider)} · {total}
               </span>
@@ -544,8 +544,8 @@ function Ficha({
               className={cn(
                 "inline-flex size-7 shrink-0 items-center justify-center rounded-full border transition-colors",
                 mostrarAjustes
-                  ? "border-[#4242FF]/40 bg-[#4242FF]/12 text-[#4242FF]"
-                  : "border-[#F8FAD7]/12 text-[#F8FAD7]/55 hover:border-[#F8FAD7]/30 hover:text-[#F8FAD7]",
+                  ? "border-brand/40 bg-brand/12 text-brand"
+                  : "border-foreground/12 text-foreground/55 hover:border-foreground/30 hover:text-foreground",
               )}
             >
               <Settings className="size-3.5" />
@@ -569,9 +569,9 @@ function Ficha({
 
       {mostrarAjustes && (
         <div className="p-4">
-          <ul className="divide-y divide-[#F8FAD7]/8 rounded-xl border border-[#F8FAD7]/10 bg-[#292929]/40">
+          <ul className="divide-y divide-foreground/8 rounded-xl border border-foreground/10 bg-field/40">
             {portfolio.accounts.length === 0 ? (
-              <li className="px-3 py-2 text-xs text-[#F8FAD7]/45">
+              <li className="px-3 py-2 text-xs text-foreground/45">
                 Sin cuentas vinculadas
               </li>
             ) : (
@@ -579,16 +579,16 @@ function Ficha({
                 <li key={cuenta.externalId} className="px-3 py-2">
                   <div className="flex items-center justify-between gap-3">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 truncate text-xs text-[#F8FAD7]/78">
+                      <span className="min-w-0 truncate text-xs text-foreground/78">
                         {cuenta.name}
                       </span>
                       {!cuenta.conDatos && (
-                        <span className="font-micro shrink-0 rounded-full border border-[#F8FAD7]/12 px-1.5 py-0.5 text-[0.52rem] text-[#F8FAD7]/40">
+                        <span className="font-micro shrink-0 rounded-full border border-foreground/12 px-1.5 py-0.5 text-[0.52rem] text-foreground/40">
                           SIN DATOS ESTE MES
                         </span>
                       )}
                     </span>
-                    <span className="metric-number shrink-0 text-[0.62rem] text-[#F8FAD7]/45">
+                    <span className="metric-number shrink-0 text-[0.62rem] text-foreground/45">
                       {cuenta.provider
                         ? `${platformLabel(cuenta.provider)} · `
                         : ""}
@@ -635,7 +635,7 @@ function Ficha({
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <div>
-              <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                 CORREO DE CONTACTO
               </label>
               <Input
@@ -643,12 +643,12 @@ function Ficha({
                 disabled={!editable}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Sin correo"
-                className="h-9 bg-[#292929]/60 text-xs"
+                className="h-9 bg-field/60 text-xs"
               />
             </div>
             {cuentasMeta.length <= 1 && (
               <div>
-                <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+                <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                   PÁGINA DE FACEBOOK
                 </label>
                 <Input
@@ -656,13 +656,13 @@ function Ficha({
                   disabled={!editable}
                   onChange={(e) => setPageId(e.target.value)}
                   placeholder="Sin página"
-                  className="h-9 bg-[#292929]/60 text-xs"
+                  className="h-9 bg-field/60 text-xs"
                 />
               </div>
             )}
             {!necesitaDesglosePorPais && (
               <div>
-                <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+                <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                   DÓNDE SE MUESTRAN LOS ANUNCIOS
                 </label>
                 <Input
@@ -670,9 +670,9 @@ function Ficha({
                   disabled={!editable}
                   onChange={(e) => setCountries(e.target.value)}
                   placeholder="Sin definir"
-                  className="h-9 bg-[#292929]/60 text-xs"
+                  className="h-9 bg-field/60 text-xs"
                 />
-                <p className="mt-1 text-[0.62rem] leading-4 text-[#F8FAD7]/38">
+                <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
                   Países de segmentación. No tiene relación con la moneda de la
                   cuenta.
                 </p>
@@ -680,7 +680,7 @@ function Ficha({
             )}
           </div>
           {necesitaDesglosePorPais && (
-            <p className="mt-3 text-[0.62rem] leading-4 text-[#F8FAD7]/38">
+            <p className="mt-3 text-[0.62rem] leading-4 text-foreground/38">
               Este cliente tiene más de una cuenta en la misma plataforma: los
               países se definen por cuenta, en la lista de arriba.
             </p>
@@ -693,9 +693,9 @@ function Ficha({
             genera recomendaciones de presupuesto, en vez de usar un umbral
             inventado.
           */}
-          <div className="mt-3 grid gap-3 border-t border-[#F8FAD7]/8 pt-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 border-t border-foreground/8 pt-3 sm:grid-cols-2">
             <div>
-              <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                 META DE CPA (EN LA MONEDA DE LA CUENTA)
               </label>
               <Input
@@ -706,11 +706,11 @@ function Ficha({
                 disabled={!editable}
                 onChange={(e) => setMetaCpa(e.target.value)}
                 placeholder="Sin meta definida"
-                className="h-9 bg-[#292929]/60 text-xs"
+                className="h-9 bg-field/60 text-xs"
               />
             </div>
             <div>
-              <label className="font-micro mb-1 block text-[0.58rem] text-[#F8FAD7]/45">
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                 META DE ROAS (EJ. 3.5)
               </label>
               <Input
@@ -721,23 +721,23 @@ function Ficha({
                 disabled={!editable}
                 onChange={(e) => setMetaRoas(e.target.value)}
                 placeholder="Sin meta definida"
-                className="h-9 bg-[#292929]/60 text-xs"
+                className="h-9 bg-field/60 text-xs"
               />
             </div>
           </div>
-          <p className="mt-1 text-[0.62rem] leading-4 text-[#F8FAD7]/38">
+          <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
             Sin estas dos metas, este cliente no genera recomendaciones en la
             cola de Decisiones.
           </p>
 
           {portfolio.needsReview && portfolio.reviewNote && (
-            <p className="mt-3 rounded-xl border border-[#4242FF]/20 bg-[#4242FF]/[0.06] px-3 py-2 text-[0.68rem] leading-5 text-[#F8FAD7]/62">
+            <p className="mt-3 rounded-xl border border-brand/20 bg-brand/[0.06] px-3 py-2 text-[0.68rem] leading-5 text-foreground/62">
               {portfolio.reviewNote}
               {editable && (
                 <button
                   type="button"
                   onClick={() => onGuardar({ needsReview: false })}
-                  className="ml-2 font-bold text-[#4242FF] underline-offset-2 hover:underline"
+                  className="ml-2 font-bold text-brand underline-offset-2 hover:underline"
                 >
                   Confirmar
                 </button>
@@ -764,9 +764,9 @@ function Ficha({
                   targetRoas: metaRoas.trim() ? Number(metaRoas) : null,
                 })
               }
-              className="mt-3 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70"
+              className="mt-3 border-foreground/12 bg-transparent text-foreground/70"
             >
-              {guardando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+              {guardando ? <OrbeDeBoton /> : null}
               Guardar
             </Button>
           )}
@@ -797,7 +797,7 @@ function PaginaDeCuenta({
 
   return (
     <div className="mt-2 flex items-center gap-2 pl-1">
-      <span className="font-micro shrink-0 text-[0.55rem] text-[#F8FAD7]/40">
+      <span className="font-micro shrink-0 text-[0.55rem] text-foreground/40">
         PÁGINA
       </span>
       <Input
@@ -805,14 +805,14 @@ function PaginaDeCuenta({
         disabled={!editable}
         onChange={(e) => setValor(e.target.value)}
         placeholder="Sin página"
-        className="h-7 bg-[#292929]/60 text-[0.68rem]"
+        className="h-7 bg-field/60 text-[0.68rem]"
       />
       {editable && cambiado && (
         <Button
           size="sm"
           variant="outline"
           onClick={() => onGuardar(valor.trim() || null)}
-          className="h-7 shrink-0 border-[#F8FAD7]/12 bg-transparent px-2.5 text-[0.62rem] text-[#F8FAD7]/70"
+          className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
         >
           Guardar
         </Button>
@@ -884,7 +884,7 @@ function PaisesDeCuenta({
 
   return (
     <div className="mt-1.5 flex items-center gap-2 pl-1">
-      <span className="font-micro shrink-0 text-[0.55rem] text-[#F8FAD7]/40">
+      <span className="font-micro shrink-0 text-[0.55rem] text-foreground/40">
         PAÍSES
       </span>
       <Input
@@ -893,12 +893,12 @@ function PaisesDeCuenta({
         onChange={(e) => setValor(e.target.value)}
         placeholder="Sin definir"
         className={cn(
-          "h-7 bg-[#292929]/60 text-[0.68rem]",
-          esSugerencia && "text-[#4242FF]/70",
+          "h-7 bg-field/60 text-[0.68rem]",
+          esSugerencia && "text-brand/70",
         )}
       />
       {esSugerencia && (
-        <span className="font-micro shrink-0 text-[0.52rem] text-[#4242FF]/60">
+        <span className="font-micro shrink-0 text-[0.52rem] text-brand/60">
           SUGERIDO DEL NOMBRE
         </span>
       )}
@@ -914,7 +914,7 @@ function PaisesDeCuenta({
                 .filter(Boolean),
             )
           }
-          className="h-7 shrink-0 border-[#F8FAD7]/12 bg-transparent px-2.5 text-[0.62rem] text-[#F8FAD7]/70"
+          className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
         >
           Guardar
         </Button>

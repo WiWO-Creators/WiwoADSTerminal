@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
-import { Surface, ThinkingOrb } from "./ui";
+import { PantallaDeCarga, Surface, OrbeDeBoton } from "./ui";
 
 /** Trae el equipo sin tocar estado, para poder usarla dentro de un efecto. */
 async function fetchTeam(): Promise<Member[]> {
@@ -128,14 +128,14 @@ export function EquipoView({
   return (
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-          <ShieldCheck className="size-3 text-[#4242FF]" />
+        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+          <ShieldCheck className="size-3 text-brand" />
           Acceso · roles y clientes
         </p>
         <h2 className="neo-section-title">
           Quién entra y qué puede hacer
         </h2>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Solo entra quien esté en esta lista. El rol decide qué puede hacer; los
           clientes asignados deciden sobre qué.
         </p>
@@ -146,7 +146,7 @@ export function EquipoView({
           <div className="min-w-0 flex-1">
             <label
               htmlFor="nuevo-correo"
-              className="font-micro block text-[0.62rem] text-[#F8FAD7]/55"
+              className="font-micro block text-[0.62rem] text-foreground/55"
             >
               CORREO
             </label>
@@ -156,15 +156,15 @@ export function EquipoView({
               value={email}
               placeholder="persona@empresa.com"
               onChange={(event) => setEmail(event.target.value)}
-              className="mt-1.5 bg-[#292929]/60"
+              className="mt-1.5 bg-field/60"
             />
           </div>
           <div className="sm:w-52">
-            <label className="font-micro block text-[0.62rem] text-[#F8FAD7]/55">
+            <label className="font-micro block text-[0.62rem] text-foreground/55">
               ROL
             </label>
             <Select value={role} onValueChange={(value) => setRole(value as Role)}>
-              <SelectTrigger className="mt-1.5 w-full bg-[#292929]/60">
+              <SelectTrigger className="mt-1.5 w-full bg-field/60">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -182,14 +182,14 @@ export function EquipoView({
             className="h-10 font-extrabold"
           >
             {saving === "invitar" ? (
-              <ThinkingOrb size="xs" state="generating" label="" />
+              <OrbeDeBoton />
             ) : (
               <UserPlus />
             )}
             Agregar
           </Button>
         </div>
-        <p className="mt-2 text-xs leading-5 text-[#F8FAD7]/45">
+        <p className="mt-2 text-xs leading-5 text-foreground/45">
           {ROLE_DESCRIPTIONS[role]}
         </p>
       </Surface>
@@ -199,24 +199,21 @@ export function EquipoView({
           {error}
         </div>
       ) : loading ? (
-        <p className="flex items-center justify-center gap-3 px-4 py-8 text-center text-sm text-[#F8FAD7]/45">
-          <ThinkingOrb size="md" state="thinking" label="" />
-          Cargando equipo…
-        </p>
+        <PantallaDeCarga mensaje="Cargando equipo…" />
       ) : (
         <Surface className="overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow className="bg-[#F8FAD7]/[0.03] hover:bg-[#F8FAD7]/[0.04]">
-                  <TableHead className="pl-4 text-xs text-[#F8FAD7]/58">
+                <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.04]">
+                  <TableHead className="pl-4 text-xs text-foreground/58">
                     Persona
                   </TableHead>
-                  <TableHead className="text-xs text-[#F8FAD7]/58">Rol</TableHead>
-                  <TableHead className="text-xs text-[#F8FAD7]/58">
+                  <TableHead className="text-xs text-foreground/58">Rol</TableHead>
+                  <TableHead className="text-xs text-foreground/58">
                     Clientes
                   </TableHead>
-                  <TableHead className="pr-4 text-right text-xs text-[#F8FAD7]/58">
+                  <TableHead className="pr-4 text-right text-xs text-foreground/58">
                     Estado
                   </TableHead>
                 </TableRow>
@@ -225,13 +222,13 @@ export function EquipoView({
                 {members.map((member) => (
                   <TableRow
                     key={member.id}
-                    className="h-16 bg-[#323330] hover:bg-[#F8FAD7]/[0.04]"
+                    className="h-16 bg-card hover:bg-foreground/[0.04]"
                   >
                     <TableCell className="pl-4">
-                      <span className="block text-sm font-bold text-[#F8FAD7]">
+                      <span className="block text-sm font-bold text-foreground">
                         {member.email}
                       </span>
-                      <span className="mt-1 block text-xs text-[#F8FAD7]/45">
+                      <span className="mt-1 block text-xs text-foreground/45">
                         {member.foundingAdmin
                           ? "Administrador fundador"
                           : member.invitedBy
@@ -241,7 +238,7 @@ export function EquipoView({
                     </TableCell>
                     <TableCell>
                       {member.foundingAdmin ? (
-                        <span className="text-sm font-semibold text-[#F8FAD7]/74">
+                        <span className="text-sm font-semibold text-foreground/74">
                           {ROLE_LABELS[member.role]}
                         </span>
                       ) : (
@@ -253,7 +250,7 @@ export function EquipoView({
                         >
                           <SelectTrigger
                             size="sm"
-                            className="w-40 bg-[#292929]/60"
+                            className="w-40 bg-field/60"
                           >
                             <SelectValue />
                           </SelectTrigger>
@@ -280,7 +277,7 @@ export function EquipoView({
                     </TableCell>
                     <TableCell className="pr-4 text-right">
                       {member.foundingAdmin ? (
-                        <span className="text-xs text-[#F8FAD7]/45">
+                        <span className="text-xs text-foreground/45">
                           No editable
                         </span>
                       ) : (
@@ -292,9 +289,9 @@ export function EquipoView({
                             void patch(member.id, { isActive: !member.isActive })
                           }
                           className={cn(
-                            "border-[#F8FAD7]/12 bg-transparent",
+                            "border-foreground/12 bg-transparent",
                             member.isActive
-                              ? "text-[#F8FAD7]/70"
+                              ? "text-foreground/70"
                               : "text-warn",
                           )}
                         >
@@ -334,7 +331,7 @@ function ClientPicker({
 }) {
   if (role === "admin" || role === "lead") {
     return (
-      <span className="text-xs text-[#F8FAD7]/45">Todos los clientes</span>
+      <span className="text-xs text-foreground/45">Todos los clientes</span>
     );
   }
 
@@ -344,7 +341,7 @@ function ClientPicker({
         <button
           type="button"
           disabled={disabled}
-          className="text-left text-sm font-semibold text-[#4242FF] underline-offset-2 hover:underline disabled:opacity-50"
+          className="text-left text-sm font-semibold text-brand underline-offset-2 hover:underline disabled:opacity-50"
         >
           {selected.length === 0
             ? "Sin clientes asignados"
@@ -364,7 +361,7 @@ function ClientPicker({
             return (
               <label
                 key={portfolio.id}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs text-[#F8FAD7]/78 hover:bg-[#F8FAD7]/[0.05]"
+                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-xs text-foreground/78 hover:bg-foreground/[0.05]"
               >
                 <input
                   type="checkbox"

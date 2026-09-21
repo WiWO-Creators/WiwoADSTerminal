@@ -44,7 +44,7 @@ import type {
   IntegrationProvider,
   IntegrationSummary,
 } from "@/lib/integration-store";
-import { Surface, ThinkingOrb } from "./ui";
+import { OrbeDeBoton, Surface } from "./ui";
 
 type WindsorAccount = { name: string; currency: string | null };
 
@@ -299,14 +299,14 @@ export function IntegrationsView({
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
-            <ShieldCheck className="size-3 text-[#4242FF]" />
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+            <ShieldCheck className="size-3 text-brand" />
             Fuentes de datos · operación controlada
           </p>
           <h2 className="neo-section-title">
             Conecta las cuentas que WiWO debe leer
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
             Autoriza con la ventana oficial, elige cuentas publicitarias y
             sincroniza inversión, impresiones, clics y resultados. WiWO.ADS
             nunca solicita ni almacena contraseñas.
@@ -315,14 +315,14 @@ export function IntegrationsView({
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             variant="outline"
-            className="h-8 border-[#F8FAD7]/10 bg-[#323330]/55 text-[#F8FAD7]/65"
+            className="h-8 border-foreground/10 bg-card/55 text-foreground/65"
           >
             <Link2 />
             {connectedCount} de 2 con OAuth
           </Badge>
           <Badge
             variant="outline"
-            className="h-8 border-[#F8FAD7]/10 bg-[#323330]/55 text-[#F8FAD7]/65"
+            className="h-8 border-foreground/10 bg-card/55 text-foreground/65"
           >
             <DatabaseZap />
             {selectedCount} cuentas seleccionadas
@@ -330,22 +330,22 @@ export function IntegrationsView({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-[#F8FAD7]/10 bg-[#323330]/55 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-foreground/10 bg-card/55 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[#4242FF] text-xs font-extrabold text-[#292929]">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-xs font-extrabold text-primary-foreground">
             {currentUser.email.slice(0, 2).toUpperCase()}
           </span>
           <div className="min-w-0">
-            <p className="font-micro text-[0.6rem] text-[#F8FAD7]/45">
+            <p className="font-micro text-[0.6rem] text-foreground/45">
               SESIÓN EN WIWO.ADS
             </p>
-            <p className="mt-1 truncate text-sm font-bold text-[#F8FAD7]">
+            <p className="mt-1 truncate text-sm font-bold text-foreground">
               {currentUser.email}
             </p>
           </div>
         </div>
         <Button asChild variant="outline" size="sm"
-          className="shrink-0 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70">
+          className="shrink-0 border-foreground/12 bg-transparent text-foreground/70">
           <a href={signOutPath}>
             <LogOut />
             Cerrar sesión
@@ -357,14 +357,14 @@ export function IntegrationsView({
         <div className="mb-4 rounded-[16px] border border-[#3BFF00]/25 bg-[#3BFF00]/[0.06] px-4 py-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-[#3BFF00]/15 text-[#3BFF00]">
+              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-[#3BFF00]/15 text-brand">
                 <DatabaseZap className="size-4" />
               </span>
               <div>
-                <p className="text-sm font-bold text-[#F8FAD7]">
+                <p className="text-sm font-bold text-foreground">
                   Windsor.ai · fuente de lectura activa
                 </p>
-                <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/58">
+                <p className="mt-1 text-xs leading-5 text-foreground/58">
                   {windsor.accountCount} cuentas con datos
                   {typeof windsor.google === "number" &&
                   typeof windsor.meta === "number"
@@ -374,11 +374,11 @@ export function IntegrationsView({
                 </p>
               </div>
             </div>
-            <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-3 py-1 text-[0.62rem] text-[#3BFF00]">
+            <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-3 py-1 text-[0.62rem] text-brand">
               LEYENDO
             </span>
           </div>
-          <p className="mt-3 text-xs leading-5 text-[#F8FAD7]/45">
+          <p className="mt-3 text-xs leading-5 text-foreground/45">
             Las métricas del tablero entran por acá. Las cuentas de Google y Meta
             están autorizadas dentro de Windsor, con su propia cuenta: se
             administran en{" "}
@@ -386,7 +386,7 @@ export function IntegrationsView({
               href="https://onboard.windsor.ai/connectors"
               target="_blank"
               rel="noreferrer"
-              className="text-[#3BFF00] underline underline-offset-2"
+              className="text-brand underline underline-offset-2"
             >
               onboard.windsor.ai
             </a>
@@ -407,7 +407,7 @@ export function IntegrationsView({
           </div>
           <Button
             variant="outline"
-            className="shrink-0 border-danger-deep/25 bg-[#323330]"
+            className="shrink-0 border-danger-deep/25 bg-card"
             onClick={() => setReloadVersion((current) => current + 1)}
           >
             <RefreshCw />
@@ -430,9 +430,9 @@ export function IntegrationsView({
         {loading
           ? ["google", "meta"].map((provider) => (
               <Surface key={provider} className="min-h-[320px] animate-pulse p-5">
-                <div className="h-12 w-12 rounded-2xl bg-[#F8FAD7]/8" />
-                <div className="mt-6 h-6 w-36 rounded bg-[#F8FAD7]/8" />
-                <div className="mt-3 h-4 w-64 rounded bg-[#F8FAD7]/6" />
+                <div className="h-12 w-12 rounded-2xl bg-foreground/8" />
+                <div className="mt-6 h-6 w-36 rounded bg-foreground/8" />
+                <div className="mt-3 h-4 w-64 rounded bg-foreground/6" />
               </Surface>
             ))
           : integrations.map((integration) => (
@@ -486,7 +486,7 @@ export function IntegrationsView({
             </DialogDescription>
           </DialogHeader>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#F8FAD7]/35" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground/35" />
             <Input
               aria-label="Buscar cuentas por nombre o ID"
               value={query}
@@ -516,12 +516,12 @@ export function IntegrationsView({
                 );
               })
             ) : (
-              <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-[#F8FAD7]/15 bg-[#F8FAD7]/[0.025] px-6 text-center">
+              <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-foreground/15 bg-foreground/[0.025] px-6 text-center">
                 <div>
-                  <p className="text-sm font-bold text-[#F8FAD7]">
+                  <p className="text-sm font-bold text-foreground">
                     No encontramos cuentas
                   </p>
-                  <p className="mt-1 text-xs text-[#F8FAD7]/48">
+                  <p className="mt-1 text-xs text-foreground/48">
                     Cambia la búsqueda o sincroniza nuevamente la plataforma.
                   </p>
                 </div>
@@ -541,7 +541,7 @@ export function IntegrationsView({
               className="font-bold"
             >
               {busy?.action === "select" ? (
-                <ThinkingOrb size="xs" state="generating" label="" />
+                <OrbeDeBoton />
               ) : (
                 <CheckCircle2 />
               )}
@@ -581,7 +581,7 @@ export function IntegrationsView({
               onClick={() => void disconnect()}
             >
               {busy?.action === "disconnect" ? (
-                <ThinkingOrb size="xs" state="generating" label="" />
+                <OrbeDeBoton />
               ) : (
                 <Unplug />
               )}
@@ -670,10 +670,10 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
     <Surface className="mt-4 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-bold text-[#F8FAD7]">
+          <h3 className="text-sm font-bold text-foreground">
             Catálogo de campañas y anuncios
           </h3>
-          <p className="mt-1 max-w-xl text-xs leading-5 text-[#F8FAD7]/55">
+          <p className="mt-1 max-w-xl text-xs leading-5 text-foreground/55">
             Incluye lo pausado y lo apagado. Sin él, Windsor solo devuelve lo
             que tuvo actividad en el rango y una campaña detenida desaparece de
             la vista.
@@ -685,22 +685,22 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
             variant="outline"
             disabled={construyendo}
             onClick={() => void reconstruir()}
-            className="shrink-0 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70"
+            className="shrink-0 border-foreground/12 bg-transparent text-foreground/70"
           >
-            {construyendo ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
+            {construyendo ? <OrbeDeBoton /> : null}
             {construyendo ? "Barriendo Windsor…" : "Reconstruir"}
           </Button>
         )}
       </div>
 
       {construyendo && (
-        <p className="mt-3 text-xs text-[#F8FAD7]/50">
+        <p className="mt-3 text-xs text-foreground/50">
           El barrido completo tarda unos minutos. Puedes seguir trabajando.
         </p>
       )}
 
       {estado === null ? (
-        <p className="mt-3 text-xs text-[#F8FAD7]/45">Consultando estado…</p>
+        <p className="mt-3 text-xs text-foreground/45">Consultando estado…</p>
       ) : !estado.disponible ? (
         <p className="mt-3 rounded-xl border border-warn-deep/25 bg-warn-deep/[0.08] px-3 py-2 text-xs leading-5 text-warn">
           Todavía no se ha construido. Hasta entonces el sistema solo muestra
@@ -712,23 +712,23 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
             {estado.porPlataforma.map((fila) => (
               <div
                 key={fila.provider}
-                className="rounded-xl border border-[#F8FAD7]/10 bg-[#292929]/40 px-3 py-2.5"
+                className="rounded-xl border border-foreground/10 bg-field/40 px-3 py-2.5"
               >
-                <p className="text-xs font-bold text-[#F8FAD7]">
+                <p className="text-xs font-bold text-foreground">
                   {fila.plataforma}
                 </p>
-                <p className="metric-number mt-1 text-[0.68rem] text-[#F8FAD7]/55">
+                <p className="metric-number mt-1 text-[0.68rem] text-foreground/55">
                   {fila.campanas} campañas · {fila.conjuntos} conjuntos ·{" "}
                   {fila.anuncios} anuncios
                 </p>
-                <p className="metric-number mt-0.5 text-[0.62rem] text-[#F8FAD7]/38">
+                <p className="metric-number mt-0.5 text-[0.62rem] text-foreground/38">
                   en {fila.cuentas}{" "}
                   {fila.cuentas === 1 ? "cuenta" : "cuentas"}
                 </p>
               </div>
             ))}
           </div>
-          <p className="metric-number mt-2.5 text-[0.62rem] text-[#F8FAD7]/40">
+          <p className="metric-number mt-2.5 text-[0.62rem] text-foreground/40">
             Historial {estado.rango.desde} a {estado.rango.hasta} · construido{" "}
             {formatDate(estado.construidoEn)}
           </p>
@@ -789,27 +789,27 @@ function ProviderCard({
         ? { label: "Datos actualizados", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : connected
           ? { label: "OAuth conectado", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
-        : { label: "Sin conexión", className: "border-[#F8FAD7]/10 bg-[#323330]/60 text-[#F8FAD7]/48" };
+        : { label: "Sin conexión", className: "border-foreground/10 bg-card/60 text-foreground/48" };
 
   return (
     <Surface className="flex min-h-[330px] flex-col overflow-hidden">
-      <div className="flex items-start justify-between border-b border-[#F8FAD7]/8 p-5">
+      <div className="flex items-start justify-between border-b border-foreground/8 p-5">
         <div className="flex items-center gap-4">
           <span
             className={cn(
               "grid size-12 place-items-center rounded-2xl text-xl font-black shadow-sm",
               integration.provider === "google"
-                ? "bg-[#323330] text-[#4285F4] ring-1 ring-[#F8FAD7]/10"
+                ? "bg-card text-[#4285F4] ring-1 ring-foreground/10"
                 : "bg-[#0668E1] text-white",
             )}
           >
             {integration.provider === "google" ? "G" : "M"}
           </span>
           <div>
-            <h3 className="text-lg font-bold text-[#F8FAD7]">
+            <h3 className="text-lg font-bold text-foreground">
               {integration.label}
             </h3>
-            <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/48">
+            <p className="mt-1 text-xs leading-5 text-foreground/48">
               {integration.description}
             </p>
           </div>
@@ -855,16 +855,16 @@ function ProviderCard({
             />
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-[#F8FAD7]/14 bg-[#323330]/35 p-4">
+          <div className="rounded-2xl border border-dashed border-foreground/14 bg-card/35 p-4">
             {windsorAccounts.length > 0 ? (
               <>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-bold text-[#F8FAD7]">
+                  <p className="text-sm font-bold text-foreground">
                     Leyendo {windsorAccounts.length}{" "}
                     {windsorAccounts.length === 1 ? "cuenta" : "cuentas"} vía
                     Windsor
                   </p>
-                  <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-2 py-0.5 text-[0.58rem] text-[#3BFF00]">
+                  <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-2 py-0.5 text-[0.58rem] text-brand">
                     ACTIVO
                   </span>
                 </div>
@@ -874,26 +874,26 @@ function ProviderCard({
                       key={account.name}
                       className="flex items-center justify-between gap-3 text-xs"
                     >
-                      <span className="min-w-0 truncate text-[#F8FAD7]/78">
+                      <span className="min-w-0 truncate text-foreground/78">
                         {account.name}
                       </span>
-                      <span className="font-micro shrink-0 text-[0.58rem] text-[#F8FAD7]/40">
+                      <span className="font-micro shrink-0 text-[0.58rem] text-foreground/40">
                         {account.currency ?? "—"}
                       </span>
                     </li>
                   ))}
                 </ul>
-                <p className="mt-3 border-t border-[#F8FAD7]/8 pt-3 text-xs leading-5 text-[#F8FAD7]/45">
+                <p className="mt-3 border-t border-foreground/8 pt-3 text-xs leading-5 text-foreground/45">
                   Autorizadas dentro de Windsor. Conectar {integration.label}{" "}
                   acá es para la capa de escritura.
                 </p>
               </>
             ) : (
               <>
-                <p className="text-sm font-bold text-[#F8FAD7]">
+                <p className="text-sm font-bold text-foreground">
                   Un acceso, todas las cuentas disponibles
                 </p>
-                <p className="mt-2 text-sm leading-6 text-[#F8FAD7]/55">
+                <p className="mt-2 text-sm leading-6 text-foreground/55">
                   Inicia sesión en {integration.label}, revisa los permisos y
                   elige exactamente qué cuentas quieres incorporar.
                 </p>
@@ -925,7 +925,7 @@ function ProviderCard({
               <Button
                 disabled
                 variant="outline"
-                className="border-[#F8FAD7]/12 bg-transparent font-bold text-[#F8FAD7]/45"
+                className="border-foreground/12 bg-transparent font-bold text-foreground/45"
               >
                 <AlertCircle />
                 {!canManage
@@ -943,7 +943,7 @@ function ProviderCard({
                 className="font-bold"
               >
                 {busy === "sync" || metricsRunning ? (
-                  <ThinkingOrb size="xs" state="generating" label="" />
+                  <OrbeDeBoton />
                 ) : needsSelection ? (
                   <SlidersHorizontal />
                 ) : (
@@ -976,7 +976,7 @@ function ProviderCard({
                 variant="ghost"
                 onClick={onDisconnect}
                 disabled={!canManage || Boolean(busy)}
-                className="ml-auto text-[#F8FAD7]/45 hover:text-danger-deep"
+                className="ml-auto text-foreground/45 hover:text-danger-deep"
               >
                 Desconectar
               </Button>
@@ -1009,12 +1009,12 @@ function AccountOption({
   return (
     <label
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-[#F8FAD7]/10 bg-[#323330]/60 p-3 transition-colors",
+        "flex items-center gap-3 rounded-xl border border-foreground/10 bg-card/60 p-3 transition-colors",
         disabled
           ? "cursor-not-allowed opacity-55"
           : // Antes hover:bg-[#1c1c25]: un navy-morado frío, ajeno a la
             // paleta ink/beige de Neo.
-            "cursor-pointer hover:border-[#4242FF]/35 hover:bg-[#F8FAD7]/[0.06]",
+            "cursor-pointer hover:border-brand/35 hover:bg-foreground/[0.06]",
       )}
     >
       <Checkbox
@@ -1024,10 +1024,10 @@ function AccountOption({
         aria-label={`Seleccionar ${account.name}`}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-bold text-[#F8FAD7]">
+        <span className="block truncate text-sm font-bold text-foreground">
           {account.name}
         </span>
-        <span className="mt-1 block truncate font-mono text-[0.68rem] text-[#F8FAD7]/42">
+        <span className="mt-1 block truncate font-mono text-[0.68rem] text-foreground/42">
           {account.externalId}
           {account.currency ? ` · ${account.currency}` : ""}
           {account.timezone ? ` · ${account.timezone}` : ""}
@@ -1035,7 +1035,7 @@ function AccountOption({
       </span>
       <Badge
         variant="outline"
-        className="shrink-0 border-[#F8FAD7]/10 bg-[#323330] text-[0.62rem] text-[#F8FAD7]/48"
+        className="shrink-0 border-foreground/10 bg-card text-[0.62rem] text-foreground/48"
       >
         {restriction ?? "Ads elegible"}
       </Badge>
@@ -1045,9 +1045,9 @@ function AccountOption({
 
 function ProviderFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-[#F8FAD7]/8 bg-[#323330]/45 px-3 py-3">
-      <p className="font-micro text-[0.58rem] text-[#F8FAD7]/38">{label}</p>
-      <p className="mt-1.5 truncate text-sm font-bold text-[#F8FAD7]/78">
+    <div className="rounded-xl border border-foreground/8 bg-card/45 px-3 py-3">
+      <p className="font-micro text-[0.58rem] text-foreground/38">{label}</p>
+      <p className="mt-1.5 truncate text-sm font-bold text-foreground/78">
         {value}
       </p>
     </div>
@@ -1065,12 +1065,12 @@ function ConnectionPrinciple({
 }) {
   return (
     <div className="flex items-start gap-3 rounded-xl px-2 py-1">
-      <span className="font-micro pt-0.5 text-[0.62rem] font-bold text-[#4242FF]">
+      <span className="font-micro pt-0.5 text-[0.62rem] font-bold text-brand">
         {number}
       </span>
       <div>
-        <p className="text-sm font-bold text-[#F8FAD7]">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-[#F8FAD7]/48">{text}</p>
+        <p className="text-sm font-bold text-foreground">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-foreground/48">{text}</p>
       </div>
     </div>
   );
