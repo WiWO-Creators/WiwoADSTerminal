@@ -226,6 +226,10 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "ad_id",
       "ad_name",
       "effective_status",
+      // Botón del anuncio (WHATSAPP_MESSAGE, CALL_NOW, MESSAGE_PAGE…): es lo
+      // que permite encontrar los anuncios de mensajería de un vistazo.
+      // Verificado contra get_fields de Windsor, tabla "Ad".
+      "call_to_action_type",
     ],
     camposAnuncio: [
       "account_id",
@@ -238,6 +242,7 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "ad_id",
       "ad_name",
       "effective_status",
+      "call_to_action_type",
       "spend",
       "impressions",
       "reach",

@@ -12,6 +12,7 @@ import {
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { can, enAlcance } from "@/lib/permisos";
 import {
+  actualizarCatalogoDeCuentas,
   executeWindsorAction,
   idDeResultado,
   type WindsorProvider,
@@ -99,6 +100,8 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     draft?: Partial<CampaignDraft>;
     confirmacion?: string;
+    /** Confirma publicar otra vez algo que ya se publicó hace poco. */
+    duplicar?: boolean;
   };
   if (body.confirmacion !== "CREAR") {
     return fail("Falta la confirmación explícita", 400);
@@ -132,6 +135,39 @@ export async function POST(request: Request) {
       },
       { status: 422, headers: NO_STORE },
     );
+  }
+
+  // Publicar dos veces lo mismo crea dos campañas iguales en cada plataforma, y
+  // Windsor no puede borrar ninguna. Pasó de verdad: un plan que se cortó a
+  // mitad de camino se volvió a publicar y dejó campañas duplicadas. Si en las
+  // últimas 6 horas ya se publicó una campaña con este nombre para este cliente
+  // y algo llegó a crearse, se pide confirmar antes de repetirla.
+  if (body.duplicar !== true) {
+    const previa = await getRawDb()
+      .prepare(
+        `SELECT created_at, steps_json FROM ejecuciones
+         WHERE portfolio_id = ? AND campaign_name = ? AND created_at > ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(draft.portfolioId, draft.name, Date.now() - 6 * 60 * 60 * 1000)
+      .first<{ created_at: number; steps_json: string }>();
+    if (previa) {
+      const creados = (JSON.parse(previa.steps_json) as PasoEjecutado[]).filter(
+        (paso) => paso.ok,
+      );
+      if (creados.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Una campaña con este nombre ya se publicó hace poco y algo quedó creado. Publicarla otra vez la duplica en la plataforma.",
+            codigo: "duplicado",
+            creado: creados.map((paso) => `${paso.platform}: ${paso.label}`),
+            hace: Date.now() - Number(previa.created_at),
+          },
+          { status: 409, headers: NO_STORE },
+        );
+      }
+    }
   }
 
   const ejecutables = plan.steps.filter((step) => !step.informativo);
@@ -223,13 +259,16 @@ export async function POST(request: Request) {
       if (!id) {
         // Se creó algo pero no sabemos su id: seguir encadenando a ciegas
         // crearía huérfanos, así que se corta y se dice exactamente eso.
-        realizados.push({
+        // Reemplaza el registro del paso (que figuraba como correcto) en vez
+        // de sumar otro: el mismo paso salía dos veces, una OK y una con error.
+        realizados[realizados.length - 1] = {
           ...resumen(step),
+          params,
           ok: false,
           error:
             "La plataforma creó el objeto pero no devolvió un identificador reconocible. Revisa la cuenta antes de reintentar: puede haber quedado creado.",
           raw: resultado.raw,
-        });
+        };
         todoBien = false;
         break;
       }
@@ -239,11 +278,43 @@ export async function POST(request: Request) {
 
   await registrar(draft, session.actor.email, realizados, todoBien);
 
+  // Lo recién creado no tiene ni una impresión, así que solo el catálogo lo
+  // conoce — y ese se reconstruía como mucho una vez al día, por eso la
+  // campaña publicada no aparecía en Clientes. Se agrega ahora, solo de las
+  // cuentas donde algo se creó, con un tope de tiempo para no demorar la
+  // respuesta si Windsor tarda.
+  const cuentasTocadas = new Map<string, { provider: WindsorProvider; accountId: string }>();
+  for (const paso of realizados) {
+    if (!paso.ok) continue;
+    const proveedor = paso.platform as WindsorProvider;
+    const cuenta = cuentaDe({ platform: proveedor } as PlanStep, draft, cuentas);
+    if (cuenta) {
+      cuentasTocadas.set(`${proveedor}:${cuenta.externalId}`, {
+        provider: proveedor,
+        accountId: cuenta.externalId,
+      });
+    }
+  }
+  let catalogoActualizado = false;
+  if (cuentasTocadas.size > 0) {
+    try {
+      await Promise.race([
+        actualizarCatalogoDeCuentas([...cuentasTocadas.values()]).then(() => {
+          catalogoActualizado = true;
+        }),
+        new Promise((resolve) => setTimeout(resolve, 25_000)),
+      ]);
+    } catch (error) {
+      console.error("WiWO.ADS catálogo tras publicar", error);
+    }
+  }
+
   return Response.json(
     {
       ok: todoBien,
       steps: realizados,
       ids,
+      catalogoActualizado,
       // Lo creado nace pausado: hay que activarlo en la plataforma.
       aviso: todoBien
         ? "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar."

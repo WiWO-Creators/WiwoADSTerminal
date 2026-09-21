@@ -32,7 +32,7 @@ const API_BASE = "https://connectors.windsor.ai";
 const CACHE_KEY = "windsor_cache_v2";
 const CAMPAIGN_CACHE_KEY = "windsor_campanas_v5";
 const CONVERSION_CACHE_KEY = "windsor_conversiones_v1";
-const ADS_CACHE_KEY = "windsor_anuncios_v5";
+const ADS_CACHE_KEY = "windsor_anuncios_v6";
 const CATALOG_CACHE_KEY = "windsor_catalogo_v2";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 /**
@@ -467,6 +467,125 @@ function iso(fecha: Date): string {
 }
 
 /**
+ * Borra lo cacheado de métricas, campañas, anuncios y contenido orgánico para
+ * que la próxima lectura vaya a Windsor. **No** toca el catálogo (lo reconstruye
+ * `fetchWindsorCatalog` con `construir: true`): es lo más caro de rehacer y no
+ * cambia con cada actualización manual.
+ */
+export async function limpiarCacheDeMetricas(): Promise<number> {
+  const prefijos = [CACHE_KEY, CAMPAIGN_CACHE_KEY, CONVERSION_CACHE_KEY, ADS_CACHE_KEY, ORGANIC_CACHE_KEY];
+  const db = getRawDb();
+  let borradas = 0;
+  for (const prefijo of prefijos) {
+    const resultado = await db
+      .prepare("DELETE FROM app_meta WHERE key = ? OR key LIKE ?")
+      .bind(prefijo, `${prefijo}:%`)
+      .run();
+    borradas += resultado.meta?.changes ?? 0;
+  }
+  return borradas;
+}
+
+/** Ventana de la actualización parcial: lo recién creado siempre cae acá adentro. */
+const CATALOGO_PARCIAL_DIAS = 45;
+const CATALOGO_PARCIAL_TIMEOUT_MS = 60_000;
+
+function claveDeCampana(c: WindsorCampaign): string {
+  return `${c.provider}:${c.campaignId ?? c.name}`;
+}
+
+function claveDeAnuncio(a: WindsorAd): string {
+  return `${a.provider}:${a.adId ?? `${a.campaignName}::${a.adsetName ?? ""}::${a.adName ?? ""}`}`;
+}
+
+/**
+ * Suma al catálogo guardado lo que exista de nuevo en unas cuentas puntuales,
+ * sin repetir el barrido de años de todo el sistema (minutos).
+ *
+ * Existe para lo que pasa justo después de publicar: la campaña recién creada
+ * no tiene ni una impresión, así que solo el catálogo la conoce, y ese se
+ * reconstruía una vez al día como mucho. Se pide únicamente la cuenta afectada
+ * y solo los últimos 45 días —lo creado ahora cae ahí siempre—, y el resultado
+ * se **funde** con lo guardado por id: se agregan y actualizan entidades, no se
+ * borran las viejas que la ventana corta no alcanza.
+ *
+ * No toca `construidoEn`: sigue siendo la fecha del último barrido completo,
+ * que es la que decide cuándo toca el siguiente.
+ */
+export async function actualizarCatalogoDeCuentas(
+  cuentas: Array<{ provider: WindsorProvider; accountId: string }>,
+): Promise<{ agregadas: number; fallos: string[] }> {
+  if (!windsorConfigured() || cuentas.length === 0) return { agregadas: 0, fallos: [] };
+
+  const hoy = new Date();
+  const rango = rangoCatalogo(hoy.toISOString().slice(0, 10));
+  const cacheId = `${CATALOG_CACHE_KEY}:${rango.desde}:${rango.hasta}`;
+  const db = getRawDb();
+  const cached = await db
+    .prepare("SELECT value, updated_at FROM app_meta WHERE key = ? LIMIT 1")
+    .bind(cacheId)
+    .first<{ value: string; updated_at: number }>();
+  // Sin un catálogo base no hay a qué fundir: el barrido completo lo arma.
+  if (!cached) return { agregadas: 0, fallos: [] };
+
+  const catalogo = JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">;
+  const desde = iso(new Date(hoy.getTime() - CATALOGO_PARCIAL_DIAS * 86_400_000));
+  const hasta = iso(hoy);
+  const fallos: string[] = [];
+  let agregadas = 0;
+
+  const unicas = new Map(cuentas.map((c) => [`${c.provider}:${c.accountId}`, c]));
+  await Promise.all(
+    [...unicas.values()].map(async ({ provider, accountId }) => {
+      try {
+        const conector = CONNECTORS[provider].connector;
+        const [filasCampanas, filasAnuncios] = await Promise.all([
+          requestWindsorConnector(conector, PLATFORM[provider].camposCatalogoCampana, desde, hasta, {
+            timeoutMs: CATALOGO_PARCIAL_TIMEOUT_MS,
+            selectAccounts: accountId,
+          }),
+          requestWindsorConnector(conector, PLATFORM[provider].camposCatalogoAnuncio, desde, hasta, {
+            timeoutMs: CATALOGO_PARCIAL_TIMEOUT_MS,
+            selectAccounts: accountId,
+          }),
+        ]);
+        const campanas = sinActividad(toCampaigns(filasCampanas, provider));
+        const anuncios = sinActividad(toAds(filasAnuncios, provider));
+
+        const porCampana = new Map(catalogo.campanas.map((c) => [claveDeCampana(c), c]));
+        for (const c of campanas) {
+          if (!porCampana.has(claveDeCampana(c))) agregadas += 1;
+          // Lo ya guardado con métricas no se pisa: solo se agrega lo que falta.
+          if (!porCampana.has(claveDeCampana(c))) porCampana.set(claveDeCampana(c), c);
+        }
+        catalogo.campanas = [...porCampana.values()];
+
+        const porAnuncio = new Map(catalogo.anuncios.map((a) => [claveDeAnuncio(a), a]));
+        for (const a of anuncios) {
+          if (!porAnuncio.has(claveDeAnuncio(a))) porAnuncio.set(claveDeAnuncio(a), a);
+        }
+        catalogo.anuncios = [...porAnuncio.values()];
+      } catch (error) {
+        fallos.push(`${provider}:${accountId} — ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }),
+  );
+
+  if (agregadas > 0 || fallos.length < unicas.size) {
+    await db
+      .prepare(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      // `updated_at` se conserva: es la fecha del barrido completo.
+      .bind(cacheId, JSON.stringify(catalogo), Number(cached.updated_at))
+      .run();
+  }
+  return { agregadas, fallos };
+}
+
+/**
  * Lee —y opcionalmente construye— el catálogo.
  *
  * Con `construir: false` jamás llama a Windsor: devuelve lo guardado, aunque
@@ -482,7 +601,14 @@ export async function fetchWindsorCatalog(
    * vacío, dejaría sin catálogo a todos salvo el mes en curso.
    */
   anclaje?: string,
-  { construir = false }: { construir?: boolean } = {},
+  {
+    construir = false,
+    forzar = false,
+  }: {
+    construir?: boolean;
+    /** Reconstruye aunque lo guardado todavía esté vigente (actualización manual). */
+    forzar?: boolean;
+  } = {},
 ): Promise<Catalogo> {
   const rango = rangoCatalogo(anclaje ?? new Date().toISOString().slice(0, 10));
   const vacio: Catalogo = {
@@ -510,7 +636,7 @@ export async function fetchWindsorCatalog(
   const vigente =
     guardado && Date.now() - guardado.construidoEn < CATALOG_TTL_MS;
 
-  if (vigente || !construir) return guardado ?? vacio;
+  if ((vigente && !forzar) || !construir) return guardado ?? vacio;
 
   // Cada plataforma se aísla: que Meta se pase de tiempo no debe costar el
   // catálogo de Google, que ya estaba listo.
@@ -936,6 +1062,12 @@ export type WindsorAd = {
   adName: string | null;
   /** Id nativo del anuncio. */
   adId: string | null;
+  /**
+   * Botón del anuncio en Meta (`WHATSAPP_MESSAGE`, `CALL_NOW`, `MESSAGE_PAGE`,
+   * `LEARN_MORE`…). `null` en Google o si Windsor no lo trae. Es el único dato
+   * de mensajería que Windsor entrega: el número de WhatsApp en sí no viaja.
+   */
+  callToAction?: string | null;
   status: string | null;
   spendMicros: number;
   impressions: number;
@@ -1036,6 +1168,7 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
       adsetId: text(first(row, "adset_id", "ad_group_id")),
       adName,
       adId: text(row.ad_id),
+      callToAction: text(row.call_to_action_type),
       status: text(first(row, "effective_status", "ad_group_ad_status")),
       spendMicros: toMicros(first(row, "spend", "cost")),
       impressions: Math.round(number(row.impressions)),
@@ -1385,53 +1518,4 @@ export async function executeWindsorAction(
   return { ok: true, raw: cuerpo, error: null };
 }
 
-/**
- * Busca el identificador que dejó una acción de creación.
- *
- * Windsor no documenta una forma única de respuesta por acción, así que se
- * recorren las claves que las APIs de Google y Meta usan, en orden, y se
- * devuelve la primera que traiga algo. Si ninguna aparece, devuelve null y el
- * ejecutor se detiene en vez de encadenar un paso con un id inventado.
- */
-export function idDeResultado(raw: unknown, claves: string[]): string | null {
-  const visitar = (valor: unknown, profundidad: number): string | null => {
-    if (profundidad > 4 || !valor || typeof valor !== "object") return null;
-    const objeto = valor as Record<string, unknown>;
-    for (const clave of claves) {
-      const encontrado = objeto[clave];
-      if (typeof encontrado === "string" && encontrado.trim()) return encontrado;
-      if (typeof encontrado === "number") return String(encontrado);
-    }
-    for (const anidado of Object.values(objeto)) {
-      const encontrado = visitar(anidado, profundidad + 1);
-      if (encontrado) return encontrado;
-    }
-    return null;
-  };
-  const porCampo = visitar(raw, 0);
-  if (porCampo) return porCampo;
-  // Verificado con una ejecución real: a diferencia de Meta, `create_campaign`
-  // de Google Ads no siempre trae el id en un campo estructurado — a veces
-  // viene solo dentro de un texto libre, p.ej. `"result": "Search campaign
-  // '...' (id 24257873743) created successfully..."`. Se busca como último
-  // recurso, nunca antes que un campo estructurado real.
-  return idDentroDeTexto(raw, 0);
-}
-
-function idDentroDeTexto(valor: unknown, profundidad: number): string | null {
-  if (profundidad > 4 || valor === null || valor === undefined) return null;
-  if (typeof valor === "string") {
-    // Sin exigir el paréntesis de cierre justo después del número: el grupo
-    // de anuncios responde "(id 200046612869, type SEARCH_STANDARD)" y con el
-    // patrón anterior no se reconocía, cortando el plan a mitad de camino
-    // (con el grupo ya creado y sin nada de Meta).
-    const coincidencia = valor.match(/\(id[:\s]+(\d+)/i);
-    return coincidencia ? coincidencia[1] : null;
-  }
-  if (typeof valor !== "object") return null;
-  for (const anidado of Object.values(valor as Record<string, unknown>)) {
-    const encontrado = idDentroDeTexto(anidado, profundidad + 1);
-    if (encontrado) return encontrado;
-  }
-  return null;
-}
+export { idDeResultado, idEnTextoLibre } from "@/lib/ids-de-resultado";
