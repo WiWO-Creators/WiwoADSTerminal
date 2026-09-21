@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Tomorrow:wght@400;500;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
@@ -24,38 +24,54 @@
 
 :root {
   color-scheme: dark;
-  --background: #080808;
-  --foreground: #F5F3FF;
-  --card: #121218;
-  --card-foreground: #F5F3FF;
-  --popover: #16161d;
-  --popover-foreground: #F5F3FF;
-  --primary: #42ff00;
-  --primary-foreground: #080808;
-  --secondary: #16161d;
-  --secondary-foreground: #F5F3FF;
-  --muted: #1b1b24;
-  --muted-foreground: #a2a0af;
-  --accent: rgba(74, 67, 255, 0.18);
-  --accent-foreground: #4a43ff;
+  /* Paleta de MetriQ (medida de sus capturas): lienzo #292929, barra lateral
+     más oscura (#201F1D) y tarjetas MÁS CLARAS que el lienzo (#33322F). */
+  --canvas: #292929;
+  --background: #292929;
+  --foreground: #f8fad7;
+  --card: #33322f;
+  --card-foreground: #f8fad7;
+  --popover: #33322f;
+  --popover-foreground: #f8fad7;
+  --primary: #3bff00;
+  --primary-foreground: #292929;
+  --secondary: #3a3933;
+  --secondary-foreground: #f8fad7;
+  --muted: #2f2e2b;
+  --muted-foreground: #a9a896;
+  --accent: rgba(59, 255, 0, 0.12);
+  --accent-foreground: #3bff00;
   --destructive: #d93d43;
-  --border: rgba(245, 243, 255, 0.14);
-  --input: rgba(245, 243, 255, 0.22);
-  --ring: #4a43ff;
-  --chart-1: #4a43ff;
-  --chart-2: #42ff00;
-  --chart-3: #42ff00;
+  --border: #46453e;
+  --input: #46453e;
+  --ring: #4242ff;
+  /* Campo de formulario recesado dentro de una tarjeta. */
+  --field: #292929;
+  /* Verde de marca para texto/íconos: neón en oscuro, verde legible en claro. */
+  --brand: #3bff00;
+  --chart-1: #4242ff;
+  --chart-2: #3bff00;
+  --chart-3: #3bff00;
   --chart-4: #f2a934;
   --chart-5: #d93d43;
   --radius: 1rem;
-  --sidebar: #0f0f14;
-  --sidebar-foreground: #F5F3FF;
-  --sidebar-primary: #4a43ff;
-  --sidebar-primary-foreground: #080808;
-  --sidebar-accent: rgba(74, 67, 255, 0.18);
-  --sidebar-accent-foreground: #4a43ff;
-  --sidebar-border: rgba(245, 243, 255, 0.12);
-  --sidebar-ring: #4a43ff;
+  --danger-deep: #b3261e;
+  --danger: #ff6f61;
+  --warn-deep: #9c6417;
+  --warn: #d88719;
+  --ok-deep: #1c7a38;
+  --ok: #9adbb0;
+  --sidebar: #201f1d;
+  --sidebar-foreground: #f8fad7;
+  --sidebar-primary: #3bff00;
+  --sidebar-primary-foreground: #292929;
+  --sidebar-accent: #31312c;
+  --sidebar-accent-foreground: #f8fad7;
+  --sidebar-border: #3a3933;
+  --sidebar-ring: #4242ff;
+  /* Aviso verdoso ("¿Primera vez?", éxito) — #283F38 en MetriQ oscuro. */
+  --tint: #283f38;
+  --tint-border: #2f4f45;
 }
 
 @theme inline {
@@ -90,12 +106,23 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-field: var(--field);
+  --color-brand: var(--brand);
+  --color-canvas: var(--canvas);
+  --color-tint: var(--tint);
+  --color-tint-border: var(--tint-border);
+  --color-danger-deep: var(--danger-deep);
+  --color-danger: var(--danger);
+  --color-warn-deep: var(--warn-deep);
+  --color-warn: var(--warn);
+  --color-ok-deep: var(--ok-deep);
+  --color-ok: var(--ok);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Archivo", Arial, Helvetica, sans-serif;
-  --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+  --font-sans: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+  --font-mono: "Tomorrow", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, monospace;
 }
 
@@ -111,109 +138,86 @@ body {
   min-width: 320px;
   background: var(--background);
   color: var(--foreground);
-  font-family: "Archivo", Arial, Helvetica, sans-serif;
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
   font-feature-settings: "tnum" 1, "ss01" 1;
   line-height: 1.55;
 }
 
 .theme-shell {
   min-height: 100svh;
-  background: #080808;
-  color: #f5f3ff;
+  background: var(--canvas);
+  color: var(--foreground);
 }
 
-.theme-shell[data-theme="light"] {
-  --background: #f7f7fa;
-  --foreground: #17161c;
-  --card: #ffffff;
-  --card-foreground: #17161c;
-  --popover: #ffffff;
-  --popover-foreground: #17161c;
-  --secondary: #ececf2;
-  --secondary-foreground: #17161c;
-  --muted: #ececf2;
-  --muted-foreground: #62616b;
-  --border: rgba(23, 22, 28, 0.14);
-  --input: rgba(23, 22, 28, 0.2);
-  --sidebar: #ffffff;
-  --sidebar-foreground: #17161c;
-  --sidebar-border: rgba(23, 22, 28, 0.12);
-  background: #f7f7fa;
-  color: #17161c;
-}
-
-.theme-shell[data-theme="light"] [class*="bg-[#080808]"] {
-  background-color: #f7f7fa !important;
-}
-
-.theme-shell[data-theme="light"] [class*="bg-[#16161d]"],
-.theme-shell[data-theme="light"] [class*="bg-[#121218]"] {
-  background-color: #ffffff !important;
-}
-
-.theme-shell[data-theme="light"] [class*="text-[#F5F3FF]"] {
-  color: #17161c !important;
-}
-
-.theme-shell[data-theme="light"] [class*="border-[#F5F3FF]"] {
-  border-color: rgba(23, 22, 28, 0.14) !important;
-}
-
-.theme-shell[data-theme="light"] .telemetry-grid {
-  background-image:
-    radial-gradient(circle at 18% 8%, rgba(66, 255, 0, 0.1), transparent 24rem),
-    radial-gradient(circle at 88% 22%, rgba(74, 67, 255, 0.1), transparent 30rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.8), transparent 52%);
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-}
-
-::selection {
-  background: #42ff00;
-  color: #080808;
+[data-theme="light"] {
+  color-scheme: light;
+  --canvas: #f8fad7;
+  --background: #f8fad7;
+  --foreground: #292929;
+  --card: #fffef7;
+  --card-foreground: #292929;
+  --popover: #fffef7;
+  --popover-foreground: #292929;
+  --secondary: #edefdd;
+  --secondary-foreground: #292929;
+  --muted: #edefdd;
+  --muted-foreground: #6b6c5a;
+  --accent: rgba(59, 255, 0, 0.16);
+  --accent-foreground: #2a7500;
+  --border: #e4e6c8;
+  --input: #dcdebd;
+  --field: #f8f9f2;
+  --brand: #2a7500;
+  --sidebar: #edefdd;
+  --sidebar-foreground: #292929;
+  --sidebar-accent: #dddfcf;
+  --sidebar-accent-foreground: #292929;
+  --sidebar-border: #d9dbca;
+  --tint: #dbf5cf;
+  --tint-border: #c9edb8;
+  background: #f8fad7;
+  color: #292929;
 }
 
 .neo-canvas,
 .telemetry-grid {
   position: relative;
-  background-image:
-    radial-gradient(circle at 18% 8%, rgba(66, 255, 0, 0.13), transparent 24rem),
-    radial-gradient(circle at 88% 22%, rgba(74, 67, 255, 0.2), transparent 30rem),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 52%);
-  background-attachment: fixed;
 }
 
-.neo-canvas::before,
-.telemetry-grid::before {
-  position: fixed;
-  z-index: 40;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 2px;
-  content: "";
-  pointer-events: none;
-  background: linear-gradient(90deg, #42ff00 0%, #42ff00 34%, #4a43ff 72%, transparent 100%);
+::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.85;
 }
 
-.font-editorial {
-  font-family: "Archivo", Arial, sans-serif;
+/* Título de cada sección/página dentro del producto. Antes usaba Fraunces
+   (serif) — el principio "serif como voz" de neo.wiwo.me es para piezas
+   editoriales/de marketing, no para el encabezado de todas las pantallas.
+   WiwoMetriQ, el software hermano que sí implementa Neo en producción, usa
+   sans-serif en negrita en sus propios títulos de pantalla (confirmado
+   contra sus capturas reales) — se corrige acá para no desentonar con el
+   resto de la familia de productos. */
+.neo-section-title {
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
   font-weight: 800;
+  font-size: 1.875rem;
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  color: var(--foreground);
+}
+@media (min-width: 768px) {
+  .neo-section-title {
+    font-size: 2.8rem;
+  }
 }
 
 .font-brand {
-  font-family: "Archivo", Arial, sans-serif;
+  font-family: "Plus Jakarta Sans", Arial, sans-serif;
 }
 
 .font-micro {
-  font-family: "Space Mono", ui-monospace, monospace;
-  font-weight: 400;
-  letter-spacing: 0.14em;
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -223,7 +227,7 @@ textarea {
   height: 0.9rem;
   flex: none;
   border-radius: 999px;
-  background: linear-gradient(135deg, #42ff00 10%, #4a43ff 78%);
+  background: linear-gradient(135deg, #3bff00 10%, #4242ff 78%);
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.42);
 }
 
@@ -239,26 +243,218 @@ textarea {
 [data-slot="select-trigger"],
 [data-slot="input"],
 [data-slot="textarea"] {
-  border-color: rgba(245, 243, 255, 0.16);
-  background: #16161d;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-color: var(--border);
+  background: var(--field);
 }
 
 [data-slot="table-header"] [data-slot="table-row"] {
-  background: #16161d !important;
+  background: transparent !important;
 }
 
 [data-slot="table-header"] [data-slot="table-head"] {
-  color: #42ff00 !important;
-  font-family: "Space Mono", ui-monospace, monospace;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.055em;
+  color: var(--muted-foreground) !important;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 [data-slot="table-row"] {
-  border-color: rgba(245, 243, 255, 0.1);
+  border-color: var(--border);
+}
+
+/* ── Tokens del sistema Neo (neo.wiwo.me) ────────────────────────────────────
+   Se declaran acá para que el resto del proyecto deje de escribir valores
+   sueltos. Los colores ya están aplicados; forma y espaciado quedan
+   disponibles para lo que venga.
+
+   `--wiwo-purple`, `--wiwo-onfill` y los tokens de movimiento de acá abajo
+   salen de WiwoMetriQ (`WiwoDevs/WiwoMetrics`), la otra app que sí implementa
+   Neo en producción — no son una interpretación nueva.
+
+   Pendiente, a propósito no aplicado todavía: MetriQ usa `--radius: 0.5rem`
+   (8px) como radio base de tarjeta, con una escala proporcional
+   (`--radius-sm/md/lg/xl` derivados de ahí). Acá `Surface` sigue en
+   `rounded-[16px]`, el doble. Corregirlo bien exige revisar cada
+   `rounded-[Npx]` suelto del proyecto, no solo esta variable — queda para una
+   pasada aparte en vez de cambiar el token sin que nada lo use todavía. */
+:root {
+  --wiwo-beige: #f8fad7;
+  --wiwo-ink: #292929;
+  /* Texto claro FIJO sobre fills oscuros o de color (azul, degradados) — no
+     flipea con el tema, a diferencia del beige de cuerpo de texto. */
+  --wiwo-onfill: #fffef7;
+  --wiwo-blue: #4242ff;
+  --wiwo-blue-700: #2525c8;
+  --wiwo-green: #3bff00;
+  --wiwo-lime: #8af84f;
+  /* Morado Neo: estado "listening" del Thinking Orb, sin uso de marca fuera de eso. */
+  --wiwo-purple: #8d7cff;
+  --wiwo-gradient-primary: linear-gradient(103deg, #3bff00, #4242ff);
+  --wiwo-gradient-soft: linear-gradient(
+    135deg,
+    rgba(59, 255, 0, 0.12),
+    rgba(66, 66, 255, 0.12)
+  );
+  --radius-card: 1rem;
+  --radius-control: 999px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+  /* Duraciones con nombre: antes cada transición tenía su propio valor suelto. */
+  --motion-micro: 160ms;
+  --motion-state: 280ms;
+  --motion-expressive: 420ms;
+  --motion-hero: 900ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-expressive: cubic-bezier(0.2, 0, 0, 1);
+  /* Elevación real de Neo — antes cada tarjeta tenía su propio valor de
+     shadow suelto e inventado. Estos cuatro son literales de neo.wiwo.me. */
+  --shadow-1: 0 8px 26px rgba(0, 0, 0, 0.24);
+  --shadow-2: 0 22px 70px rgba(0, 0, 0, 0.32);
+  --shadow-soft: 0 18px 52px rgba(0, 0, 0, 0.24);
+  --shadow-expressive: 0 30px 90px rgba(66, 66, 255, 0.22);
+  /* Escala tipográfica fluida de Neo (clamp, crece con el viewport) y sus
+     pesos con nombre — "editorial, cálida y humana en primer lugar" en vez
+     de los tamaños/pesos por defecto de Tailwind, que no dicen nada de la
+     voz de marca. */
+  --step--1: 0.82rem;
+  --step-0: 1rem;
+  --step-1: clamp(1.15rem, 1.4vw, 1.35rem);
+  --step-2: clamp(1.45rem, 2vw, 2rem);
+  --step-3: clamp(2rem, 3.8vw, 3.8rem);
+  --step-4: clamp(3.1rem, 7vw, 7.2rem);
+  --weight-body: 450;
+  --weight-meta: 600;
+  --weight-nav: 650;
+  --weight-action: 700;
+  --weight-display: 780;
+}
+
+/* Título de página — el h1 que encabeza cada vista. Antes era sans-serif
+   `text-sm font-bold`, indistinguible de cualquier dashboard genérico. "Serif
+   como voz": los titulares editoriales de Neo van en Fraunces, no en la
+   grotesca del cuerpo de texto. */
+.neo-page-title {
+  /* Sans, no serif — ver la nota de `.neo-section-title` sobre por qué. */
+  font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+  font-weight: 800;
+  font-size: var(--step-1);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+[data-theme="light"] {
+  --danger-deep: #b3261e;
+  --danger: #b3261e;
+  --warn-deep: #9c6417;
+  --warn: #9c6417;
+  --ok-deep: #1c7a38;
+  --ok: #1c7a38;
+  --shadow-1: 0 8px 26px rgba(41, 41, 41, 0.08);
+  --shadow-2: 0 22px 70px rgba(41, 41, 41, 0.12);
+  --shadow-soft: 0 18px 52px rgba(41, 41, 41, 0.08);
+  --shadow-expressive: 0 30px 90px rgba(66, 66, 255, 0.14);
+}
+
+/* "Tech en microdosis": los controles de Neo son pastillas. */
+[data-slot="button"],
+[data-slot="badge"],
+[data-slot="select-trigger"],
+[data-slot="input"] {
+  border-radius: var(--radius-control);
+}
+
+/* El logotipo usa la fuente de marca. */
+.font-brand {
+  font-family: "Outfit", "Plus Jakarta Sans", Arial, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Acento de marca para el elemento activo de navegación. */
+.neo-accent {
+  background-image: var(--wiwo-gradient-primary);
+}
+
+/* Texto con relleno de degradado — el mismo recurso que usa WiwoMetriQ para
+   resaltar una palabra dentro de un titular (p.ej. el nombre de la persona
+   en su saludo de inicio). Se usa con cuenta gotas: una palabra por titular,
+   no un párrafo entero. */
+.neo-gradient-text {
+  background-image: linear-gradient(100deg, #4242ff 0%, #3bff00 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+/* En oscuro MetriQ usa el verde de marca liso, sin degradado. */
+[data-theme="dark"] .neo-gradient-text {
+  background-image: none;
+  color: var(--brand);
+}
+
+/* El nombre de quien entró, en el saludo de bienvenida.
+   
+   A diferencia de `.neo-gradient-text`, este no se aplana en oscuro: el
+   saludo es lo primero que se ve al entrar y el movimiento es justamente
+   el punto. El degradado abre y cierra en el mismo azul, así que al
+   correrlo un ancho completo el bucle no tiene costura.
+   
+   Ocho segundos es deliberado: más rápido se lee como un GIF y compite con
+   el contenido; a este ritmo pasa por respiración. El `prefers-reduced-motion`
+   global de más arriba lo congela para quien lo pida. */
+@keyframes neo-nombre-flujo {
+  to {
+    background-position: 200% center;
+  }
+}
+.neo-nombre-animado {
+  background-image: linear-gradient(
+    100deg,
+    #4242ff 0%,
+    #00c2ff 25%,
+    #3bff00 50%,
+    #00c2ff 75%,
+    #4242ff 100%
+  );
+  background-size: 200% auto;
+  background-position: 0% center;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: neo-nombre-flujo 8s linear infinite;
+}
+/* En claro, el verde y el cian de marca pierden contra el fondo beige:
+   mismos colores, un paso más profundos, para que el nombre siga siendo
+   texto legible y no decoración. */
+[data-theme="light"] .neo-nombre-animado {
+  background-image: linear-gradient(
+    100deg,
+    #2f2fd6 0%,
+    #0086b3 25%,
+    #2a7500 50%,
+    #0086b3 75%,
+    #2f2fd6 100%
+  );
+}
+
+/* Acento decorativo corto en la esquina de una tarjeta — no un borde
+   completo, una pincelada corta que ancla la tarjeta a la identidad de
+   marca sin competir con su contenido. */
+.neo-card-accent::before {
+  content: "";
+  display: block;
+  width: 2.25rem;
+  height: 4px;
+  margin-bottom: 0.75rem;
+  border-radius: 999px;
+  background-image: linear-gradient(90deg, #3bff00, #4242ff);
 }
 
 @keyframes neo-breathe {
@@ -285,5 +481,923 @@ textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Vista previa de anuncios: colores reales de Google y de Meta, no los de
+ * Neo. A propósito no usa las variables de marca del sistema — el punto es
+ * que se reconozca como "así se ve en Google" o "así se ve en Meta", y eso
+ * significa copiar el modo oscuro real de cada uno, no el de WiWO.ADS.
+ *
+ * Por default (sin `data-theme="light"` heredado del `.theme-shell`) se ve
+ * el modo oscuro de cada plataforma, porque el sistema arranca en oscuro.
+ */
+.wa-preview-google {
+  background: #202124;
+}
+.wa-preview-google .wa-g-label {
+  border-color: #9aa0a6;
+  color: #9aa0a6;
+}
+.wa-preview-google .wa-g-domain {
+  color: #bdc1c6;
+}
+.wa-preview-google .wa-g-title {
+  color: #8ab4f8;
+}
+.wa-preview-google .wa-g-desc {
+  color: #bdc1c6;
+}
+
+[data-theme="light"] .wa-preview-google {
+  background: #ffffff;
+}
+[data-theme="light"] .wa-preview-google .wa-g-label {
+  border-color: #4d5156;
+  color: #4d5156;
+}
+[data-theme="light"] .wa-preview-google .wa-g-domain {
+  color: #4d5156;
+}
+[data-theme="light"] .wa-preview-google .wa-g-title {
+  color: #1a0dab;
+}
+[data-theme="light"] .wa-preview-google .wa-g-desc {
+  color: #4d5156;
+}
+
+.wa-preview-meta {
+  background: #242526;
+  color: #e4e6eb;
+}
+.wa-preview-meta .wa-m-avatar {
+  background: #3a3b3c;
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-sub {
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-media {
+  background: #3a3b3c;
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-footer {
+  background: #3a3b3c;
+}
+.wa-preview-meta .wa-m-domain {
+  color: #b0b3b8;
+}
+.wa-preview-meta .wa-m-cta {
+  background: #4e4f50;
+  color: #e4e6eb;
+}
+
+[data-theme="light"] .wa-preview-meta {
+  background: #ffffff;
+  color: #050505;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-avatar {
+  background: #e4e6eb;
+  color: #65676b;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-sub {
+  color: #65676b;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-media {
+  background: #e4e6eb;
+  color: #65676b;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-footer {
+  background: #f0f2f5;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-domain {
+  color: #65676b;
+}
+[data-theme="light"] .wa-preview-meta .wa-m-cta {
+  background: #e4e6eb;
+  color: #050505;
+}
+
+/* ── Thinking Orb ─────────────────────────────────────────────────────────
+   Portado desde WiwoMetriQ (WiwoDevs/WiwoMetrics, docs/THINKING_ORB.md —
+   "Kit de portabilidad"), la app hermana que implementa Neo en producción.
+   Solo la variante *inline* (xs/sm/md): la bolita de gradiente que respira,
+   para botones e indicadores junto a texto — reemplaza el `LoaderCircle`
+   genérico en los lugares donde "algo inteligente está pasando" (leer
+   Windsor, armar el plan, publicar). La variante *stage* —el orbe
+   volumétrico con partículas, para paneles de carga grandes— no se portó:
+   es varios cientos de líneas de CSS adicionales, para otra pasada. */
+@keyframes wiwo-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes wiwo-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1) saturate(1);
+  }
+  50% {
+    transform: scale(1.09);
+    filter: brightness(1.12) saturate(1.15);
+  }
+}
+@keyframes wiwo-orb-morph {
+  0%,
+  100% {
+    border-radius: 50%;
+  }
+  33% {
+    border-radius: 54% 46% 52% 48% / 48% 52% 48% 52%;
+  }
+  66% {
+    border-radius: 46% 54% 48% 52% / 52% 46% 54% 48%;
+  }
+}
+@keyframes wiwo-orb-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-12%) scale(1.06);
+  }
+}
+@keyframes wiwo-orb-ribbon {
+  0% {
+    transform: scale(0.75);
+    opacity: 0;
+  }
+  35% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-emanate {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-bloom {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+@keyframes wiwo-orb-contract {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: saturate(1) brightness(1);
+  }
+  50% {
+    transform: scale(0.84);
+    filter: saturate(1.25) brightness(0.95);
+  }
+}
+@keyframes wiwo-orb-success {
+  0% {
+    transform: scale(0.9);
+  }
+  45% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Base: gradiente líquido que respira + highlight que orbita. Es el estado
+   "thinking", el default — no necesita modificador. */
+.wiwo-orb {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border-radius: 999px;
+  background: var(--wiwo-gradient-primary);
+  box-shadow:
+    0 0 14px -2px rgba(66, 66, 255, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  animation:
+    wiwo-orb-breathe 2.4s ease-in-out infinite,
+    wiwo-orb-morph 7s ease-in-out infinite;
+}
+/* Capa de FX por estado (ribbon/emanación/bloom). Oculta por defecto; cada
+   modificador de estado la enciende. */
+.wiwo-orb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+}
+.wiwo-orb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.6) 60deg,
+    transparent 150deg
+  );
+  mix-blend-mode: screen;
+  animation: wiwo-orb-spin 2.8s linear infinite;
+}
+
+/* idle: gris definido en espera, pulso bajo (sistema disponible). */
+.wiwo-orb--idle {
+  background: radial-gradient(circle at 38% 32%, #b8b8b3, #76766f);
+  box-shadow:
+    0 0 10px -3px rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  animation: wiwo-orb-breathe 3.8s ease-in-out infinite;
+}
+.wiwo-orb--idle::before {
+  opacity: 0.3;
+  animation-duration: 7s;
+}
+
+/* listening: morado, rebote vivo + ribbon sensible al input. */
+.wiwo-orb--listening {
+  background: radial-gradient(circle at 38% 32%, #c2b6ff, var(--wiwo-purple));
+  box-shadow:
+    0 0 16px -2px rgba(141, 124, 255, 0.6),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.26);
+  animation: wiwo-orb-bounce 1.2s var(--ease-spring) infinite;
+}
+.wiwo-orb--listening::before {
+  opacity: 0;
+}
+.wiwo-orb--listening::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(141, 124, 255, 0.7);
+  animation: wiwo-orb-ribbon 1.8s var(--ease-out) infinite;
+}
+
+/* generating: más brillante y veloz, emanación saliendo (output activo). */
+.wiwo-orb--generating {
+  filter: saturate(1.25) brightness(1.12);
+  animation:
+    wiwo-orb-breathe 1.5s ease-in-out infinite,
+    wiwo-orb-morph 4s ease-in-out infinite;
+}
+.wiwo-orb--generating::before {
+  animation-duration: 1.4s;
+}
+.wiwo-orb--generating::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(66, 66, 255, 0.5);
+  animation: wiwo-orb-emanate 1.6s var(--ease-out) infinite;
+}
+
+/* routing: órbitas partidas, coordinación entre agentes. */
+.wiwo-orb--routing {
+  animation: wiwo-orb-breathe 2.6s ease-in-out infinite;
+}
+.wiwo-orb--routing::before {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.8) 22deg,
+    transparent 56deg,
+    transparent 180deg,
+    rgba(255, 255, 255, 0.55) 202deg,
+    transparent 236deg
+  );
+  animation: wiwo-orb-spin 1.4s linear infinite;
+}
+.wiwo-orb--routing::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgba(66, 66, 255, 0.38);
+  animation: wiwo-orb-emanate 2.2s linear infinite;
+}
+
+/* success: lima alegre + bloom celebratorio. */
+.wiwo-orb--success {
+  background: var(--wiwo-green);
+  box-shadow:
+    0 0 18px -2px rgba(59, 255, 0, 0.7),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  animation: wiwo-orb-success 0.6s var(--ease-spring) 1 both;
+}
+.wiwo-orb--success::before {
+  display: none;
+}
+.wiwo-orb--success::after {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px rgba(59, 255, 0, 0.6);
+  animation: wiwo-orb-bloom 0.7s var(--ease-out) 1 both;
+}
+
+/* error: fricción + contracción (bloqueo claro, sin rojo agresivo permanente).
+   retry es un alias del mismo lenguaje visual. */
+.wiwo-orb--error,
+.wiwo-orb--retry {
+  background: linear-gradient(135deg, #ff6f61 0%, #ba1a1a 100%);
+  box-shadow:
+    0 0 14px -3px rgba(186, 26, 26, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  animation: wiwo-orb-contract 1.4s var(--ease-in-out) infinite;
+}
+
+/* ── Thinking Orb volumétrico (variante "stage") ───────────────────────────
+   Portado tal cual de MetriQ (thinking-orb.css del kit): el orbe grande de
+   las pantallas de carga. Diseñado a 600×600 y escalado con --orb-fit. */
+@keyframes orbx-breathe {
+  0%, 100% {
+    transform: translate3d(var(--orb-x, 0px), var(--orb-y, 0px), 0) scale(var(--orb-scale-a, .98)) rotate(-2deg);
+    border-radius: 56% 44% 52% 48% / 45% 58% 42% 55%;
+  }
+  45% {
+    transform: translate3d(calc(var(--orb-x, 0px) + 8px), calc(var(--orb-y, 0px) - 4px), 0) scale(var(--orb-scale-b, 1.12)) rotate(4deg);
+    border-radius: 44% 56% 58% 42% / 58% 40% 60% 42%;
+  }
+  72% {
+    transform: translate3d(calc(var(--orb-x, 0px) - 6px), calc(var(--orb-y, 0px) + 5px), 0) scale(var(--orb-scale-c, .95)) rotate(-5deg);
+    border-radius: 63% 37% 47% 53% / 42% 62% 38% 58%;
+  }
+}
+@keyframes orbx-magnetic {
+  0%, 100% {
+    box-shadow:
+      0 0 170px color-mix(in srgb, var(--orb-light-blue) 34%, transparent),
+      0 0 145px color-mix(in srgb, var(--orb-light-lime) 26%, transparent),
+      0 0 80px rgba(248, 250, 215, .16);
+  }
+  50% {
+    box-shadow:
+      0 0 230px color-mix(in srgb, var(--orb-light-lime) 30%, transparent),
+      0 0 180px color-mix(in srgb, var(--orb-light-blue) 36%, transparent),
+      0 0 120px rgba(248, 250, 215, .2);
+  }
+}
+@keyframes orbx-membrane {
+  0%, 100% { transform: rotate(0deg) scale(.96); }
+  50% { transform: rotate(148deg) scale(1.12); }
+}
+@keyframes orbx-liquid {
+  0%, 100% { transform: rotate(-12deg) scale(.95) skew(-4deg); }
+  48% { transform: rotate(112deg) scale(1.12) skew(6deg); }
+}
+@keyframes orbx-lightswim {
+  0% { transform: translate3d(-4%, -2%, 0) scale(.95); }
+  100% { transform: translate3d(5%, 4%, 0) scale(1.08); }
+}
+@keyframes orbx-caustic { to { transform: rotate(360deg); } }
+@keyframes orbx-aurora-a { to { transform: rotate(360deg) scale(1.05); } }
+@keyframes orbx-aurora-b { to { transform: rotate(-360deg) scale(1.02); } }
+@keyframes orbx-tide {
+  0% { transform: translate3d(-8%, -2%, 0) scale(.9); opacity: .52; }
+  100% { transform: translate3d(7%, 4%, 0) scale(1.08); opacity: .86; }
+}
+@keyframes orbx-core {
+  0% { transform: scale(.72); opacity: .08; }
+  100% { transform: scale(1.08); opacity: .18; }
+}
+@keyframes orbx-glint {
+  0% { transform: translate3d(-28px, -8px, 0) rotate(-12deg); opacity: .34; }
+  100% { transform: translate3d(18px, 10px, 0) rotate(-4deg); opacity: .76; }
+}
+@keyframes orbx-pulse {
+  0% { transform: scale(.72); opacity: .1; }
+  42% { opacity: .42; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+@keyframes orbx-sheen {
+  from { transform: translate3d(-14px, -8px, 0) rotate(-10deg); opacity: .48; }
+  to { transform: translate3d(18px, 12px, 0) rotate(6deg); opacity: .82; }
+}
+@keyframes orbx-stage-aurora {
+  0%, 100% { transform: translate(-50%, -50%) rotate(-3deg) scale(.95); }
+  50% { transform: translate(-50%, -50%) rotate(7deg) scale(1.08); }
+}
+@keyframes orbx-listen-scan {
+  0%, 100% { transform: translate(-50%, -50%) scaleX(.58); opacity: .28; }
+  50% { transform: translate(-50%, -50%) scaleX(1.4); opacity: .96; }
+}
+@keyframes orbx-state-orbit { to { transform: translate(-50%, -50%) rotate(360deg); } }
+@keyframes orbx-output-trail {
+  0% { transform: translate(-52%, -50%) scaleX(.34); opacity: 0; }
+  38% { opacity: .96; }
+  100% { transform: translate(-22%, -50%) scaleX(1.12); opacity: 0; }
+}
+@keyframes orbx-route-beam {
+  0% { transform: translate(-50%, -50%) rotate(-34deg) scaleX(.72); opacity: .22; }
+  100% { transform: translate(-50%, -50%) rotate(26deg) scaleX(1.16); opacity: .72; }
+}
+@keyframes orbx-success-bloom {
+  0% { transform: translate(-50%, -50%) scale(.62); opacity: 0; }
+  34% { opacity: .9; }
+  100% { transform: translate(-50%, -50%) scale(1.22); opacity: 0; }
+}
+@keyframes orbx-error-friction {
+  0%, 100% { transform: translate(-52%, -50%) rotate(-3deg) scaleX(.72); opacity: .26; }
+  50% { transform: translate(-48%, -50%) rotate(2deg) scaleX(1.08); opacity: .86; }
+}
+@keyframes orbx-orbit {
+  from { transform: rotate(0deg) translateX(var(--orbit, 220px)) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(var(--orbit, 220px)) rotate(-360deg); }
+}
+@keyframes orbx-twinkle {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(.7); opacity: .34; }
+  38% { transform: translate3d(10px, -14px, 0) scale(1.2); opacity: .92; }
+  68% { transform: translate3d(-8px, 10px, 0) scale(.9); opacity: .6; }
+}
+
+/* ==========================================================================
+   STAGE ORB (volumétrico)
+   ========================================================================== */
+.wiwo-orb-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  flex: none;
+  border-radius: clamp(14px, 16%, 30px);
+  color: var(--wiwo-beige);
+  --orb-light-blue: rgba(66, 66, 255, .84);
+  --orb-light-lime: rgba(59, 255, 0, .78);
+  --orb-light-milk: rgba(248, 250, 215, .72);
+  background:
+    radial-gradient(circle at 18% 8%, rgba(59, 255, 0, .18), transparent 28%),
+    radial-gradient(circle at 82% 18%, rgba(66, 66, 255, .22), transparent 34%),
+    radial-gradient(circle at 52% 54%, rgba(248, 250, 215, .08), transparent 45%),
+    linear-gradient(135deg, #1b1c21, #1f2620 46%, #15151e);
+}
+.wiwo-orb-stage::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 128%;
+  height: 116%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(248, 250, 215, .16), transparent 30%),
+    radial-gradient(ellipse at 42% 56%, rgba(66, 66, 255, .4), transparent 56%),
+    radial-gradient(ellipse at 63% 40%, rgba(59, 255, 0, .26), transparent 60%);
+  filter: blur(30px) saturate(1.7);
+  opacity: .7;
+  transform: translate(-50%, -50%);
+  animation: orbx-stage-aurora 8200ms var(--ease-expressive) infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.wiwo-orb-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 600px;
+  height: 600px;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%) scale(var(--orb-fit, 1));
+  z-index: 1;
+  pointer-events: none;
+}
+.wiwo-orb-stage.wiwo-orb-stage--bare {
+  background: none;
+  border-radius: 0;
+  overflow: visible;
+  isolation: auto;
+}
+.wiwo-orb-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: var(--wiwo-beige);
+  background:
+    radial-gradient(circle at 16% 6%, rgba(59, 255, 0, .16), transparent 32%),
+    radial-gradient(circle at 84% 16%, rgba(66, 66, 255, .2), transparent 38%),
+    linear-gradient(135deg, #1b1c21, #1f2620 48%, #15151e);
+  border: 1px solid rgba(248, 250, 215, .1);
+}
+.wiwo-orb-aura {
+  position: relative;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
+}
+.wiwo-orb-aura::before {
+  content: "";
+  position: absolute;
+  inset: -46%;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side,
+    #23252e 0% 24%,
+    rgba(35, 37, 46, 0.5) 42%,
+    color-mix(in srgb, var(--background) 68%, #23252e) 58%,
+    color-mix(in srgb, var(--background) 92%, #23252e) 76%,
+    var(--background) 90%
+  );
+  filter: blur(16px);
+  z-index: -1;
+  pointer-events: none;
+}
+[data-theme="dark"] .wiwo-orb-aura::before {
+  inset: -62%;
+  background: radial-gradient(
+    closest-side,
+    #16161f 0% 48%,
+    rgba(22, 22, 31, 0.58) 64%,
+    rgba(22, 22, 31, 0.2) 79%,
+    transparent 92%
+  );
+  filter: blur(12px);
+}
+
+.wiwo-thinking-orb {
+  --orb-w: 390px;
+  --orb-h: 340px;
+  --orb-x: 0px;
+  --orb-y: 0px;
+  --orb-scale-a: .98;
+  --orb-scale-b: 1.12;
+  --orb-scale-c: .95;
+  --orb-speed: 1850ms;
+  --orb-flow-speed: 2450ms;
+  --orb-brightness: 1.12;
+  --orb-saturation: 2.12;
+  --orb-alpha: .94;
+  position: relative;
+  display: block;
+  z-index: 4;
+  width: var(--orb-w);
+  height: var(--orb-h);
+  border-radius: 56% 44% 52% 48% / 45% 58% 42% 55%;
+  background: transparent;
+  opacity: var(--orb-alpha);
+  box-shadow:
+    0 0 150px color-mix(in srgb, var(--orb-light-blue) 30%, transparent),
+    0 0 125px color-mix(in srgb, var(--orb-light-lime) 24%, transparent),
+    0 0 72px rgba(248, 250, 215, .15);
+  filter: saturate(var(--orb-saturation)) brightness(var(--orb-brightness));
+  mix-blend-mode: screen;
+  transform-origin: 50% 54%;
+  will-change: transform, filter, border-radius;
+  animation:
+    orbx-breathe var(--orb-speed) var(--ease-expressive) infinite,
+    orbx-magnetic var(--orb-flow-speed) linear infinite;
+}
+.wiwo-thinking-orb > span {
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.wiwo-thinking-orb::before {
+  content: "";
+  position: absolute;
+  inset: -22%;
+  border-radius: 52% 48% 56% 44% / 48% 58% 42% 52%;
+  background:
+    radial-gradient(ellipse at 28% 36%, rgba(66, 66, 255, .68), transparent 38%),
+    radial-gradient(ellipse at 70% 40%, rgba(59, 255, 0, .56), transparent 36%),
+    radial-gradient(ellipse at 48% 66%, rgba(248, 250, 215, .42), transparent 40%),
+    radial-gradient(ellipse at 54% 52%, rgba(0, 229, 255, .24), transparent 48%);
+  filter: blur(38px) saturate(2.35) brightness(1.08);
+  opacity: .92;
+  mix-blend-mode: screen;
+  animation: orbx-membrane calc(var(--orb-flow-speed) * 1.34) var(--ease-expressive) infinite;
+}
+.wiwo-thinking-orb::after {
+  content: "";
+  position: absolute;
+  inset: -14% -10%;
+  background:
+    radial-gradient(ellipse at 32% 24%, rgba(255, 255, 251, .56), rgba(255, 255, 251, .14) 30%, transparent 58%),
+    radial-gradient(ellipse at 72% 58%, rgba(66, 66, 255, .26), transparent 46%),
+    radial-gradient(ellipse at 44% 72%, rgba(59, 255, 0, .2), transparent 48%);
+  filter: blur(18px) saturate(1.55);
+  opacity: .72;
+  mix-blend-mode: screen;
+  animation: orbx-sheen 3900ms var(--ease-expressive) infinite alternate;
+}
+
+.orb-liquid-veil, .orb-light-field, .orb-caustic, .orb-aurora, .orb-core { mix-blend-mode: screen; }
+.orb-liquid-veil {
+  inset: -18%;
+  border-radius: 58% 42% 46% 54% / 44% 52% 48% 56%;
+  background:
+    radial-gradient(ellipse at 30% 66%, rgba(59, 255, 0, .45), transparent 38%),
+    radial-gradient(ellipse at 72% 28%, rgba(66, 66, 255, .52), transparent 40%),
+    radial-gradient(ellipse at 48% 48%, rgba(248, 250, 215, .2), transparent 48%);
+  filter: blur(42px) saturate(2.15);
+  opacity: .72;
+  animation: orbx-liquid 5400ms var(--ease-expressive) infinite;
+}
+.orb-light-field {
+  inset: -22%;
+  border-radius: 48% 52% 58% 42% / 56% 44% 52% 48%;
+  background:
+    radial-gradient(ellipse at 36% 44%, rgba(248, 250, 215, .42), transparent 30%),
+    radial-gradient(ellipse at 62% 50%, rgba(66, 66, 255, .42), transparent 40%),
+    radial-gradient(ellipse at 48% 68%, rgba(59, 255, 0, .28), transparent 36%);
+  filter: blur(34px) saturate(1.9);
+  opacity: .62;
+  animation: orbx-lightswim 4600ms var(--ease-expressive) infinite alternate;
+}
+.orb-caustic {
+  inset: -8%;
+  background: repeating-conic-gradient(from 0deg, transparent 0deg 18deg, rgba(248, 250, 215, .18) 22deg 24deg, transparent 28deg 46deg);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, transparent 0 18%, rgba(0, 0, 0, .52) 38%, transparent 76%);
+  mask-image: radial-gradient(ellipse at 50% 50%, transparent 0 18%, rgba(0, 0, 0, .52) 38%, transparent 76%);
+  filter: blur(18px);
+  opacity: .28;
+  animation: orbx-caustic 8600ms linear infinite;
+}
+.orb-aurora-one, .orb-aurora-two, .orb-aurora-three {
+  inset: -20%;
+  border-radius: 50%;
+  filter: blur(44px) saturate(2.2) brightness(1.05);
+  opacity: .72;
+}
+.orb-aurora-one {
+  background:
+    radial-gradient(ellipse at 24% 38%, rgba(66, 66, 255, .5), transparent 34%),
+    radial-gradient(ellipse at 58% 70%, rgba(59, 255, 0, .34), transparent 38%);
+  animation: orbx-aurora-a 4200ms linear infinite;
+}
+.orb-aurora-two {
+  background:
+    radial-gradient(ellipse at 72% 34%, rgba(59, 255, 0, .5), transparent 34%),
+    radial-gradient(ellipse at 40% 58%, rgba(0, 229, 255, .28), transparent 42%);
+  animation: orbx-aurora-b 5600ms linear infinite;
+}
+.orb-aurora-three {
+  background:
+    radial-gradient(ellipse at 50% 48%, rgba(248, 250, 215, .38), transparent 34%),
+    radial-gradient(ellipse at 46% 62%, rgba(66, 66, 255, .28), transparent 46%);
+  opacity: .82;
+  animation: orbx-tide 2600ms var(--ease-expressive) infinite alternate;
+}
+.orb-core {
+  inset: -16%;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at 46% 46%, rgba(248, 250, 215, .46), transparent 30%),
+    radial-gradient(ellipse at 56% 56%, rgba(66, 66, 255, .2), transparent 44%),
+    radial-gradient(ellipse at 42% 60%, rgba(59, 255, 0, .18), transparent 46%);
+  filter: blur(46px) saturate(1.85);
+  opacity: .58;
+  animation: orbx-core 2400ms var(--ease-expressive) infinite alternate;
+}
+.orb-glint {
+  width: 110px;
+  height: 52px;
+  right: 14%;
+  top: 18%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(248, 250, 215, .72), rgba(248, 250, 215, .18) 44%, transparent 72%);
+  filter: blur(14px);
+  opacity: .64;
+  mix-blend-mode: screen;
+  animation: orbx-glint 2600ms var(--ease-expressive) infinite alternate;
+}
+.orb-pulse {
+  inset: -36%;
+  border-radius: inherit;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(248, 250, 215, .12), transparent 25%),
+    conic-gradient(from 0deg, rgba(59, 255, 0, .24), rgba(66, 66, 255, .26), transparent 62%, rgba(248, 250, 215, .14));
+  filter: blur(32px) saturate(1.5);
+  opacity: .18;
+  mix-blend-mode: screen;
+  animation: orbx-pulse 3100ms var(--ease-expressive) infinite;
+}
+.orb-pulse:nth-child(2) { animation-delay: -1050ms; }
+.orb-pulse:nth-child(3) { animation-delay: -2050ms; }
+
+.orb-particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 5;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(59, 255, 0, .8) 0 18%, rgba(59, 255, 0, .24) 46%, transparent 72%);
+  filter: blur(5px) saturate(1.4);
+  mix-blend-mode: screen;
+  --orbit: 230px;
+  animation: orbx-orbit 5200ms linear infinite;
+}
+.orb-particle:nth-of-type(2) {
+  width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px;
+  background: radial-gradient(circle, rgba(66, 66, 255, .82) 0 18%, rgba(66, 66, 255, .26) 46%, transparent 72%);
+  --orbit: 198px;
+  animation-duration: 6400ms;
+  animation-delay: -1900ms;
+}
+.orb-particle:nth-of-type(3) {
+  width: 12px; height: 12px; margin: -6px 0 0 -6px;
+  background: radial-gradient(circle, rgba(248, 250, 215, .76) 0 18%, rgba(248, 250, 215, .24) 46%, transparent 74%);
+  --orbit: 262px;
+  animation-duration: 7800ms;
+  animation-delay: -3600ms;
+}
+.orb-spark {
+  position: absolute;
+  left: var(--sx, 50%);
+  top: var(--sy, 50%);
+  z-index: 5;
+  width: var(--spark-size, 16px);
+  height: var(--spark-size, 16px);
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--spark-color, rgba(248, 250, 215, .9)) 0 16%, transparent 70%);
+  filter: blur(6px) saturate(1.5);
+  mix-blend-mode: screen;
+  animation: orbx-twinkle var(--spark-speed, 6200ms) var(--ease-expressive) infinite;
+  animation-delay: var(--spark-delay, 0ms);
+}
+
+.orb-state-field {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+.orb-state-ring, .orb-state-ring.alt, .orb-scan-line, .orb-output-trail,
+.orb-success-burst, .orb-retry-notch {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  mix-blend-mode: screen;
+  z-index: 10;
+}
+.orb-state-ring, .orb-state-ring.alt {
+  width: 520px;
+  height: 300px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 10%, rgba(248, 250, 215, .3) 18%, transparent 28%, rgba(66, 66, 255, .44) 48%, transparent 64%, rgba(59, 255, 0, .44) 78%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, transparent calc(100% - 34px), #000 calc(100% - 16px), transparent calc(100% - 2px));
+  mask-image: radial-gradient(ellipse at 50% 50%, transparent calc(100% - 34px), #000 calc(100% - 16px), transparent calc(100% - 2px));
+  filter: blur(7px);
+}
+.orb-state-ring.alt { width: 430px; height: 250px; filter: blur(10px); }
+.orb-scan-line {
+  width: 88px;
+  height: 460px;
+  border-radius: 999px;
+  background:
+    radial-gradient(ellipse at 50% 50%, rgba(248, 250, 215, .48), transparent 18%),
+    linear-gradient(180deg, transparent, rgba(59, 255, 0, .72), rgba(66, 66, 255, .42), transparent);
+  filter: blur(9px) saturate(1.9);
+}
+.orb-output-trail {
+  left: 64%;
+  width: 300px;
+  height: 30px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(248, 250, 215, .7), rgba(59, 255, 0, .72), rgba(66, 66, 255, .58), transparent);
+  filter: blur(8px) saturate(1.8);
+}
+.orb-output-trail.one { top: 39%; }
+.orb-output-trail.two { top: 50%; width: 250px; animation-delay: -180ms; }
+.orb-output-trail.three { top: 61%; width: 210px; animation-delay: -360ms; }
+.orb-success-burst {
+  width: 420px;
+  height: 300px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(59, 255, 0, .56), rgba(248, 250, 215, .22) 34%, transparent 72%);
+  filter: blur(24px);
+}
+.orb-retry-notch {
+  width: 420px;
+  height: 34px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgba(248, 250, 215, .28), rgba(116, 108, 255, .72), rgba(248, 250, 215, .18), transparent);
+  filter: blur(8px) saturate(1.35);
+}
+
+/* ---- Personalidades por estado ---- */
+.wiwo-orb-stage[data-thinking-state="idle"] .wiwo-thinking-orb {
+  --orb-w: 330px; --orb-h: 245px;
+  --orb-speed: 7600ms; --orb-flow-speed: 11000ms;
+  --orb-alpha: .72; --orb-brightness: .88; --orb-saturation: 1.18;
+  --orb-scale-a: .9; --orb-scale-b: .96; --orb-scale-c: .88;
+}
+.wiwo-orb-stage[data-thinking-state="idle"] .orb-aurora,
+.wiwo-orb-stage[data-thinking-state="idle"] .orb-liquid-veil,
+.wiwo-orb-stage[data-thinking-state="idle"] .orb-pulse { opacity: .18; }
+
+.wiwo-orb-stage[data-thinking-state="listening"] .wiwo-thinking-orb {
+  --orb-w: 385px; --orb-h: 350px;
+  --orb-speed: 2300ms; --orb-flow-speed: 3600ms;
+  --orb-brightness: 1.08; --orb-saturation: 1.9;
+  --orb-scale-a: .96; --orb-scale-b: 1.08; --orb-scale-c: .94;
+}
+.wiwo-orb-stage[data-thinking-state="listening"] .orb-scan-line {
+  opacity: 1; z-index: 22;
+  animation: orbx-listen-scan 1280ms var(--ease-expressive) infinite;
+}
+.wiwo-orb-stage[data-thinking-state="listening"] .orb-pulse { opacity: .42; animation-duration: 1700ms; }
+
+.wiwo-orb-stage[data-thinking-state="thinking"] .orb-state-ring,
+.wiwo-orb-stage[data-thinking-state="thinking"] .orb-state-ring.alt {
+  opacity: .08;
+  animation: orbx-state-orbit 3200ms linear infinite;
+}
+.wiwo-orb-stage[data-thinking-state="thinking"] .orb-state-ring.alt {
+  animation-duration: 4600ms;
+  animation-direction: reverse;
+}
+
+.wiwo-orb-stage[data-thinking-state="generating"] .wiwo-thinking-orb {
+  --orb-w: 430px; --orb-h: 330px; --orb-x: -16px;
+  --orb-speed: 1280ms; --orb-flow-speed: 1760ms;
+  --orb-brightness: 1.18; --orb-saturation: 2.35;
+  --orb-scale-a: 1.02; --orb-scale-b: 1.2; --orb-scale-c: 1;
+}
+.wiwo-orb-stage[data-thinking-state="generating"] .orb-output-trail {
+  opacity: 1; z-index: 22;
+  animation: orbx-output-trail 980ms var(--ease-expressive) infinite;
+}
+.wiwo-orb-stage[data-thinking-state="generating"] .orb-output-trail.two { opacity: .86; }
+.wiwo-orb-stage[data-thinking-state="generating"] .orb-output-trail.three { opacity: .72; }
+
+.wiwo-orb-stage[data-thinking-state="routing"] .wiwo-thinking-orb {
+  --orb-w: 400px; --orb-h: 340px;
+  --orb-speed: 2500ms; --orb-flow-speed: 3100ms;
+  --orb-brightness: 1.08; --orb-saturation: 2.05;
+  --orb-scale-a: .94; --orb-scale-b: 1.08; --orb-scale-c: .96;
+}
+.wiwo-orb-stage[data-thinking-state="routing"] .orb-state-ring,
+.wiwo-orb-stage[data-thinking-state="routing"] .orb-state-ring.alt {
+  opacity: .58; z-index: 21;
+  filter: blur(4px) saturate(1.7);
+  animation: orbx-state-orbit 2100ms var(--ease-expressive) infinite;
+}
+.wiwo-orb-stage[data-thinking-state="routing"] .orb-scan-line {
+  opacity: .76; z-index: 22;
+  width: 410px; height: 28px;
+  background: linear-gradient(90deg, transparent, rgba(248, 250, 215, .5), rgba(59, 255, 0, .58), rgba(66, 66, 255, .5), transparent);
+  transform: translate(-50%, -50%) rotate(-28deg);
+  animation: orbx-route-beam 1280ms var(--ease-expressive) infinite alternate;
+}
+
+.wiwo-orb-stage[data-thinking-state="success"] .wiwo-thinking-orb {
+  --orb-w: 385px; --orb-h: 285px;
+  --orb-speed: 2500ms; --orb-flow-speed: 3600ms;
+  --orb-brightness: 1.18; --orb-saturation: 1.95;
+  --orb-scale-a: .98; --orb-scale-b: 1.08; --orb-scale-c: .98;
+}
+.wiwo-orb-stage[data-thinking-state="success"] .orb-success-burst {
+  opacity: .88;
+  animation: orbx-success-bloom 1800ms var(--ease-expressive) infinite;
+}
+
+.wiwo-orb-stage[data-thinking-state="error"],
+.wiwo-orb-stage[data-thinking-state="retry"] {
+  --orb-light-blue: rgba(116, 108, 255, .7);
+  --orb-light-lime: rgba(248, 250, 215, .2);
+  --orb-light-milk: rgba(248, 250, 215, .34);
+}
+.wiwo-orb-stage[data-thinking-state="error"] .wiwo-thinking-orb,
+.wiwo-orb-stage[data-thinking-state="retry"] .wiwo-thinking-orb {
+  --orb-w: 350px; --orb-h: 230px;
+  --orb-speed: 980ms; --orb-flow-speed: 1500ms;
+  --orb-alpha: .74; --orb-brightness: .78; --orb-saturation: 1.16;
+  --orb-scale-a: .84; --orb-scale-b: .94; --orb-scale-c: .82;
+  filter: saturate(var(--orb-saturation)) brightness(var(--orb-brightness)) contrast(1.04);
+}
+.wiwo-orb-stage[data-thinking-state="error"] .orb-retry-notch,
+.wiwo-orb-stage[data-thinking-state="retry"] .orb-retry-notch {
+  opacity: .9; z-index: 22;
+  animation: orbx-error-friction 760ms var(--ease-expressive) infinite;
+}
+
+
+/* Reduced motion: el orbe queda como un campo de luz estático. */
+@media (prefers-reduced-motion: reduce) {
+  .wiwo-orb-stage,
+  .wiwo-orb-stage::before,
+  .wiwo-orb-canvas *,
+  .wiwo-thinking-orb,
+  .wiwo-thinking-orb::before,
+  .wiwo-thinking-orb::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

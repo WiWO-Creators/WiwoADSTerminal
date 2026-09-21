@@ -1,0 +1,196 @@
+{
+  "_responsabilidad": "Agrupa cuentas publicitarias en portafolios (clientes). Lo edita el equipo de medios, no el código.",
+  "_por_que_existe": "Los nombres de cuenta no coinciden entre plataformas: 'Amipass Companies' en Google es 'Amipass Chile' en Meta, y ALO Group son seis cuentas de Google contra una de Meta. Emparejar por nombre automáticamente se equivoca, así que la relación se declara acá.",
+  "_como_editar": "Cada portafolio lista los IDs de cuenta tal como los entrega la plataforma. Google usa el formato 123-456-7890; Meta, un número largo. Una cuenta que no aparezca acá se muestra como su propio portafolio, así que agregar cuentas nuevas es opcional.",
+  "_revisar": "Los grupos marcados con _confianza: 'revisar' los armé por parecido de nombre y conviene que el equipo los confirme.",
+  "_version": "2026-09-09",
+  "portafolios": [
+    {
+      "id": "amipass",
+      "nombre": "Amipass",
+      "cuentas": [
+        "832-810-5693",
+        "1553639595450932"
+      ],
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "colbun",
+      "nombre": "Colbún Energía",
+      "cuentas": [
+        "423-204-0466",
+        "2006250736667023"
+      ],
+      "pagina": "286255651767382",
+      "_pagina_nombre": "Colbún Energía",
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "primeros-pueblos",
+      "nombre": "Primeros Pueblos",
+      "cuentas": [
+        "781-402-7498",
+        "25524676890466864"
+      ],
+      "pagina": "101165459516306",
+      "_pagina_nombre": "Primeros Pueblos",
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "maria-ayuda",
+      "nombre": "María Ayuda",
+      "cuentas": [
+        "182-750-4429",
+        "792906527166172",
+        "453169699698594"
+      ],
+      "pagina": "110600114825264",
+      "_pagina_nombre": "Funeraria Maria Ayuda",
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "sqm",
+      "nombre": "SQM",
+      "cuentas": [
+        "465-094-9852",
+        "2737262463224930",
+        "899439413222155",
+        "985579737840293"
+      ]
+    },
+    {
+      "id": "alo-group",
+      "nombre": "ALO Group",
+      "_nota": "Seis cuentas de Google por país (USD, PEN y ARS) y una de Meta. El total va por moneda: no se suman entre sí.",
+      "cuentas": [
+        "111-856-2413",
+        "335-407-3572",
+        "719-949-3611",
+        "795-361-1860",
+        "820-279-1929",
+        "988-103-2709",
+        "898923521443041"
+      ],
+      "pagina": "166001070164221",
+      "_pagina_nombre": "ALO Group"
+    },
+    {
+      "id": "cornerstone",
+      "nombre": "Cornerstone",
+      "_confianza": "revisar",
+      "_nota": "Google factura en PEN y Meta en USD. Confirmar que sean el mismo cliente.",
+      "cuentas": [
+        "185-304-1133",
+        "2195498387953258"
+      ],
+      "pagina": "232496186776415",
+      "_pagina_nombre": "Cornerstone Perú & Ecuador",
+      "paises": [
+        "PE"
+      ]
+    },
+    {
+      "id": "valor",
+      "nombre": "Valor Development",
+      "_confianza": "revisar",
+      "cuentas": [
+        "595-229-1307",
+        "528836355882248"
+      ],
+      "pagina": "470071746473727",
+      "_pagina_nombre": "Valor Development Panama",
+      "paises": [
+        "PA"
+      ]
+    },
+    {
+      "id": "wildsty",
+      "nombre": "Wildsty",
+      "cuentas": [
+        "502-419-5795",
+        "537158034988156"
+      ],
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "skydive-andes",
+      "nombre": "Skydive Andes",
+      "cuentas": [
+        "492-590-2029",
+        "346330089306398"
+      ],
+      "pagina": "258532967508008",
+      "_pagina_nombre": "Skydive Andes",
+      "paises": [
+        "CL"
+      ]
+    },
+    {
+      "id": "anker-soundcore",
+      "nombre": "Anker · Soundcore",
+      "_confianza": "revisar",
+      "_nota": "La cuenta de Meta 1494126595605892 figuraba como 'Soundcore Chile' y hoy aparece como 'Anker Chile + Arg'. Confirmar si Soundcore y Anker se reportan juntos o por separado.",
+      "cuentas": [
+        "985-043-3091",
+        "1494126595605892",
+        "4252945408262033"
+      ],
+      "pagina": "249293014933766",
+      "_pagina_nombre": "Soundcore Chile",
+      "paises": [
+        "CL",
+        "AR"
+      ]
+    },
+    {
+      "id": "foundaxis",
+      "nombre": "Foundaxis",
+      "cuentas": [
+        "728-736-2856",
+        "1327585191742131"
+      ],
+      "pagina": "501203559746016",
+      "_pagina_nombre": "Foundaxis"
+    },
+    {
+      "id": "agencia-palta",
+      "nombre": "Agencia Palta",
+      "cuentas": [
+        "466-890-0970"
+      ],
+      "pagina": "311836435340300",
+      "_pagina_nombre": "Agencia Palta",
+      "paises": [
+        "CL"
+      ],
+      "_nota": "Sin cuenta publicitaria de Meta: solo Google Ads."
+    },
+    {
+      "id": "mgc",
+      "nombre": "MGC",
+      "_confianza": "revisar",
+      "cuentas": [
+        "331-782-5860",
+        "44274770",
+        "1126066724775550"
+      ],
+      "pagina": "348822158519892",
+      "_pagina_nombre": "MGC",
+      "paises": [
+        "CL"
+      ]
+    }
+  ],
+  "_paginas": "pagina: Page ID de Facebook, necesario para publicar en Meta. Salen del conector facebook_organic de Windsor, donde account_id es el Page ID. Un portafolio sin pagina no puede publicar en Meta.",
+  "_paises": "paises: codigos ISO de dos letras para la segmentacion geografica minima que Meta exige. Deducidos de la moneda de facturacion; revisar antes de publicar."
+}

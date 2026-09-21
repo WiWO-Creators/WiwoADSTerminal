@@ -7,7 +7,7 @@ import {
   DatabaseZap,
   ExternalLink,
   Link2,
-  LoaderCircle,
+  LogOut,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -44,11 +44,24 @@ import type {
   IntegrationProvider,
   IntegrationSummary,
 } from "@/lib/integration-store";
-import { Surface } from "./ui";
+import { OrbeDeBoton, Surface } from "./ui";
+
+type WindsorAccount = { name: string; currency: string | null };
+
+type WindsorStatus = {
+  configured: boolean;
+  accountCount?: number;
+  google?: number;
+  meta?: number;
+  accounts?: { google: WindsorAccount[]; meta: WindsorAccount[] };
+  lastSyncedAt?: number | null;
+  dataThrough?: string | null;
+};
 
 type IntegrationsResponse = {
   integrations?: IntegrationSummary[];
   canManage?: boolean;
+  windsor?: WindsorStatus;
   error?: string;
 };
 
@@ -70,12 +83,17 @@ const errorMessages: Record<string, string> = {
 };
 
 export function IntegrationsView({
+  currentUser,
+  signOutPath,
   onPerformanceUpdated,
 }: {
+  currentUser: { email: string; displayName: string };
+  signOutPath: string;
   onPerformanceUpdated?: () => void;
 }) {
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [canManage, setCanManage] = useState(false);
+  const [windsor, setWindsor] = useState<WindsorStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -118,6 +136,7 @@ export function IntegrationsView({
         if (cancelled) return;
         setIntegrations(body.integrations);
         setCanManage(Boolean(body.canManage));
+        setWindsor(body.windsor ?? null);
 
         const params = new URLSearchParams(window.location.search);
         const connected = params.get("connected") as IntegrationProvider | null;
@@ -280,14 +299,14 @@ export function IntegrationsView({
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 rounded-full border border-[#F5F3FF]/10 bg-[#16161d]/55 px-3 py-1.5 text-[0.62rem] text-[#F5F3FF]/60 shadow-sm backdrop-blur-md">
-            <ShieldCheck className="size-3 text-[#4A43FF]" />
+          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
+            <ShieldCheck className="size-3 text-brand" />
             Fuentes de datos · operación controlada
           </p>
-          <h2 className="font-editorial text-3xl leading-[0.98] tracking-[-0.035em] text-[#F5F3FF] md:text-[2.8rem]">
+          <h2 className="neo-section-title">
             Conecta las cuentas que WiWO debe leer
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F5F3FF]/58">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
             Autoriza con la ventana oficial, elige cuentas publicitarias y
             sincroniza inversión, impresiones, clics y resultados. WiWO.ADS
             nunca solicita ni almacena contraseñas.
@@ -296,14 +315,14 @@ export function IntegrationsView({
         <div className="flex flex-wrap items-center gap-2">
           <Badge
             variant="outline"
-            className="h-8 border-[#F5F3FF]/10 bg-[#16161d]/55 text-[#F5F3FF]/65"
+            className="h-8 border-foreground/10 bg-card/55 text-foreground/65"
           >
             <Link2 />
-            {connectedCount} de 2 autorizadas
+            {connectedCount} de 2 con OAuth
           </Badge>
           <Badge
             variant="outline"
-            className="h-8 border-[#F5F3FF]/10 bg-[#16161d]/55 text-[#F5F3FF]/65"
+            className="h-8 border-foreground/10 bg-card/55 text-foreground/65"
           >
             <DatabaseZap />
             {selectedCount} cuentas seleccionadas
@@ -311,18 +330,84 @@ export function IntegrationsView({
         </div>
       </div>
 
+      <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-foreground/10 bg-card/55 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-xs font-extrabold text-primary-foreground">
+            {currentUser.email.slice(0, 2).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <p className="font-micro text-[0.6rem] text-foreground/45">
+              SESIÓN EN WIWO.ADS
+            </p>
+            <p className="mt-1 truncate text-sm font-bold text-foreground">
+              {currentUser.email}
+            </p>
+          </div>
+        </div>
+        <Button asChild variant="outline" size="sm"
+          className="shrink-0 border-foreground/12 bg-transparent text-foreground/70">
+          <a href={signOutPath}>
+            <LogOut />
+            Cerrar sesión
+          </a>
+        </Button>
+      </div>
+
+      {windsor?.configured ? (
+        <div className="mb-4 rounded-[16px] border border-[#3BFF00]/25 bg-[#3BFF00]/[0.06] px-4 py-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-[#3BFF00]/15 text-brand">
+                <DatabaseZap className="size-4" />
+              </span>
+              <div>
+                <p className="text-sm font-bold text-foreground">
+                  Windsor.ai · fuente de lectura activa
+                </p>
+                <p className="mt-1 text-xs leading-5 text-foreground/58">
+                  {windsor.accountCount} cuentas con datos
+                  {typeof windsor.google === "number" &&
+                  typeof windsor.meta === "number"
+                    ? ` · ${windsor.google} de Google Ads · ${windsor.meta} de Meta`
+                    : ""}
+                  {windsor.dataThrough ? ` · hasta ${windsor.dataThrough}` : ""}
+                </p>
+              </div>
+            </div>
+            <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-3 py-1 text-[0.62rem] text-brand">
+              LEYENDO
+            </span>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-foreground/45">
+            Las métricas del tablero entran por acá. Las cuentas de Google y Meta
+            están autorizadas dentro de Windsor, con su propia cuenta: se
+            administran en{" "}
+            <a
+              href="https://onboard.windsor.ai/connectors"
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand underline underline-offset-2"
+            >
+              onboard.windsor.ai
+            </a>
+            . Las conexiones de abajo son para la capa de escritura, que todavía
+            no está habilitada.
+          </p>
+        </div>
+      ) : null}
+
       {loadError && !loading ? (
-        <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-red-200 bg-red-50/90 px-4 py-3 text-red-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-danger shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <AlertCircle className="mt-0.5 size-4 shrink-0 text-red-700" />
+            <AlertCircle className="mt-0.5 size-4 shrink-0 text-danger" />
             <div>
               <p className="text-sm font-bold">No se pudieron cargar las conexiones</p>
-              <p className="mt-1 text-xs leading-5 text-red-800">{loadError}</p>
+              <p className="mt-1 text-xs leading-5 text-danger">{loadError}</p>
             </div>
           </div>
           <Button
             variant="outline"
-            className="shrink-0 border-red-200 bg-[#16161d]"
+            className="shrink-0 border-danger-deep/25 bg-card"
             onClick={() => setReloadVersion((current) => current + 1)}
           >
             <RefreshCw />
@@ -332,8 +417,8 @@ export function IntegrationsView({
       ) : null}
 
       {!canManage && !loading ? (
-        <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-amber-200 bg-amber-50/90 px-4 py-3 text-amber-950 shadow-sm">
-          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-amber-700" />
+        <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-warn-deep/25 bg-warn-deep/10 px-4 py-3 text-warn shadow-sm">
+          <ShieldCheck className="mt-0.5 size-4 shrink-0 text-warn" />
           <p className="text-sm leading-6">
             Puedes revisar el estado, pero solo un administrador puede conectar
             o desconectar cuentas.
@@ -345,15 +430,18 @@ export function IntegrationsView({
         {loading
           ? ["google", "meta"].map((provider) => (
               <Surface key={provider} className="min-h-[320px] animate-pulse p-5">
-                <div className="h-12 w-12 rounded-2xl bg-[#F5F3FF]/8" />
-                <div className="mt-6 h-6 w-36 rounded bg-[#F5F3FF]/8" />
-                <div className="mt-3 h-4 w-64 rounded bg-[#F5F3FF]/6" />
+                <div className="h-12 w-12 rounded-2xl bg-foreground/8" />
+                <div className="mt-6 h-6 w-36 rounded bg-foreground/8" />
+                <div className="mt-3 h-4 w-64 rounded bg-foreground/6" />
               </Surface>
             ))
           : integrations.map((integration) => (
               <ProviderCard
                 key={integration.provider}
                 integration={integration}
+                windsorAccounts={
+                  windsor?.accounts?.[integration.provider] ?? []
+                }
                 canManage={canManage}
                 busy={busy?.provider === integration.provider ? busy.action : null}
                 onManage={() => openAccountManager(integration)}
@@ -362,6 +450,8 @@ export function IntegrationsView({
               />
             ))}
       </div>
+
+      <CatalogoPanel canManage={canManage} />
 
       <Surface className="mt-4 grid gap-4 p-4 md:grid-cols-3">
         <ConnectionPrinciple
@@ -396,7 +486,7 @@ export function IntegrationsView({
             </DialogDescription>
           </DialogHeader>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#F5F3FF]/35" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-foreground/35" />
             <Input
               aria-label="Buscar cuentas por nombre o ID"
               value={query}
@@ -426,12 +516,12 @@ export function IntegrationsView({
                 );
               })
             ) : (
-              <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-[#F5F3FF]/15 bg-[#F5F3FF]/[0.025] px-6 text-center">
+              <div className="grid min-h-40 place-items-center rounded-xl border border-dashed border-foreground/15 bg-foreground/[0.025] px-6 text-center">
                 <div>
-                  <p className="text-sm font-bold text-[#F5F3FF]">
+                  <p className="text-sm font-bold text-foreground">
                     No encontramos cuentas
                   </p>
-                  <p className="mt-1 text-xs text-[#F5F3FF]/48">
+                  <p className="mt-1 text-xs text-foreground/48">
                     Cambia la búsqueda o sincroniza nuevamente la plataforma.
                   </p>
                 </div>
@@ -451,7 +541,7 @@ export function IntegrationsView({
               className="font-bold"
             >
               {busy?.action === "select" ? (
-                <LoaderCircle className="animate-spin" />
+                <OrbeDeBoton />
               ) : (
                 <CheckCircle2 />
               )}
@@ -491,7 +581,7 @@ export function IntegrationsView({
               onClick={() => void disconnect()}
             >
               {busy?.action === "disconnect" ? (
-                <LoaderCircle className="animate-spin" />
+                <OrbeDeBoton />
               ) : (
                 <Unplug />
               )}
@@ -504,8 +594,159 @@ export function IntegrationsView({
   );
 }
 
+type CatalogoEstado = {
+  disponible: boolean;
+  construidoEn: number | null;
+  rango: { desde: string; hasta: string };
+  totales: { campanas: number; anuncios: number };
+  porPlataforma: Array<{
+    provider: string;
+    plataforma: string;
+    campanas: number;
+    conjuntos: number;
+    anuncios: number;
+    cuentas: number;
+  }>;
+  fallos: Array<{ plataforma: string; mensaje: string }>;
+};
+
+/**
+ * Catálogo de lo que existe en las cuentas, activo o apagado.
+ *
+ * Está acá y no en el tablero porque construirlo barre tres años de historial
+ * en Windsor y tarda minutos. El tablero solo lee el resultado guardado; este
+ * panel dice de cuándo es y permite volver a barrer.
+ *
+ * Hace falta porque la API de Windsor, por sí sola, devuelve únicamente lo que
+ * tuvo actividad en el rango consultado: sin catálogo, una campaña pausada hace
+ * dos semanas simplemente no existe para el sistema.
+ */
+function CatalogoPanel({ canManage }: { canManage: boolean }) {
+  const [estado, setEstado] = useState<CatalogoEstado | null>(null);
+  const [construyendo, setConstruyendo] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/catalogo", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as CatalogoEstado;
+        if (!cancelado) setEstado(body);
+      } catch {
+        // Sin catálogo el resto de la pantalla sigue siendo útil.
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  async function reconstruir() {
+    setConstruyendo(true);
+    try {
+      const response = await fetch("/api/catalogo", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      const body = (await response.json()) as CatalogoEstado & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "No se pudo reconstruir");
+      setEstado(body);
+      toast.success(
+        `Catálogo al día: ${body.totales.campanas} campañas y ${body.totales.anuncios} anuncios`,
+      );
+    } catch (issue) {
+      toast.error(
+        issue instanceof Error ? issue.message : "No se pudo reconstruir",
+      );
+    } finally {
+      setConstruyendo(false);
+    }
+  }
+
+  return (
+    <Surface className="mt-4 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-bold text-foreground">
+            Catálogo de campañas y anuncios
+          </h3>
+          <p className="mt-1 max-w-xl text-xs leading-5 text-foreground/55">
+            Incluye lo pausado y lo apagado. Sin él, Windsor solo devuelve lo
+            que tuvo actividad en el rango y una campaña detenida desaparece de
+            la vista.
+          </p>
+        </div>
+        {canManage && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={construyendo}
+            onClick={() => void reconstruir()}
+            className="shrink-0 border-foreground/12 bg-transparent text-foreground/70"
+          >
+            {construyendo ? <OrbeDeBoton /> : null}
+            {construyendo ? "Barriendo Windsor…" : "Reconstruir"}
+          </Button>
+        )}
+      </div>
+
+      {construyendo && (
+        <p className="mt-3 text-xs text-foreground/50">
+          El barrido completo tarda unos minutos. Puedes seguir trabajando.
+        </p>
+      )}
+
+      {estado === null ? (
+        <p className="mt-3 text-xs text-foreground/45">Consultando estado…</p>
+      ) : !estado.disponible ? (
+        <p className="mt-3 rounded-xl border border-warn-deep/25 bg-warn-deep/[0.08] px-3 py-2 text-xs leading-5 text-warn">
+          Todavía no se ha construido. Hasta entonces el sistema solo muestra
+          campañas y anuncios que entregaron en el periodo elegido.
+        </p>
+      ) : (
+        <>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {estado.porPlataforma.map((fila) => (
+              <div
+                key={fila.provider}
+                className="rounded-xl border border-foreground/10 bg-field/40 px-3 py-2.5"
+              >
+                <p className="text-xs font-bold text-foreground">
+                  {fila.plataforma}
+                </p>
+                <p className="metric-number mt-1 text-[0.68rem] text-foreground/55">
+                  {fila.campanas} campañas · {fila.conjuntos} conjuntos ·{" "}
+                  {fila.anuncios} anuncios
+                </p>
+                <p className="metric-number mt-0.5 text-[0.62rem] text-foreground/38">
+                  en {fila.cuentas}{" "}
+                  {fila.cuentas === 1 ? "cuenta" : "cuentas"}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="metric-number mt-2.5 text-[0.62rem] text-foreground/40">
+            Historial {estado.rango.desde} a {estado.rango.hasta} · construido{" "}
+            {formatDate(estado.construidoEn)}
+          </p>
+          {estado.fallos.length > 0 && (
+            <p className="mt-2 rounded-xl border border-warn-deep/25 bg-warn-deep/[0.08] px-3 py-2 text-[0.68rem] leading-5 text-warn">
+              Falta la parte de {estado.fallos.map((f) => f.plataforma).join(", ")}:{" "}
+              {estado.fallos[0].mensaje}
+            </p>
+          )}
+        </>
+      )}
+    </Surface>
+  );
+}
+
 function ProviderCard({
   integration,
+  windsorAccounts,
   canManage,
   busy,
   onManage,
@@ -513,6 +754,7 @@ function ProviderCard({
   onDisconnect,
 }: {
   integration: IntegrationSummary;
+  windsorAccounts: WindsorAccount[];
   canManage: boolean;
   busy: BusyKind | null;
   onManage: () => void;
@@ -536,38 +778,38 @@ function ProviderCard({
     integration.performanceStatus === "partial" ||
     integration.performanceStatus === "error";
   const status = attention
-    ? { label: "Atención requerida", className: "border-red-200 bg-red-50 text-red-700" }
+    ? { label: "Atención requerida", className: "border-danger-deep/25 bg-danger-deep/10 text-danger" }
     : needsSelection
-      ? { label: "Selección pendiente", className: "border-amber-200 bg-amber-50 text-amber-700" }
+      ? { label: "Selección pendiente", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : metricsIssue
-        ? { label: "Lectura requiere atención", className: "border-amber-200 bg-amber-50 text-amber-700" }
+        ? { label: "Lectura requiere atención", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : metricsStale
-        ? { label: "Lectura desactualizada", className: "border-amber-200 bg-amber-50 text-amber-700" }
+        ? { label: "Lectura desactualizada", className: "border-warn-deep/25 bg-warn-deep/10 text-warn" }
       : connected && metricsReady
-        ? { label: "Datos actualizados", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+        ? { label: "Datos actualizados", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : connected
-          ? { label: "OAuth conectado", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
-        : { label: "Sin conexión", className: "border-[#F5F3FF]/10 bg-[#16161d]/60 text-[#F5F3FF]/48" };
+          ? { label: "OAuth conectado", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
+        : { label: "Sin conexión", className: "border-foreground/10 bg-card/60 text-foreground/48" };
 
   return (
     <Surface className="flex min-h-[330px] flex-col overflow-hidden">
-      <div className="flex items-start justify-between border-b border-[#F5F3FF]/8 p-5">
+      <div className="flex items-start justify-between border-b border-foreground/8 p-5">
         <div className="flex items-center gap-4">
           <span
             className={cn(
               "grid size-12 place-items-center rounded-2xl text-xl font-black shadow-sm",
               integration.provider === "google"
-                ? "bg-[#16161d] text-[#4285F4] ring-1 ring-[#F5F3FF]/10"
+                ? "bg-card text-[#4285F4] ring-1 ring-foreground/10"
                 : "bg-[#0668E1] text-white",
             )}
           >
             {integration.provider === "google" ? "G" : "M"}
           </span>
           <div>
-            <h3 className="text-lg font-bold text-[#F5F3FF]">
+            <h3 className="text-lg font-bold text-foreground">
               {integration.label}
             </h3>
-            <p className="mt-1 text-xs leading-5 text-[#F5F3FF]/48">
+            <p className="mt-1 text-xs leading-5 text-foreground/48">
               {integration.description}
             </p>
           </div>
@@ -613,19 +855,55 @@ function ProviderCard({
             />
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-[#F5F3FF]/14 bg-[#16161d]/35 p-4">
-            <p className="text-sm font-bold text-[#F5F3FF]">
-              Un acceso, todas las cuentas disponibles
-            </p>
-            <p className="mt-2 text-sm leading-6 text-[#F5F3FF]/55">
-              Inicia sesión en {integration.label}, revisa los permisos y elige
-              exactamente qué cuentas quieres incorporar.
-            </p>
+          <div className="rounded-2xl border border-dashed border-foreground/14 bg-card/35 p-4">
+            {windsorAccounts.length > 0 ? (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-foreground">
+                    Leyendo {windsorAccounts.length}{" "}
+                    {windsorAccounts.length === 1 ? "cuenta" : "cuentas"} vía
+                    Windsor
+                  </p>
+                  <span className="font-micro shrink-0 rounded-full border border-[#3BFF00]/25 px-2 py-0.5 text-[0.58rem] text-brand">
+                    ACTIVO
+                  </span>
+                </div>
+                <ul className="mt-3 max-h-40 space-y-1.5 overflow-y-auto pr-1">
+                  {windsorAccounts.map((account) => (
+                    <li
+                      key={account.name}
+                      className="flex items-center justify-between gap-3 text-xs"
+                    >
+                      <span className="min-w-0 truncate text-foreground/78">
+                        {account.name}
+                      </span>
+                      <span className="font-micro shrink-0 text-[0.58rem] text-foreground/40">
+                        {account.currency ?? "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-3 border-t border-foreground/8 pt-3 text-xs leading-5 text-foreground/45">
+                  Autorizadas dentro de Windsor. Conectar {integration.label}{" "}
+                  acá es para la capa de escritura.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-foreground">
+                  Un acceso, todas las cuentas disponibles
+                </p>
+                <p className="mt-2 text-sm leading-6 text-foreground/55">
+                  Inicia sesión en {integration.label}, revisa los permisos y
+                  elige exactamente qué cuentas quieres incorporar.
+                </p>
+              </>
+            )}
           </div>
         )}
 
         {integration.performanceError || integration.lastError ? (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800">
+          <div className="mt-4 flex items-start gap-2 rounded-xl border border-warn-deep/25 bg-warn-deep/10 px-3 py-2.5 text-xs leading-5 text-warn">
             <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
             {integration.performanceError ?? integration.lastError}
           </div>
@@ -644,9 +922,17 @@ function ProviderCard({
                 </a>
               </Button>
             ) : (
-              <Button disabled className="font-bold">
+              <Button
+                disabled
+                variant="outline"
+                className="border-foreground/12 bg-transparent font-bold text-foreground/45"
+              >
                 <AlertCircle />
-                {canManage ? "Falta configuración OAuth" : "Solo administradores"}
+                {!canManage
+                  ? "Solo administradores"
+                  : integration.missingConfig.length
+                    ? `Falta ${integration.missingConfig.join(" y ")}`
+                    : "No disponible"}
               </Button>
             )
           ) : (
@@ -657,7 +943,7 @@ function ProviderCard({
                 className="font-bold"
               >
                 {busy === "sync" || metricsRunning ? (
-                  <LoaderCircle className="animate-spin" />
+                  <OrbeDeBoton />
                 ) : needsSelection ? (
                   <SlidersHorizontal />
                 ) : (
@@ -690,7 +976,7 @@ function ProviderCard({
                 variant="ghost"
                 onClick={onDisconnect}
                 disabled={!canManage || Boolean(busy)}
-                className="ml-auto text-[#F5F3FF]/45 hover:text-red-600"
+                className="ml-auto text-foreground/45 hover:text-danger-deep"
               >
                 Desconectar
               </Button>
@@ -723,10 +1009,12 @@ function AccountOption({
   return (
     <label
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-[#F5F3FF]/10 bg-[#16161d]/60 p-3 transition-colors",
+        "flex items-center gap-3 rounded-xl border border-foreground/10 bg-card/60 p-3 transition-colors",
         disabled
           ? "cursor-not-allowed opacity-55"
-          : "cursor-pointer hover:border-[#4A43FF]/35 hover:bg-[#1c1c25]",
+          : // Antes hover:bg-[#1c1c25]: un navy-morado frío, ajeno a la
+            // paleta ink/beige de Neo.
+            "cursor-pointer hover:border-brand/35 hover:bg-foreground/[0.06]",
       )}
     >
       <Checkbox
@@ -736,10 +1024,10 @@ function AccountOption({
         aria-label={`Seleccionar ${account.name}`}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-bold text-[#F5F3FF]">
+        <span className="block truncate text-sm font-bold text-foreground">
           {account.name}
         </span>
-        <span className="mt-1 block truncate font-mono text-[0.68rem] text-[#F5F3FF]/42">
+        <span className="mt-1 block truncate font-mono text-[0.68rem] text-foreground/42">
           {account.externalId}
           {account.currency ? ` · ${account.currency}` : ""}
           {account.timezone ? ` · ${account.timezone}` : ""}
@@ -747,7 +1035,7 @@ function AccountOption({
       </span>
       <Badge
         variant="outline"
-        className="shrink-0 border-[#F5F3FF]/10 bg-[#16161d] text-[0.62rem] text-[#F5F3FF]/48"
+        className="shrink-0 border-foreground/10 bg-card text-[0.62rem] text-foreground/48"
       >
         {restriction ?? "Ads elegible"}
       </Badge>
@@ -757,9 +1045,9 @@ function AccountOption({
 
 function ProviderFact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-[#F5F3FF]/8 bg-[#16161d]/45 px-3 py-3">
-      <p className="font-micro text-[0.58rem] text-[#F5F3FF]/38">{label}</p>
-      <p className="mt-1.5 truncate text-sm font-bold text-[#F5F3FF]/78">
+    <div className="rounded-xl border border-foreground/8 bg-card/45 px-3 py-3">
+      <p className="font-micro text-[0.58rem] text-foreground/38">{label}</p>
+      <p className="mt-1.5 truncate text-sm font-bold text-foreground/78">
         {value}
       </p>
     </div>
@@ -777,12 +1065,12 @@ function ConnectionPrinciple({
 }) {
   return (
     <div className="flex items-start gap-3 rounded-xl px-2 py-1">
-      <span className="font-micro pt-0.5 text-[0.62rem] font-bold text-[#4A43FF]">
+      <span className="font-micro pt-0.5 text-[0.62rem] font-bold text-brand">
         {number}
       </span>
       <div>
-        <p className="text-sm font-bold text-[#F5F3FF]">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-[#F5F3FF]/48">{text}</p>
+        <p className="text-sm font-bold text-foreground">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-foreground/48">{text}</p>
       </div>
     </div>
   );

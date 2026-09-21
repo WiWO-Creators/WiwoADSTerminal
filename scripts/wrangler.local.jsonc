@@ -1,0 +1,23 @@
+// Configuracion minima de Wrangler SOLO para tareas locales de D1 (migraciones y
+// consultas). El starter no usa wrangler.jsonc para dev/deploy: vite.config.ts
+// declara los bindings y la plataforma Sites inyecta los reales.
+//
+// Responsabilidad: describir el binding D1 `DB` y la carpeta de migraciones para
+//   `wrangler d1 migrations apply` / `wrangler d1 execute` contra el estado local.
+// Usado por: el script npm `db:migrate:local`.
+// NO hace: desplegar, servir la app, ni definir variables de entorno (ver .dev.vars).
+{
+  "name": "wiwo-ads-terminal-local",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "site-creator-d1",
+      // Mismo placeholder que vite.config.ts: asegura que el CLI y el dev server
+      // usen el mismo archivo SQLite en .wrangler/state.
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "../drizzle"
+    }
+  ]
+}

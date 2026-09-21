@@ -1,4 +1,4 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { getSession } from "@/app/sesion";
 import {
   completeAuthorization,
   isIntegrationProvider,
@@ -14,7 +14,8 @@ export async function GET(
   if (!isIntegrationProvider(provider)) {
     return backToIntegrations(request, "provider_not_supported");
   }
-  const user = await getChatGPTUser();
+  const session = await getSession();
+  const user = session?.actor ?? null;
   if (!user) return backToIntegrations(request, "signin_required", provider);
 
   const url = new URL(request.url);
