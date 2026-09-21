@@ -180,6 +180,11 @@ volver a golpear la plataforma para saber qué se llegó a crear.
 
 ## 4. Motor de reglas (recomendaciones, fase 1)
 
+> **Estado actual:** el motor y sus endpoints (`/api/decisiones/evaluar`,
+> `lib/dashboard-store.ts`) siguen en el servidor, pero **la pantalla de cola
+> de decisiones se quitó** de la interfaz porque no tenía ninguna entrada de
+> menú. Las recomendaciones al usuario hoy las da el asistente de IA (§8).
+
 `lib/reglas.ts` evalúa 4 reglas de optimización sobre las campañas activas de
 cada cliente, comparando contra metas (`targetCpaMicros` / `targetRoas`) que
 el equipo carga por cliente. **No ejecuta nada**: cada candidato que genera
@@ -215,35 +220,41 @@ recomendación, pero un día nuevo sí puede generar otra si el problema sigue.
 
 ## 5. Variables de entorno
 
-Definidas en `.dev.vars` en desarrollo local (nunca en el repo). Solo se listan
-los nombres — los valores viven fuera del control de versiones.
+Definidas en `.dev.vars` en desarrollo local (nunca en el repo) y como variables
+del proceso en un servidor. Solo se listan los nombres — los valores viven fuera
+del control de versiones. La tabla con el detalle de cada una (obligatoriedad,
+cómo generarla) está en [`DESPLIEGUE_VPS.md`](DESPLIEGUE_VPS.md#5-variables-de-entorno).
 
 | Variable | Para qué |
 |---|---|
+| `APP_ORIGIN` | URL pública del sitio (redirecciones OAuth, flag `Secure` de la cookie) |
 | `OAUTH_ADMIN_EMAILS` | Lista de correos con acceso de administrador |
-| `DEV_LOGIN_ENABLED` | En local, fuerza la salida de sesión propia en vez de la del dispatch |
-| `OAUTH_TOKEN_KEY` | Clave para cifrar tokens de sesión/OAuth guardados en D1 |
-| `GOOGLE_CLIENT_ID` | OAuth2 de Google (login) |
-| `GOOGLE_CLIENT_SECRET` | OAuth2 de Google (login) |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Requerido por Google Ads para llamadas de API (vía Windsor) |
-| `META_APP_ID` | App de Meta for Developers |
-| `META_APP_SECRET` | App de Meta for Developers |
+| `DEV_LOGIN_ENABLED` | En local, fuerza la salida de sesión propia en vez de la del dispatch. Falso o ausente en producción |
+| `OAUTH_TOKEN_KEY` | Clave AES-GCM (32 bytes, base64url) para cifrar los tokens de plataformas guardados en la base. Sirve de secreto de sesión si falta `SESSION_SECRET` |
+| `SESSION_SECRET` | Secreto con el que se firma la cookie de sesión |
+| `WIWO_DB_PATH` / `WIWO_MEDIA_DIR` | Solo en Node/VPS: archivo SQLite y carpeta de creativos |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth2 de Google (login y OAuth directo) |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Requerido por Google Ads para llamadas de API |
+| `META_APP_ID` / `META_APP_SECRET` | App de Meta for Developers |
 | `WINDSOR_API_KEY` | Autenticación contra todos los endpoints de Windsor.ai (lectura y escritura) |
+| `ANTHROPIC_API_KEY` | Clave de la API de Claude, para el asistente |
+| `ANTHROPIC_MODEL` | Modelo del asistente (por defecto `claude-sonnet-5`) |
 
 ## 6. Tecnologías
 
 | Capa | Tecnología |
 |---|---|
-| Framework | Next.js 16 (App Router) sobre **vinext**, corriendo en el runtime de **Cloudflare Workers** |
-| UI | React 19, Tailwind CSS v4, shadcn/ui (Radix UI / `radix-ui`), Sonner (toasts) |
+| Framework | Next.js 16 (App Router) sobre **vinext**. Corre en **Cloudflare Workers** (ChatGPT Sites) o en **Node** con el puente de `servidor/` |
+| UI | React 19, Tailwind CSS v4, shadcn/ui (Radix UI / `radix-ui`), Sonner (toasts). Paleta y tipografía de MetriQ (sistema de diseño Neo) |
 | Formularios | react-hook-form + zod |
 | Build / dev server | Vite 8 (`@vitejs/plugin-react`, `@vitejs/plugin-rsc`, `@cloudflare/vite-plugin`) |
-| Base de datos | Cloudflare D1 (SQLite) + Drizzle ORM (`drizzle-orm`, migraciones con `drizzle-kit`) |
-| Almacenamiento de archivos | Cloudflare R2 (binding `MEDIA`) — creativos subidos manualmente |
-| Autenticación | Google OAuth2 con PKCE, sesión propia respaldada en D1 |
+| Base de datos | Cloudflare D1 (SQLite) + Drizzle ORM. En Node: SQLite vía `better-sqlite3` con un adaptador de la API de D1 (`servidor/d1.mjs`) |
+| Almacenamiento de archivos | Cloudflare R2 (binding `MEDIA`), o una carpeta en disco en Node (`servidor/r2.mjs`) — creativos subidos manualmente |
+| Autenticación | Google OAuth2 con PKCE; sesión en cookie **firmada con HMAC** y con vencimiento |
+| IA | Anthropic SDK (`@anthropic-ai/sdk`), Claude Sonnet, con streaming (SSE) |
 | Integración de datos de anuncios | Windsor.ai (normaliza Google Ads, Meta Ads, TikTok Ads, LinkedIn Ads) |
 | Lenguaje | TypeScript |
-| Linting | ESLint 9 (`eslint-config-next`) |
+| Pruebas | `node --test tests/*.test.mjs`, `tsc`, ESLint 9 |
 
 ## 7. Esquema de base de datos (D1 / Drizzle)
 
@@ -272,3 +283,44 @@ Definido en [`db/schema.ts`](../db/schema.ts), con migraciones versionadas en
 - **`oauth_sessions`** — estado de PKCE en tránsito durante el login.
 - **`app_meta`** — almacén clave/valor genérico, usado sobre todo como caché
   de las respuestas de Windsor (ver §2.3).
+
+## 8. Asistente de IA
+
+`app/asistente.tsx` (orbe flotante y chat) habla con `POST /api/asistente`, que
+responde en streaming (SSE) y corre el agente de `lib/asistente.ts`.
+
+**Regla que ordena el diseño: el modelo nunca escribe en una plataforma.**
+
+- **Lectura** (herramientas que ejecuta el servidor): `listar_clientes` y
+  `buscar_campanas`, sobre el mismo `getPerformanceSnapshot` de la app, que ya
+  filtra por los clientes asignados a cada persona.
+- **Propuestas** (no ejecutan nada): `proponer_cambio` (pausar/activar una
+  campaña) y `abrir_constructor` (sugerir una campaña nueva). Llegan a la
+  pantalla como tarjetas con botón. Cada propuesta se valida contra las
+  campañas reales antes de mostrarse, así un id inventado no llega al usuario.
+- **Aplicar** lo decide la persona: el botón llama al mismo
+  `/api/anuncios/estado` de siempre, con sus permisos (`aprobar_cambios`) y su
+  bitácora.
+- **CSV adjunto** (`lib/asistente-csv.ts`): el servidor lo lee y calcula sumas,
+  promedios y ranking en código; el modelo recibe solo el resumen más una
+  muestra, entre marcadores que le indican que es dato y no instrucción.
+- **Límites**: hasta 24 mensajes de historial, 8.000 caracteres por mensaje,
+  CSV de 1,5 MB, 6 vueltas del bucle de herramientas. **No hay límite de
+  consultas por persona** (pendiente).
+
+## 9. Sesión y ejecución en un servidor propio
+
+**Sesión** (`lib/sesion-firmada.ts`, `app/chatgpt-auth.ts`): tras el login con
+Google, la cookie `wiwo-dev-user` lleva `correo.vencimiento.firma` (HMAC-SHA256
+con `SESSION_SECRET` u `OAUTH_TOKEN_KEY`), con `HttpOnly`, `SameSite=Lax` y
+`Secure` bajo https. Una cookie sin firma válida, incluida la antigua (el
+correo suelto), se trata como sin sesión. En un servidor propio
+(`WIWO_RUNTIME=node`) la cabecera `oai-authenticated-user-email` se ignora,
+porque solo ChatGPT Sites la pone de forma confiable.
+
+**Ejecución en Node** (`servidor/`): el build de vinext deja una sola
+importación de `cloudflare:workers`. Un hook de Node (`--import`) la resuelve
+hacia `servidor/cloudflare-workers.mjs`, que exporta el mismo `env` con `DB`
+(SQLite, `d1.mjs`) y `MEDIA` (disco, `r2.mjs`). `migrar.mjs` aplica `drizzle/`
+en orden de forma idempotente. El código de la app no cambia y en Cloudflare
+todo sigue igual. Pasos completos en [`DESPLIEGUE_VPS.md`](DESPLIEGUE_VPS.md).

@@ -8,7 +8,8 @@ arreglar antes de exponerlo a internet y en qué orden hacerlo.
 Amaro (o se generan; ver §5). Complementa a `docs/ARQUITECTURA.md`, que explica
 el flujo de lectura y escritura con las plataformas.
 
-Rama de trabajo: `devAmaro`. (`main` está desactualizada.)
+Rama de trabajo: `devAmaro`. El despliegue automático (`.github/workflows/deploy.yaml`)
+se dispara al integrar un PR a `main`, así que los cambios deben llegar a `main` para desplegarse.
 
 ---
 
