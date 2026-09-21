@@ -32,14 +32,20 @@ const EXTENSION_POR_TIPO: Record<string, string> = {
   "video/quicktime": "mov",
 };
 
-const TAMANO_MAXIMO_BYTES = 200 * 1024 * 1024;
+/**
+ * Tope de un archivo subido desde el Constructor. Va entero a memoria antes de
+ * pasar a R2 (un Worker tiene 128 MB) y Cloudflare rechaza cuerpos de más de
+ * 100 MB en los planes comunes, así que 50 MB deja margen. Un video más
+ * pesado se pega como URL: no pasa por acá.
+ */
+export const TAMANO_MAXIMO_BYTES = 50 * 1024 * 1024;
 
 export function r2Configurado(): boolean {
   return Boolean(env.MEDIA);
 }
 
 export async function subirCreativo(
-  archivo: File,
+  archivo: { type: string; data: ArrayBuffer },
   origin: string,
 ): Promise<{ url: string; key: string }> {
   if (!env.MEDIA) {
@@ -55,17 +61,18 @@ export async function subirCreativo(
       `Formato no admitido (${archivo.type || "desconocido"}). Usa JPG, PNG, WEBP, GIF, MP4 o MOV.`,
     );
   }
-  if (archivo.size === 0) {
+  if (archivo.data.byteLength === 0) {
     throw new AlmacenamientoError("El archivo llegó vacío.");
   }
-  if (archivo.size > TAMANO_MAXIMO_BYTES) {
+  if (archivo.data.byteLength > TAMANO_MAXIMO_BYTES) {
     throw new AlmacenamientoError(
       `El archivo pesa demasiado (máximo ${TAMANO_MAXIMO_BYTES / (1024 * 1024)} MB).`,
+      413,
     );
   }
 
   const key = `creativos/${crypto.randomUUID()}.${extension}`;
-  await env.MEDIA.put(key, await archivo.arrayBuffer(), {
+  await env.MEDIA.put(key, archivo.data, {
     httpMetadata: { contentType: archivo.type },
   });
 

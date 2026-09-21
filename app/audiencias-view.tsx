@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LoaderCircle, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { PortfolioSummary } from "@/lib/portafolios";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 type CuentaGoogle = {
   portfolioName: string;
@@ -240,7 +240,7 @@ function TarjetaCrearLista({
           Sin expiración (si no, cada miembro cae de la lista a los 540 días)
         </label>
         <Button onClick={() => void crear()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           Crear
         </Button>
       </div>
@@ -380,7 +380,7 @@ function TarjetaSubirContactos({
           de quien sube la lista, no algo que esta pantalla pueda verificar.
         </p>
         <Button onClick={() => void subir()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           Subir
         </Button>
         {ultimoRequestId && (
@@ -427,7 +427,7 @@ function TarjetaEstadoSubida({ cuenta }: { cuenta: CuentaGoogle }) {
           className="min-w-0 flex-1 bg-[#292929]/60"
         />
         <Button onClick={() => void consultar()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           Consultar
         </Button>
       </div>
@@ -522,7 +522,7 @@ function TarjetaAdjuntar({
           segmentar
         </label>
         <Button onClick={() => void adjuntar()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           {excluir ? "Excluir" : "Adjuntar"}
         </Button>
       </div>
@@ -609,7 +609,7 @@ function TarjetaAdministrarLista({
             className="min-w-0 flex-1 bg-[#292929]/60"
           />
           <Button onClick={() => void renombrar()} disabled={enviando}>
-            {enviando ? <LoaderCircle className="animate-spin" /> : null}
+            {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
             Renombrar
           </Button>
           <Button

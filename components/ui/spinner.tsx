@@ -1,16 +1,12 @@
-import { Loader2Icon } from "lucide-react"
+import { ThinkingOrb } from "@/app/ui"
 
-import { cn } from "@/lib/utils"
-
-function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
-  return (
-    <Loader2Icon
-      role="status"
-      aria-label="Loading"
-      className={cn("size-4 animate-spin", className)}
-      {...props}
-    />
-  )
+/**
+ * El indicador de carga de WiWO es el Thinking Orb, no un giro genérico:
+ * cualquier `<Spinner />` que se use en adelante (incluidos los de
+ * componentes de shadcn) muestra lo mismo que el resto de la app.
+ */
+function Spinner({ className }: { className?: string }) {
+  return <ThinkingOrb size="sm" state="thinking" className={className} />
 }
 
 export { Spinner }

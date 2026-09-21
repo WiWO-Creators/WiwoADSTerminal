@@ -6,6 +6,7 @@ import {
   emptyBreakdown,
   type ConversionBreakdown,
 } from "@/lib/conversiones";
+import { unidadesMenoresMeta } from "@/lib/monedas";
 import { ACTIVE_PLATFORMS, PLATFORM, type Platform } from "@/lib/plataformas";
 
 /**
@@ -789,7 +790,9 @@ function parseCampaigns(
  * Google entrega `budget_amount` ya en la moneda de la cuenta, igual que
  * `cost` — se convierte igual. Meta entrega `campaign_daily_budget` en la
  * unidad menor (centavos), la misma unidad que exige de vuelta al escribir
- * un presupuesto nuevo — hay que multiplicar por 10.000, no por 1.000.000.
+ * un presupuesto nuevo — en monedas con centavos hay que multiplicar por
+ * 10.000, no por 1.000.000; en las que no los tienen (CLP, COP…), por
+ * 1.000.000 (ver `lib/monedas.ts`).
  */
 function presupuestoDiarioMicros(
   row: Row,
@@ -804,7 +807,11 @@ function presupuestoDiarioMicros(
   if (provider === "meta") {
     const valor = row.campaign_daily_budget;
     if (valor === null || valor === undefined || valor === "") return null;
-    return Math.round(number(valor) * 10_000);
+    // La unidad menor depende de la moneda de la cuenta: en CLP, COP y otras
+    // sin centavos el valor ya viene en pesos enteros, no en centavos.
+    return Math.round(
+      (number(valor) * 1_000_000) / unidadesMenoresMeta(text(row.currency)),
+    );
   }
   return null;
 }
@@ -1414,7 +1421,11 @@ export function idDeResultado(raw: unknown, claves: string[]): string | null {
 function idDentroDeTexto(valor: unknown, profundidad: number): string | null {
   if (profundidad > 4 || valor === null || valor === undefined) return null;
   if (typeof valor === "string") {
-    const coincidencia = valor.match(/\(id[:\s]+(\d+)\)/i);
+    // Sin exigir el paréntesis de cierre justo después del número: el grupo
+    // de anuncios responde "(id 200046612869, type SEARCH_STANDARD)" y con el
+    // patrón anterior no se reconocía, cortando el plan a mitad de camino
+    // (con el grupo ya creado y sin nada de Meta).
+    const coincidencia = valor.match(/\(id[:\s]+(\d+)/i);
     return coincidencia ? coincidencia[1] : null;
   }
   if (typeof valor !== "object") return null;

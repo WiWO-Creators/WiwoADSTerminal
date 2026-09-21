@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { LoaderCircle, ShieldCheck, UserPlus } from "lucide-react";
+import { ShieldCheck, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 /** Trae el equipo sin tocar estado, para poder usarla dentro de un efecto. */
 async function fetchTeam(): Promise<Member[]> {
@@ -182,7 +182,7 @@ export function EquipoView({
             className="h-10 font-extrabold"
           >
             {saving === "invitar" ? (
-              <LoaderCircle className="animate-spin" />
+              <ThinkingOrb size="xs" state="generating" label="" />
             ) : (
               <UserPlus />
             )}
@@ -199,7 +199,8 @@ export function EquipoView({
           {error}
         </div>
       ) : loading ? (
-        <p className="px-4 py-8 text-center text-sm text-[#F8FAD7]/45">
+        <p className="flex items-center justify-center gap-3 px-4 py-8 text-center text-sm text-[#F8FAD7]/45">
+          <ThinkingOrb size="md" state="thinking" label="" />
           Cargando equipo…
         </p>
       ) : (

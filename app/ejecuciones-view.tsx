@@ -6,7 +6,6 @@ import {
   Check,
   ChevronDown,
   History,
-  LoaderCircle,
   Rocket,
   Search,
 } from "lucide-react";
@@ -14,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { platformLabel } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
-import { Surface, StatCard } from "./ui";
+import { Surface, StatCard, ThinkingOrb } from "./ui";
 
 type PasoEjecucion = {
   platform: string;
@@ -109,7 +108,7 @@ export function EjecucionesView() {
 
       {loading ? (
         <Surface className="flex min-h-56 flex-col items-center justify-center gap-3 text-[#F8FAD7]/55">
-          <LoaderCircle className="size-5 animate-spin text-[#4242FF]" />
+          <ThinkingOrb size="md" state="thinking" label="" />
           Cargando bitácora…
         </Surface>
       ) : error ? (

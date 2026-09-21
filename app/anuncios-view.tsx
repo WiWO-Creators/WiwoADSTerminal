@@ -639,7 +639,13 @@ export function AnunciosView({
                         {fila.nombre}
                       </span>
                       <span className="mt-1 block max-w-[420px] truncate text-xs text-[#F8FAD7]/45">
-                        {platformLabel(fila.provider)} · {fila.contexto}
+                        {platformLabel(fila.provider)} · {fila.contexto} ·{" "}
+                        <span
+                          className="metric-number"
+                          title="Id de la cuenta publicitaria: el mismo que ves en la barra del administrador de anuncios de la plataforma"
+                        >
+                          {idDeCuentaVisible(fila.provider, fila.accountId)}
+                        </span>
                       </span>
                     </TableCell>
                     <TableCell>
@@ -900,6 +906,20 @@ const ESTADO_LABELS: Record<string, string> = {
 function estado(status: string | null): string {
   if (!status) return "Sin estado";
   return ESTADO_LABELS[status.toUpperCase()] ?? status.toLowerCase();
+}
+
+/**
+ * El id de la cuenta como lo muestra la plataforma. Un cliente puede tener
+ * varias cuentas con el mismo nombre (Colbún tiene una en Meta con campañas y
+ * otra vacía): sin el id, es imposible saber a cuál de las dos se refiere una
+ * fila al abrir el administrador de anuncios.
+ */
+function idDeCuentaVisible(provider: string, id: string): string {
+  const soloDigitos = id.replace(/\D/g, "");
+  if (provider === "google" && soloDigitos.length === 10) {
+    return `${soloDigitos.slice(0, 3)}-${soloDigitos.slice(3, 6)}-${soloDigitos.slice(6)}`;
+  }
+  return id;
 }
 
 function dinero(micros: number, currency: string | null): string {

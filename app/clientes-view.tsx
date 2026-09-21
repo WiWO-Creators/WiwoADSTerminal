@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronUp,
-  LoaderCircle,
   Plus,
   Settings,
   TriangleAlert,
@@ -23,7 +22,7 @@ import {
   type AttachToCampana,
   type AttachToConjunto,
 } from "./anuncios-view";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 type CuentaVinculada = {
   externalId: string;
@@ -302,7 +301,7 @@ export function ClientesView({
                 className="h-9 font-extrabold"
               >
                 {saving === "nuevo" ? (
-                  <LoaderCircle className="animate-spin" />
+                  <ThinkingOrb size="xs" state="generating" label="" />
                 ) : (
                   <Plus />
                 )}
@@ -767,7 +766,7 @@ function Ficha({
               }
               className="mt-3 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70"
             >
-              {guardando ? <LoaderCircle className="animate-spin" /> : null}
+              {guardando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
               Guardar
             </Button>
           )}

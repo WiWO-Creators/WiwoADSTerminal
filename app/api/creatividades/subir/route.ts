@@ -1,5 +1,9 @@
 import { getSession } from "@/app/sesion";
-import { AlmacenamientoError, subirCreativo } from "@/lib/almacenamiento";
+import {
+  AlmacenamientoError,
+  subirCreativo,
+  TAMANO_MAXIMO_BYTES,
+} from "@/lib/almacenamiento";
 import { can, enAlcance } from "@/lib/permisos";
 
 /**
@@ -25,25 +29,34 @@ export async function POST(request: Request) {
     return fail("Origen no permitido", 403);
   }
 
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.includes("multipart/form-data")) {
-    return fail("Formato de solicitud no válido", 415);
+  // El archivo llega como cuerpo crudo, con su tipo en `content-type` y el
+  // cliente en `x-portfolio-id` — no como multipart. vinext trata todo POST
+  // multipart sin id de acción como una acción de servidor y le aplica el
+  // tope de 1 MB de esas acciones, incluso en rutas de /api: con multipart,
+  // cualquier imagen de más de 1 MB volvía como "Payload Too Large" en texto
+  // plano.
+  const contentType = (request.headers.get("content-type") ?? "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  const declarado = Number(request.headers.get("content-length") ?? 0);
+  if (declarado > TAMANO_MAXIMO_BYTES) {
+    return fail(
+      `El archivo pesa demasiado (máximo ${TAMANO_MAXIMO_BYTES / (1024 * 1024)} MB). Si es un video, pega su URL en vez de subirlo.`,
+      413,
+    );
   }
 
   try {
-    const form = await request.formData();
-    const portfolioId = String(form.get("portfolioId") ?? "");
+    const portfolioId = decodeURIComponent(
+      request.headers.get("x-portfolio-id") ?? "",
+    );
     if (!portfolioId || !enAlcance(session.actor, portfolioId)) {
       return fail("Ese cliente no está en tu alcance", 403);
     }
 
-    const archivo = form.get("archivo");
-    if (!(archivo instanceof File)) {
-      return fail("Falta el archivo", 400);
-    }
-
     const resultado = await subirCreativo(
-      archivo,
+      { type: contentType, data: await request.arrayBuffer() },
       new URL(request.url).origin,
     );
     return Response.json(resultado, { headers: NO_STORE });

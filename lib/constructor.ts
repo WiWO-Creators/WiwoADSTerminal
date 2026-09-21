@@ -1,6 +1,7 @@
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel } from "@/lib/plataformas";
 import type { Platform } from "@/lib/plataformas";
+import { unidadesMenoresMeta } from "@/lib/monedas";
 import { nombreCompuesto } from "@/lib/nomenclatura";
 import type { Objetivo } from "@/lib/objetivos";
 import type { PortfolioSummary } from "@/lib/portafolios";
@@ -525,6 +526,44 @@ function paisesEfectivos(
 }
 
 /**
+ * Por qué una URL de pieza no le sirve a Meta, o null si le sirve. Se dice el
+ * motivo exacto en vez de un genérico: una URL vacía, una sin https:// y una
+ * de localhost fallan por razones distintas y se arreglan distinto. La de
+ * localhost es la que más importa atrapar acá — pasa cualquier chequeo de
+ * formato, pero Meta no puede descargarla, y descubrirlo recién al ejecutar
+ * dejaría una campaña y un conjunto ya creados sin anuncio.
+ */
+function problemaDeUrlPublica(valor: string): string | null {
+  const texto = valor.trim();
+  if (!texto) {
+    return "Falta la URL de la pieza: pega una dirección que empiece con https:// (o sube el archivo)";
+  }
+  let url: URL;
+  try {
+    url = new URL(texto);
+  } catch {
+    return "La URL de la pieza no es válida: debe empezar con https:// (por ejemplo https://tusitio.com/imagen.jpg)";
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return "La URL de la pieza debe empezar con https://";
+  }
+  const host = url.hostname.toLowerCase();
+  const privado =
+    host === "localhost" ||
+    host === "0.0.0.0" ||
+    host === "[::1]" ||
+    host.endsWith(".local") ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (privado) {
+    return `La pieza está en una dirección local (${host}): Meta no puede descargarla desde ahí. Usa una URL pública`;
+  }
+  return null;
+}
+
+/**
  * Valida el borrador contra los límites reales de cada plataforma.
  *
  * Los límites no son de la aplicación: son de Google y de Meta. Avisar acá
@@ -694,9 +733,10 @@ export function validateDraft(
     }
     if (!boosteandoValidacion && draft.mediaType === "none") {
       add("mediaUrl", "Meta necesita una imagen o un video");
-    } else if (!boosteandoValidacion && !/^https?:\/\//i.test(draft.mediaUrl.trim())) {
+    } else if (!boosteandoValidacion) {
       // Windsor no recibe archivos: va a buscar la pieza a una URL pública.
-      add("mediaUrl", "La pieza debe estar en una URL pública accesible");
+      const problema = problemaDeUrlPublica(draft.mediaUrl);
+      if (problema) add("mediaUrl", problema);
     }
     if (draft.budgetMode === "total" && !draft.endDate) {
       add(
@@ -907,8 +947,8 @@ export function buildPlan(
           // Meta trabaja en la unidad menor: 5000 = 50,00.
           ...(conCBO
             ? draft.budgetMode === "total"
-              ? { lifetime_budget: Math.round(presupuestoDe("meta") * 100) }
-              : { daily_budget: Math.round(presupuestoDe("meta") * 100) }
+              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
             : // Sin presupuesto de campaña, Windsor avisa que algunas cuentas
               // exigen declarar esto explícito: que el gasto NO se comparte
               // entre conjuntos, porque cada uno trae el suyo propio.
@@ -1010,8 +1050,8 @@ export function buildPlan(
           ...(conCBO
             ? {}
             : draft.budgetMode === "total"
-              ? { lifetime_budget: Math.round(presupuestoDe("meta") * 100) }
-              : { daily_budget: Math.round(presupuestoDe("meta") * 100) }),
+              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
           // ON_POST + POST_ENGAGEMENT: la forma simple de boostear que Meta
           // documenta sin exigir un botón de acción.
           ...(boosteando

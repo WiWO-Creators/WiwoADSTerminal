@@ -6,7 +6,6 @@ import {
   BadgeCheck,
   Bell,
   Building2,
-  CalendarRange,
   Bot,
   ChevronRight,
   Clock3,
@@ -81,9 +80,8 @@ import type {
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
 import {
-  RANGOS,
-  RANGO_LABELS,
   RANGO_POR_DEFECTO,
+  esRangoNombrado,
   type RangoId,
 } from "@/lib/rangos";
 import { cn } from "@/lib/utils";
@@ -114,6 +112,7 @@ import {
   DEFAULT_VIEW_STORAGE_KEY,
   SettingsView,
 } from "./settings-view";
+import { SelectorDeFechas } from "./selector-fechas";
 import {
   AutonomyBadge,
   SeverityBadge,
@@ -337,8 +336,10 @@ export default function WiwoDashboard({
 
     const rangoGuardado = window.localStorage.getItem(
       DEFAULT_RANGO_STORAGE_KEY,
-    ) as RangoId | null;
-    if (rangoGuardado && RANGOS.includes(rangoGuardado)) {
+    );
+    // Solo un periodo con nombre puede ser el predeterminado: uno a mano
+    // ("1 sep – 21 sep") sería otro mes distinto cada vez que se abre la app.
+    if (rangoGuardado && esRangoNombrado(rangoGuardado)) {
       void cambiarRango(rangoGuardado);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
@@ -1023,7 +1024,7 @@ function AppHeader({
   // El periodo solo se ofrece donde cambia lo que se ve. En Equipo o Cuentas
   // sería un control que no hace nada, y eso enseña a desconfiar de los
   // controles.
-  const conPeriodo = ["control", "pacing", "health", "ads"].includes(view);
+  const conPeriodo = ["control", "pacing", "health", "ads", "clients"].includes(view);
   // Ver la nota junto al selector de cliente: solo los declarados existen
   // como portafolio real en Clientes.
   const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
@@ -1075,39 +1076,21 @@ function AppHeader({
       <div className="flex items-center gap-2">
         {conPeriodo && (
           <div className="hidden items-center gap-2 sm:flex">
-            <Select
-              value={rango}
+            {/*
+              Un rango amplio (90 días, año en curso) puede tardar más de un
+              minuto en frío: Windsor recorre esas fechas para cada cuenta. El
+              orbe reemplaza el ícono fijo para que la espera se lea como
+              "trabajando", no como una pantalla congelada.
+            */}
+            <SelectorDeFechas
+              valor={rango}
+              onChange={onRangoChange}
+              cargando={cambiandoRango}
               disabled={cambiandoRango}
-              onValueChange={(valor) => onRangoChange(valor as RangoId)}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-[9.5rem] border-[#F8FAD7]/10 bg-[#323330]/55"
-              >
-                {/*
-                  Un rango amplio (90 días, año en curso) puede tardar más de
-                  un minuto en frío: Windsor recorre esas fechas para cada
-                  cuenta. El giro reemplaza el ícono fijo para que la espera se
-                  lea como "trabajando", no como una pantalla congelada.
-                */}
-                {cambiandoRango ? (
-                  <ThinkingOrb size="xs" state="thinking" label="" />
-                ) : (
-                  <CalendarRange className="size-3.5 text-[#4242FF]" />
-                )}
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {RANGOS.map((id) => (
-                  <SelectItem key={id} value={id}>
-                    {RANGO_LABELS[id]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
             <span
               className={cn(
-                "font-micro whitespace-nowrap text-[0.58rem]",
+                "font-micro hidden whitespace-nowrap text-[0.58rem] 2xl:inline",
                 cambiandoRango ? "text-[#4242FF]" : "text-[#F8FAD7]/40",
               )}
             >

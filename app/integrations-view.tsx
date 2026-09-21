@@ -8,7 +8,6 @@ import {
   ExternalLink,
   Link2,
   LogOut,
-  LoaderCircle,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -45,7 +44,7 @@ import type {
   IntegrationProvider,
   IntegrationSummary,
 } from "@/lib/integration-store";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 type WindsorAccount = { name: string; currency: string | null };
 
@@ -542,7 +541,7 @@ export function IntegrationsView({
               className="font-bold"
             >
               {busy?.action === "select" ? (
-                <LoaderCircle className="animate-spin" />
+                <ThinkingOrb size="xs" state="generating" label="" />
               ) : (
                 <CheckCircle2 />
               )}
@@ -582,7 +581,7 @@ export function IntegrationsView({
               onClick={() => void disconnect()}
             >
               {busy?.action === "disconnect" ? (
-                <LoaderCircle className="animate-spin" />
+                <ThinkingOrb size="xs" state="generating" label="" />
               ) : (
                 <Unplug />
               )}
@@ -688,7 +687,7 @@ function CatalogoPanel({ canManage }: { canManage: boolean }) {
             onClick={() => void reconstruir()}
             className="shrink-0 border-[#F8FAD7]/12 bg-transparent text-[#F8FAD7]/70"
           >
-            {construyendo ? <LoaderCircle className="animate-spin" /> : null}
+            {construyendo ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
             {construyendo ? "Barriendo Windsor…" : "Reconstruir"}
           </Button>
         )}
@@ -944,7 +943,7 @@ function ProviderCard({
                 className="font-bold"
               >
                 {busy === "sync" || metricsRunning ? (
-                  <LoaderCircle className="animate-spin" />
+                  <ThinkingOrb size="xs" state="generating" label="" />
                 ) : needsSelection ? (
                   <SlidersHorizontal />
                 ) : (

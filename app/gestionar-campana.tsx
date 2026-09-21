@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -29,8 +28,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { parsearPalabraClave } from "@/lib/constructor";
+import { unidadesMenoresMeta } from "@/lib/monedas";
 import type { Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
+import { ThinkingOrb } from "./ui";
 
 export type CampanaGestionable = {
   provider: Platform;
@@ -208,8 +209,9 @@ function TarjetaPresupuesto({ campana }: { campana: CampanaGestionable }) {
         : {
             [esCampana ? "campaign_id" : "adset_id"]: campana.id,
             budget_type: tipo,
-            // Meta trabaja en la unidad menor: 5000 = 50,00.
-            amount: Math.round(valor * 100),
+            // Meta trabaja en la unidad menor: 5000 = 50,00 en USD; en CLP y
+            // otras sin centavos, el monto va en pesos enteros.
+            amount: Math.round(valor * unidadesMenoresMeta(campana.currency)),
           },
       "Presupuesto actualizado",
     );
@@ -245,7 +247,7 @@ function TarjetaPresupuesto({ campana }: { campana: CampanaGestionable }) {
           />
         </div>
         <Button onClick={() => void guardar()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           Guardar
         </Button>
       </div>
@@ -299,7 +301,7 @@ function TarjetaNombre({ campana }: { campana: CampanaGestionable }) {
         className="min-w-0 flex-1 bg-[#292929]/60"
       />
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <LoaderCircle className="animate-spin" /> : null}
+        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
         Guardar
       </Button>
     </div>
@@ -398,7 +400,7 @@ function TarjetaPuja({ campana }: { campana: CampanaGestionable }) {
         />
       )}
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <LoaderCircle className="animate-spin" /> : null}
+        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
         Guardar
       </Button>
     </div>
@@ -506,7 +508,7 @@ function TarjetaIdiomas({ campana }: { campana: CampanaGestionable }) {
         ))}
       </div>
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <LoaderCircle className="animate-spin" /> : null}
+        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
         Guardar ({elegidos.length === 0 ? "todos los idiomas" : `${elegidos.length} elegido${elegidos.length === 1 ? "" : "s"}`})
       </Button>
     </div>
@@ -618,7 +620,7 @@ function TarjetaHorario({ campana }: { campana: CampanaGestionable }) {
           />
         </div>
         <Button onClick={() => void guardar()} disabled={enviando}>
-          {enviando ? <LoaderCircle className="animate-spin" /> : null}
+          {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
           Guardar
         </Button>
         <Button variant="ghost" onClick={() => void quitar()} disabled={enviando}>
@@ -671,7 +673,7 @@ function TarjetaNegativas({ campana }: { campana: CampanaGestionable }) {
         desde Google Ads.
       </p>
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <LoaderCircle className="animate-spin" /> : null}
+        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
         Añadir
       </Button>
     </div>
@@ -875,7 +877,7 @@ function TarjetaExtensiones({ campana }: { campana: CampanaGestionable }) {
       )}
 
       <Button onClick={() => void guardar()} disabled={enviando}>
-        {enviando ? <LoaderCircle className="animate-spin" /> : null}
+        {enviando ? <ThinkingOrb size="xs" state="generating" label="" /> : null}
         Añadir extensión
       </Button>
       <p className="text-[0.65rem] leading-5 text-[#F8FAD7]/35">

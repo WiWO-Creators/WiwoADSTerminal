@@ -1,6 +1,6 @@
 import { getSession } from "@/app/sesion";
-import { detalleClientes } from "@/lib/clientes-detalle";
 import { can, enAlcance } from "@/lib/permisos";
+import { listPortfolios } from "@/lib/portafolios-store";
 import {
   fetchFacebookPosts,
   fetchInstagramMedia,
@@ -46,17 +46,25 @@ export async function GET(request: Request) {
   const desde = params.get("desde") ?? isoHaceNDias(DIAS_POR_DEFECTO, hasta);
 
   try {
-    const { clientes } = await detalleClientes(session.actor, new Date());
-    const cliente = clientes.find((item) => item.id === portfolioId);
+    // Solo la lista de clientes guardada: antes cada apertura del selector
+    // armaba el resumen de rendimiento completo y leía el catálogo de
+    // años (1,6 MB de JSON) nada más para saber qué página de Facebook tiene
+    // una cuenta — la respuesta tardaba más en eso que en traer las
+    // publicaciones.
+    const cliente = (await listPortfolios()).find((item) => item.id === portfolioId);
     if (!cliente) return fail("Cliente no encontrado", 404);
 
-    const cuenta = cliente.accounts.find(
-      (item) => item.externalId === accountId && item.provider === "meta",
+    const claveCuenta = accountId.toLowerCase();
+    const idCuenta = cliente.accountIds.find(
+      (item) => item.toLowerCase() === claveCuenta,
     );
-    if (!cuenta) {
+    if (!idCuenta || cliente.accountProviders[idCuenta] === "google") {
       return fail("Esa cuenta de Meta no pertenece a este cliente", 404);
     }
-    if (!cuenta.pageId) {
+    // La página propia de la cuenta si la tiene; si no, la del cliente — el
+    // mismo orden que ya usa el resto del Constructor.
+    const pageId = cliente.accountPages[idCuenta] ?? cliente.pageId;
+    if (!pageId) {
       return Response.json(
         {
           posts: [],
@@ -68,7 +76,7 @@ export async function GET(request: Request) {
     }
 
     const [posts, instagram] = await Promise.all([
-      fetchFacebookPosts(cuenta.pageId, desde, hasta),
+      fetchFacebookPosts(pageId, desde, hasta),
       cliente.instagramId
         ? fetchInstagramMedia(cliente.instagramId, desde, hasta)
         : Promise.resolve<OrganicPost[]>([]),
@@ -78,9 +86,13 @@ export async function GET(request: Request) {
       (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
     );
 
+    // El enlace público de cada publicación no se usa en el selector y en un
+    // año de contenido pesaba decenas de KB de más.
+    const liviano = todo.map((post) => ({ ...post, permalink: undefined }));
+
     return Response.json(
       {
-        posts: todo,
+        posts: liviano,
         aviso: cliente.instagramId
           ? null
           : "Este cliente no tiene una cuenta de Instagram declarada, así que solo se muestra Facebook.",
