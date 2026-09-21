@@ -3,9 +3,10 @@
 Sistema operativo de medios pagados de MGC/WiWO: unifica Google Ads y Meta
 Ads (TikTok y LinkedIn ya están en el registro de plataformas, pero
 desactivados) en un solo tablero. Permite crear y gestionar campañas reales
-desde una sola interfaz, y evalúa reglas de optimización que dejan
-recomendaciones para que una persona las apruebe — nunca ejecuta un cambio de
-presupuesto o una pausa por sí solo.
+desde una sola interfaz, y tiene un asistente de IA (Claude) que lee las
+campañas, analiza CSV de MetriQ y recomienda. Nada se activa ni gasta dinero
+sin que una persona lo apruebe: ni el sistema ni el asistente ejecutan un
+cambio por sí solos.
 
 > Si vienes de la plantilla original de este repo (vinext-starter): este
 > README la reemplaza. Lo que describía la plantilla —scripts, bindings de
@@ -22,6 +23,10 @@ npm run dev          # levanta vite en http://localhost:5173
 Node `>=22.13.0`. En Windows, usa Git Bash o WSL para los scripts en `scripts/`
 (están escritos para Linux).
 
+**Llevarlo a un servidor propio (VPS)**: ver
+[`docs/DESPLIEGUE_VPS.md`](docs/DESPLIEGUE_VPS.md). El código corre en Node con
+un puente (`servidor/`) que reemplaza a Cloudflare D1/R2 por SQLite y disco.
+
 ### Variables de entorno
 
 Van en `.dev.vars` en la raíz del repo (nunca se sube a git). La lista
@@ -31,20 +36,23 @@ Pide los valores reales a alguien del equipo que ya tenga acceso.
 
 ### Iniciar sesión en local
 
-En producción, la identidad la inyecta el hosting por la cabecera
-`oai-authenticated-user-email` (ChatGPT Sites) — eso no existe corriendo
-`npm run dev` a pelo. Dos formas de entrar en local:
+En ChatGPT Sites, la identidad la inyecta el hosting por la cabecera
+`oai-authenticated-user-email`; eso no existe corriendo `npm run dev` a pelo.
+Dos formas de entrar en local:
 
-- **Simulando esa cabecera** (recomendado, se comporta como producción):
+- **Simulando esa cabecera** (se comporta como ChatGPT Sites):
   ```bash
   pip install playwright && playwright install chromium
   python scripts/open-in-chrome.py        # abre Chrome como techlab@mgcglobalgroup.com
   ```
-- **Con Google** (`/acceso`): funciona siempre, pero solo entran correos
-  `@mgcglobalgroup.com`.
+- **Con Google** (`/acceso`): solo entran correos `@mgcglobalgroup.com`. La
+  sesión es una cookie **firmada** (HMAC, vence a las 12 h), así que hace falta
+  `SESSION_SECRET` u `OAUTH_TOKEN_KEY` en `.dev.vars`; sin ninguno no se abre
+  sesión. Es la única puerta: el formulario de "escribe cualquier correo" se
+  quitó porque dejaba entrar sin probar identidad.
 
-Es la única puerta: el formulario de "escribe cualquier correo" que existía
-en `/acceso` se quitó, porque dejaba entrar sin probar identidad.
+En un servidor propio (VPS) la cabecera `oai-*` **se ignora** (cualquiera
+podría mandarla): solo vale la cookie firmada.
 
 Estar autenticado no basta: además hay que existir en la tabla `users` con un
 rol asignado (ver [Roles](#roles-y-permisos)). Sin eso, la app muestra "no
@@ -52,29 +60,58 @@ estás en el equipo" aunque el login haya funcionado.
 
 ## Qué hay en la app
 
-La navegación tiene dos grupos, en el sidebar:
+**Inicio** es un vestíbulo: una tarjeta por módulo, según el rol. La barra
+lateral tiene dos grupos:
 
 **Operación** (trabajo de campaña, día a día):
 | Sección | Qué hace |
 |---|---|
 | **Clientes** | Cartera de clientes, cuentas conectadas por cliente, tabla de campañas/conjuntos/anuncios con pausar/activar y gestión (ver abajo) |
-| **Constructor** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa, vista previa por plataforma. Todo nace **pausado** |
-| **Sala de control** | Resumen ejecutivo de la cartera completa |
-| **Salud de medición** | Diagnóstico de calidad de datos por cliente (píxeles, conversiones, cuentas sin sincronizar) |
-| **Audiencias** | Customer Match de Google Ads: crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios. Meta no tiene equivalente todavía — ver [Límites conocidos](#límites-conocidos) |
+| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
+| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios) |
+| **Dashboard C-Level** | Lectura ejecutiva: inversión, resultados, estado de cartera y calidad del dato |
 
 **Gestión** (administración de cuenta, no campaña):
 | Sección | Qué hace |
 |---|---|
-| **Publicaciones** | Bitácora de cada intento real de publicación (éxito o error), con el detalle completo de cada paso |
+| **Auditoría** | Bitácora de cada intento real de publicación (éxito o error), con el detalle de cada paso |
 | **Cuentas** | Conexión de cuentas publicitarias por cliente |
-| **Equipo** | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
-| **Ajustes** | Preferencias personales: vista inicial, rango de fechas por defecto, tema |
+| **Ajustes** | Preferencias personales: periodo por defecto, tema |
+| **Equipo** (engranaje junto a tu ficha) | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
 
-El selector de cliente vive **solo en el navbar superior** — cambiar ahí
-cambia el cliente activo en toda la app (Clientes, Salud de medición,
-Constructor). Ninguna vista debería tener su propio selector aparte; si ves
-uno, es un bug.
+Transversal a todo:
+
+- **Selector de cliente** solo en el encabezado: cambiar ahí cambia el cliente
+  activo en toda la app y **no cambia de pantalla**. Ninguna vista debería
+  tener su propio selector; si ves uno, es un bug.
+- **Periodo** con calendario (presets y rango libre) donde cambia lo que se ve.
+- **Actualizar** (encabezado): relee Windsor y reconstruye el catálogo de
+  campañas. Se hace solo cada semana (la primera sesión admin/lead que abra la
+  app pasados 7 días); no hay cron en el hosting original. Tras publicar, las
+  campañas nuevas se suman al catálogo sin esperar.
+- **Búsqueda ⌘K / Ctrl+K**: saltar a una sección o cambiar de cliente.
+- **Tema claro/oscuro** con la paleta de MetriQ, y el Thinking Orb en todas las
+  cargas.
+
+### Asistente de IA
+
+El orbe flotante (abajo a la derecha) abre un chat con **Claude Sonnet**
+(`claude-sonnet-5`, configurable con `ANTHROPIC_MODEL`). Puede:
+
+- Responder sobre campañas y clientes (gasto, CTR, resultados, costo por
+  resultado) con datos reales, respetando el cliente activo y los permisos.
+- Recomendar según cómo le fue a una campaña.
+- Analizar un **CSV** (por ejemplo de MetriQ): las sumas y rankings los calcula
+  el servidor en código, y al modelo solo le llegan el resumen y una muestra.
+
+Regla de diseño: **el asistente nunca escribe en una plataforma.** Los cambios
+llegan como tarjetas con botón (pausar/activar una campaña, o abrir el Creador
+de campañas con el cliente elegido) y la persona decide; el cambio lo aplica el
+mismo endpoint de siempre, con sus permisos y su bitácora. Antes de mostrar una
+tarjeta se comprueba que la campaña exista en los datos reales.
+
+Todavía no hay límite de consultas por persona (cada respuesta cuesta dinero).
+Detalle en [`lib/asistente.ts`](lib/asistente.ts).
 
 ## Gestionar campañas ya publicadas
 
@@ -108,6 +145,9 @@ qué (vacío para admin/lead: ven todo).
 ```
 app/                   vistas (Next.js App Router, "use client" casi todo)
   dashboard.tsx         shell: sidebar, header, switch de vistas
+  asistente.tsx         orbe flotante y chat del asistente de IA
+  paleta-comandos.tsx   búsqueda ⌘K
+  mensajeria-view.tsx   anuncios de WhatsApp/llamada/mensaje de Meta
   constructor-view.tsx  wizard de creación de campañas
   gestionar-campana.tsx panel de gestión de campaña/conjunto ya publicado
   geo-map.tsx           mapa Leaflet de segmentación (país / radio / excluir)
@@ -120,6 +160,10 @@ lib/
   geo.ts                países segmentables + su id de Google verificado
   permisos.ts           roles y capacidades
   reglas.ts             motor de recomendaciones (fase 1, sin autonomía)
+  asistente.ts          agente de IA: herramientas de lectura y propuestas
+  asistente-csv.ts      perfil de un CSV calculado en código
+  sesion-firmada.ts     cookie de sesión firmada (HMAC)
+servidor/               puente para correr en Node/VPS (SQLite, disco, migrador)
 db/                     esquema Drizzle + bindings de D1
 docs/ARQUITECTURA.md    arquitectura técnica completa (lectura/escritura,
                         variables de entorno, esquema de base de datos)
@@ -151,6 +195,11 @@ no tener que redescubrirlos:
   (círculo en el mapa, con coordenadas crudas — eso no exige buscar nada).
 - **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
   las que ya existen (eso todavía se hace en Google Ads directamente).
+- **Borrar campañas**: no existe esa acción en Windsor; solo se pausan. El
+  asistente lo sabe y no lo ofrece.
+- **Número de WhatsApp de un anuncio**: Windsor no lo expone ni tiene acción
+  para cambiarlo (el destino llega vacío). Solo se ve el tipo de botón. Cambiarlo
+  en bloque exigiría una integración directa con la API de WhatsApp Business.
 - **Edición de creativo de un anuncio ya publicado**: no implementada
   todavía, aunque Windsor sí expone la acción (`update_ad_creative` en
   Meta) — quedó fuera por alcance, no por imposibilidad.

@@ -2,6 +2,12 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { env } from "cloudflare:workers";
 
+import {
+  firmarSesion,
+  SESION_SEGUNDOS,
+  verificarSesion,
+} from "@/lib/sesion-firmada";
+
 export type ChatGPTUser = {
   id: string;
   displayName: string;
@@ -43,9 +49,44 @@ function enLocalSinDispatch(): boolean {
   return env.DEV_LOGIN_ENABLED === "true";
 }
 
+/**
+ * Corriendo en un servidor propio (VPS), no dentro de ChatGPT Sites.
+ *
+ * Allí las cabeceras `oai-authenticated-user-*` las pone la plataforma; en un
+ * servidor propio las puede mandar cualquiera, así que confiar en ellas
+ * equivale a dejar entrar como admin a quien escriba un correo. El puente de
+ * `servidor/cloudflare-workers.mjs` marca este modo y las cabeceras se ignoran.
+ */
+function enServidorPropio(): boolean {
+  return env.WIWO_RUNTIME === "node";
+}
+
+/** Secreto con el que se firma la sesión. Sin él no se puede iniciar sesión. */
+function secretoDeSesion(): string | null {
+  return env.SESSION_SECRET || env.OAUTH_TOKEN_KEY || null;
+}
+
+/**
+ * La cookie de sesión lista para `Set-Cookie`, o `null` si el servidor no
+ * tiene secreto configurado (en ese caso no se abre ninguna sesión).
+ */
+export async function cookieDeSesion(
+  correo: string,
+  seguro: boolean,
+): Promise<string | null> {
+  const secreto = secretoDeSesion();
+  if (!secreto) return null;
+  const valor = await firmarSesion(correo, secreto);
+  return `${DEV_SESSION_COOKIE}=${valor}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESION_SEGUNDOS}${seguro ? "; Secure" : ""}`;
+}
+
 async function getCookieSessionUser(): Promise<ChatGPTUser | null> {
   const store = await cookies();
-  const email = store.get(DEV_SESSION_COOKIE)?.value?.trim().toLowerCase();
+  const secreto = secretoDeSesion();
+  if (!secreto) return null;
+  // Una cookie sin firma válida (incluida la vieja, que era solo el correo) no
+  // es una sesión: se trata como si no hubiera ninguna.
+  const email = await verificarSesion(store.get(DEV_SESSION_COOKIE)?.value, secreto);
   if (!email) return null;
 
   // Se guardó con encodeURIComponent y Next entrega el valor crudo: sin
@@ -73,7 +114,7 @@ function nombreDesdeCorreo(email: string): string {
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
-  const email = requestHeaders.get(USER_EMAIL_HEADER);
+  const email = enServidorPropio() ? null : requestHeaders.get(USER_EMAIL_HEADER);
   if (!email) {
     // Sin cabecera de ChatGPT Sites puede haber una sesión de esta cookie
     // igual: la escribe el callback de Google en `/acceso`, que verifica el
@@ -143,7 +184,9 @@ export function chatGPTSignInPath(returnTo: string): string {
 export async function chatGPTSignOutPath(returnTo = "/"): Promise<string> {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
   const conCabeceraReal =
-    !enLocalSinDispatch() && Boolean((await headers()).get(USER_EMAIL_HEADER));
+    !enLocalSinDispatch() &&
+    !enServidorPropio() &&
+    Boolean((await headers()).get(USER_EMAIL_HEADER));
   const base = conCabeceraReal ? SIGN_OUT_PATH : DEV_SIGN_OUT_PATH;
   return `${base}?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
