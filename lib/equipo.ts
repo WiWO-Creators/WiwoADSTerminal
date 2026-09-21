@@ -96,13 +96,23 @@ export async function resolveActor(
       .first<{ id: string }>();
 
     if (existente) {
-      await db
-        .prepare(
-          `UPDATE users
+      // El nombre solo se toca cuando la sesión trae uno de verdad: si no,
+      // se conserva el que ya estaba. Escribir aquí el `displayName` de
+      // relleno —el correo recortado— borraba en cada request el nombre
+      // bueno que había guardado un inicio de sesión anterior.
+      const sql = identity.fullName
+        ? `UPDATE users
            SET display_name = ?, role = 'admin', is_active = 1, last_seen_at = ?
-           WHERE id = ?`,
-        )
-        .bind(identity.displayName, now, existente.id)
+           WHERE id = ?`
+        : `UPDATE users
+           SET role = 'admin', is_active = 1, last_seen_at = ?
+           WHERE id = ?`;
+      const valores = identity.fullName
+        ? [identity.fullName, now, existente.id]
+        : [now, existente.id];
+      await db
+        .prepare(sql)
+        .bind(...valores)
         .run();
     } else {
       await db
@@ -134,10 +144,21 @@ export async function resolveActor(
 
   if (!row || !row.is_active) return null;
 
-  await db
-    .prepare("UPDATE users SET last_seen_at = ?, display_name = ? WHERE id = ?")
-    .bind(now, identity.displayName, row.id)
-    .run();
+  // El nombre solo se reescribe cuando la sesión trae uno de verdad
+  // (`fullName`). Sin esta guarda, una sesión sin nombre —donde
+  // `displayName` es apenas el correo recortado— pisaba en cada request el
+  // nombre bueno que ya estaba guardado, y no había forma de recuperarlo.
+  if (identity.fullName) {
+    await db
+      .prepare("UPDATE users SET last_seen_at = ?, display_name = ? WHERE id = ?")
+      .bind(now, identity.fullName, row.id)
+      .run();
+  } else {
+    await db
+      .prepare("UPDATE users SET last_seen_at = ? WHERE id = ?")
+      .bind(now, row.id)
+      .run();
+  }
 
   return {
     id: row.id,

@@ -19,6 +19,13 @@ const SIGN_IN_PATH = "/signin-with-chatgpt";
 const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 const DEV_SESSION_COOKIE = "wiwo-dev-user";
+/**
+ * Nombre de pila de quien entró, para saludarlo por su nombre y no por su
+ * correo. Va aparte del cookie de sesión a propósito: es cosmético y puede
+ * faltar (una cuenta de Google sin nombre, o una sesión abierta antes de
+ * que esto existiera), y en ese caso se cae al correo sin romper nada.
+ */
+const DEV_NAME_COOKIE = "wiwo-dev-nombre";
 const DEV_SIGN_IN_PATH = "/acceso";
 const DEV_SIGN_OUT_PATH = "/api/acceso/salir";
 
@@ -40,7 +47,28 @@ async function getCookieSessionUser(): Promise<ChatGPTUser | null> {
   const store = await cookies();
   const email = store.get(DEV_SESSION_COOKIE)?.value?.trim().toLowerCase();
   if (!email) return null;
-  return { id: `email:${email}`, displayName: email, email, fullName: null };
+
+  // Se guardó con encodeURIComponent y Next entrega el valor crudo: sin
+  // decodificar, "José" se leería "Jos%C3%A9".
+  const crudo = store.get(DEV_NAME_COOKIE)?.value;
+  const fullName = crudo
+    ? (safeDecodeURIComponent(crudo) ?? crudo).trim() || null
+    : null;
+  return {
+    id: `email:${email}`,
+    displayName: fullName ?? nombreDesdeCorreo(email),
+    email,
+    fullName,
+  };
+}
+
+/**
+ * Último recurso cuando no hay nombre: la parte del correo antes de la
+ * arroba. "mdarras@empresa.com" queda en "mdarras" — impersonal, pero
+ * saludar con la dirección entera se lee como un error del sistema.
+ */
+function nombreDesdeCorreo(email: string): string {
+  return email.split("@")[0] || email;
 }
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
@@ -121,6 +149,7 @@ export async function chatGPTSignOutPath(returnTo = "/"): Promise<string> {
 }
 
 export const DEV_SESSION_COOKIE_NAME = DEV_SESSION_COOKIE;
+export const DEV_NAME_COOKIE_NAME = DEV_NAME_COOKIE;
 
 function safeRelativeReturnPath(value: string): string {
   if (!value.startsWith("/") || value.startsWith("//")) return "/";

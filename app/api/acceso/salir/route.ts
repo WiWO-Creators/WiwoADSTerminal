@@ -1,4 +1,7 @@
-import { DEV_SESSION_COOKIE_NAME } from "@/app/chatgpt-auth";
+import {
+  DEV_NAME_COOKIE_NAME,
+  DEV_SESSION_COOKIE_NAME,
+} from "@/app/chatgpt-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +19,18 @@ export async function GET(request: Request) {
   destino.searchParams.set("cerrada", "1");
   destino.searchParams.set("return_to", target);
 
-  return new Response(null, {
-    status: 303,
-    headers: {
-      location: destino.toString(),
-      "set-cookie": `${DEV_SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
-      "cache-control": "no-store",
-    },
+  const headers = new Headers({
+    location: destino.toString(),
+    "cache-control": "no-store",
   });
+  // Las dos: dejar el nombre vivo después de cerrar sesión haría que la
+  // siguiente persona en este navegador entre saludada con el nombre ajeno.
+  for (const cookie of [DEV_SESSION_COOKIE_NAME, DEV_NAME_COOKIE_NAME]) {
+    headers.append(
+      "set-cookie",
+      `${cookie}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+    );
+  }
+
+  return new Response(null, { status: 303, headers });
 }
