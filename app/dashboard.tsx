@@ -825,7 +825,10 @@ export default function WiwoDashboard({
             />
           )}
           {view === "audiencias" && (
-            <AudienciasView portfolios={performance.portfolios} />
+            <AudienciasView
+              portfolios={performance.portfolios}
+              clienteSeleccionado={clienteSeleccionado}
+            />
           )}
         </div>
       </SidebarInset>

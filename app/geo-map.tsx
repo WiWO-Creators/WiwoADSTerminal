@@ -9,6 +9,7 @@ import {
   MapContainer,
   Marker,
   TileLayer,
+  useMap,
   useMapEvents,
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
@@ -60,6 +61,25 @@ function CapturaClicks({
       onClick(e.latlng.lat, e.latlng.lng);
     },
   });
+  return null;
+}
+
+/**
+ * Sin esto, un círculo de 10 km sobre el zoom inicial (todo el continente)
+ * mide menos de un píxel y solo se ve el pin: parece que no pasó nada. Al
+ * cambiar el centro o el radio, el mapa se ajusta para que el círculo entero
+ * quede a la vista.
+ */
+function AjustarACirculo({ radio }: { radio: GeoRadio }) {
+  const map = useMap();
+  useEffect(() => {
+    // `L.circle().getBounds()` exige que el círculo ya esté en un mapa;
+    // `toBounds` calcula el mismo cuadro a partir de solo el centro.
+    const limites = L.latLng(radio.lat, radio.lng).toBounds(
+      radio.radiusKm * 2000,
+    );
+    map.fitBounds(limites, { maxZoom: 10, padding: [30, 30] });
+  }, [map, radio.lat, radio.lng, radio.radiusKm]);
   return null;
 }
 
@@ -199,6 +219,7 @@ function GeoMap({
         )}
         {radio && (
           <>
+            <AjustarACirculo radio={radio} />
             <Marker position={[radio.lat, radio.lng]} icon={ICONO_PIN} />
             <Circle
               center={[radio.lat, radio.lng]}

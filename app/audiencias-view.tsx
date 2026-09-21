@@ -74,10 +74,16 @@ async function ejecutar(
  */
 export function AudienciasView({
   portfolios,
+  clienteSeleccionado,
 }: {
   portfolios: PortfolioSummary[];
+  /** El cliente del navbar: es el único selector de cliente de la app, así que
+   * acá solo se ofrecen sus cuentas. Sin cliente elegido, se ven todas. */
+  clienteSeleccionado: string | null;
 }) {
-  const cuentasGoogle: CuentaGoogle[] = portfolios.flatMap((p) =>
+  const cuentasGoogle: CuentaGoogle[] = portfolios
+    .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
+    .flatMap((p) =>
     p.accounts
       .filter((a) => a.provider === "google")
       .map((a) => ({
@@ -89,7 +95,14 @@ export function AudienciasView({
         accountName: a.name,
       })),
   );
-  const [cuentaId, setCuentaId] = useState("");
+  const [cuentaElegida, setCuentaId] = useState("");
+  // Con una sola cuenta posible no hay nada que elegir; si la elegida ya no
+  // pertenece al cliente del navbar, se descarta en vez de operar sobre otra.
+  const cuentaId = cuentasGoogle.some((c) => c.accountId === cuentaElegida)
+    ? cuentaElegida
+    : cuentasGoogle.length === 1
+      ? cuentasGoogle[0].accountId
+      : "";
   const cuenta = cuentasGoogle.find((c) => c.accountId === cuentaId) ?? null;
   const [listas, setListas] = useState<ListaConocida[]>([]);
 
@@ -98,14 +111,20 @@ export function AudienciasView({
       <div className="mb-5">
         <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-[#F8FAD7]/50">
           <Users className="size-3 text-[#4242FF]" />
-          Google Ads · Customer Match
+          Audiencias propias
         </p>
         <h2 className="neo-section-title">Audiencias</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-[#F8FAD7]/58">
           Sube listas de contactos (correo, teléfono o domicilio) para
-          segmentar o excluir a personas específicas en Google Ads. Los datos
-          se hashean acá mismo, en el propio servidor de Windsor, antes de
-          llegar a Google — nunca se guardan en WiWO.ADS.
+          segmentar o excluir a personas específicas. Los datos se hashean acá
+          mismo, en el propio servidor de Windsor, antes de llegar a la
+          plataforma — nunca se guardan en WiWO.ADS.
+        </p>
+        <p className="mt-2 max-w-2xl text-xs leading-5 text-[#F8FAD7]/40">
+          Por ahora solo Google Ads (Customer Match). Meta tiene el mismo tipo
+          de audiencia en su propia plataforma, pero Windsor —el proveedor que
+          conecta esta app con las plataformas— todavía no expone esa acción
+          para Meta; en cuanto la exponga, se suma acá.
         </p>
       </div>
 

@@ -86,7 +86,11 @@ export default async function AccesoPage({
                 name="email"
                 type="email"
                 required
-                autoComplete="email"
+                // A propósito apagado: el navegador puede autocompletar acá
+                // un correo distinto al que la persona quiso escribir —y con
+                // Google arriba en la misma pantalla, entrar "con el que no
+                // era" es fácil de confundir con un bug del login real.
+                autoComplete="off"
                 placeholder="tu@empresa.com"
                 className="h-11 w-full rounded-xl border border-[#F8FAD7]/12 bg-[#292929]/60 px-4 text-sm text-[#F8FAD7] outline-none placeholder:text-[#F8FAD7]/28 focus:border-[#4242FF]"
               />
