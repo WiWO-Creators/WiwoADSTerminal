@@ -57,6 +57,7 @@ export function ThinkingOrb({
   state = "thinking",
   variant = "auto",
   bare = false,
+  pixels,
   className,
   label,
 }: {
@@ -64,6 +65,8 @@ export function ThinkingOrb({
   state?: OrbState;
   variant?: "auto" | "inline" | "stage";
   bare?: boolean;
+  /** Tamaño exacto en px del orbe volumétrico, cuando los preajustes no sirven. */
+  pixels?: number;
   className?: string;
   /** aria-label accesible; por defecto el del estado. Pasa "" para decorativo. */
   label?: string;
@@ -73,7 +76,7 @@ export function ThinkingOrb({
     variant === "stage" || (variant === "auto" && (size === "lg" || size === "xl"));
 
   if (useStage) {
-    const px = STAGE_PX[size === "lg" || size === "xl" ? size : "md"];
+    const px = pixels ?? STAGE_PX[size === "lg" || size === "xl" ? size : "md"];
     return (
       <span
         role={a11yLabel ? "status" : undefined}

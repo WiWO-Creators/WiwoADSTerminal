@@ -16,6 +16,7 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config scripts/wrangler.local.jsonc --persist-to .wrangler/state"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
     "@base-ui/react": "^1.7.0",
     "@hookform/resolvers": "^5.7.1",
     "@shadcn/react": "^0.3.0",

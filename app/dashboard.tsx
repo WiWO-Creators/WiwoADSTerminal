@@ -73,6 +73,7 @@ import {
   DEFAULT_VIEW_STORAGE_KEY,
   SettingsView,
 } from "./settings-view";
+import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
 import { SelectorDeFechas } from "./selector-fechas";
 import { ThinkingOrb } from "./ui";
@@ -660,6 +661,22 @@ export default function WiwoDashboard({
         </div>
       </SidebarInset>
 
+      <AsistenteFlotante
+        clienteId={clienteSeleccionado}
+        clienteNombre={
+          performance.portfolios.find((item) => item.id === clienteSeleccionado)?.name ?? null
+        }
+        rango={rango}
+        puedeAprobar={
+          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+        }
+        onAbrirConstructor={(portfolioId) => {
+          setClienteSeleccionado(portfolioId);
+          setBuilderContexto({ modo: "nueva", portfolioId });
+          setView("builder");
+        }}
+        onCambioAplicado={() => void refreshOperationalData()}
+      />
       <Toaster position="bottom-right" richColors />
     </SidebarProvider>
     </div>
