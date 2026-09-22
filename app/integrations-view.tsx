@@ -305,10 +305,6 @@ export function IntegrationsView({
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <ShieldCheck className="size-3 text-brand" />
-            Fuentes de datos · operación controlada
-          </p>
           <h2 className="neo-section-title">
             Conecta las cuentas que WiWO debe leer
           </h2>

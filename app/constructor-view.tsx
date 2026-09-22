@@ -14,7 +14,6 @@ import {
   Megaphone,
   Rocket,
   ShieldCheck,
-  Sparkles,
   Upload,
   Wand2,
 } from "lucide-react";
@@ -423,10 +422,6 @@ export function ConstructorView({
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Sparkles className="size-3 text-brand" />
-          Creador de campañas · se revisa antes de publicar
-        </p>
         <h2 className="neo-section-title">
           {draft.existingAdset
             ? "Añade un anuncio, revísalo antes de publicar"

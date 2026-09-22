@@ -92,10 +92,6 @@ export function EjecucionesView() {
   return (
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <History className="size-3 text-brand" />
-          Historial de publicaciones
-        </p>
         <h2 className="neo-section-title">
           Lo que se creó de verdad
         </h2>

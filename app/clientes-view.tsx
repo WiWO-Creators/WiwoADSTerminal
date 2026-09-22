@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Building2,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
@@ -271,10 +270,6 @@ export function ClientesView({
   return (
     <div className="mx-auto w-full max-w-[1700px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Building2 className="size-3 text-brand" />
-          Cartera · cliente y sus anuncios
-        </p>
         <h2 className="neo-section-title">
           Cliente
         </h2>

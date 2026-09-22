@@ -64,24 +64,11 @@ export function ControlRoomView({
   onOpenIntegrations: () => void;
 }) {
   const hasLiveData = performance.accountsWithData > 0;
-  const isCurrent = performance.mode === "live";
-  const monthLabel = etiquetaPeriodo(performance);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                isCurrent ? "bg-ok-deep" : "bg-warn-deep",
-              )}
-            />
-            {hasLiveData
-              ? `${isCurrent ? "Datos reales" : "Datos reales · actualización pendiente"} · ${monthLabel}`
-              : "Configuración · todavía sin métricas"}
-          </p>
           <span
             className="mb-3 block h-1 w-9 rounded-full bg-gradient-to-r from-[#3bff00] to-[#4242ff]"
             aria-hidden="true"
@@ -104,7 +91,10 @@ export function ControlRoomView({
       </div>
 
       <nav aria-label="Módulos">
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {/* auto-rows-fr iguala el alto de TODAS las filas, no solo el de las
+              tarjetas de una misma fila: así el bloque se lee como una
+              grilla pareja aunque los resúmenes tengan largos distintos. */}
+          <ul className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {modulos.map((modulo) => (
             <li key={modulo.key}>
               <TarjetaDeModulo
@@ -203,10 +193,6 @@ export function HealthView({
     return (
       <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
         <div className="mb-5">
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <HeartPulse className="size-3 text-brand" />
-            Salud por cliente
-          </p>
           <h2 className="neo-section-title">
             Elige un cliente
           </h2>
@@ -235,17 +221,6 @@ export function HealthView({
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                checks.length > 0 && critical === 0 && warnings === 0
-                  ? "bg-ok-deep"
-                  : "bg-warn-deep",
-              )}
-            />
-            Salud real de conexiones y frescura
-          </p>
           <h2 className="neo-section-title">
             {portfolio.name}
           </h2>
@@ -546,4 +521,3 @@ function formatMonth(value: string): string {
     timeZone: "UTC",
   }).format(new Date(`${value}T00:00:00Z`));
 }
-
