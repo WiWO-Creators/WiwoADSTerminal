@@ -227,6 +227,21 @@ export const GOOGLE_GEO_TARGET_IDS: Record<string, string> = {
 export const RADIO_MINIMO_KM = 1;
 export const RADIO_MAXIMO_KM = 80;
 
+/**
+ * Base con la que el asistente de IA puede precargar una campaña nueva
+ * (ver `abrir_constructor` en `lib/asistente.ts`). Deliberadamente no trae
+ * presupuesto ni segmentación fina: eso se elige recién dentro del
+ * Constructor, una vez que se sabe la cuenta real y su moneda.
+ */
+export type SemillaDeCampana = {
+  name: string;
+  objective: Objective;
+  platforms: Platform[];
+  /** Nota interna visible en "Detalles" — nunca se envía a ninguna plataforma. */
+  details: string;
+  targetCountries: string[];
+};
+
 export type CampaignDraft = {
   portfolioId: string;
   platforms: Platform[];

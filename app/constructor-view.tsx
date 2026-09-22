@@ -60,6 +60,7 @@ import {
   type Gender,
   type GoogleChannel,
   type Objective,
+  type SemillaDeCampana,
   type SpecialAdCategory,
 } from "@/lib/constructor";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
@@ -171,6 +172,7 @@ export type ConstructorAttachTo = {
 function borradorInicial(
   attachTo?: ConstructorAttachTo,
   clienteGlobal?: string | null,
+  semilla?: SemillaDeCampana,
 ): CampaignDraft {
   // "Crear campaña para este cliente" llega con portfolioId pero sin
   // campaignId: ahí solo se precarga el cliente, no se adjunta a nada — una
@@ -181,12 +183,20 @@ function borradorInicial(
     // preferencia—; sin eso, se parte del cliente marcado en el selector del
     // navbar, para no pedir elegirlo de nuevo acá adentro.
     portfolioId: attachTo?.portfolioId ?? clienteGlobal ?? "",
-    platforms: attachTo ? [attachTo.platform] : ["google"],
+    // `attachTo` de "nueva campaña" también llega con un `platform` fijo
+    // (placeholder), así que lo que de verdad distingue un destino real es
+    // `adjuntando` — solo ahí el `platform` de `attachTo` es información y
+    // no un relleno.
+    platforms: adjuntando
+      ? [attachTo!.platform]
+      : semilla?.platforms.length
+        ? semilla.platforms
+        : ["google"],
     accountByPlatform:
       attachTo?.accountId ? { [attachTo.platform]: attachTo.accountId } : {},
-    name: "",
-    details: "",
-    objective: "trafico",
+    name: semilla?.name ?? "",
+    details: semilla?.details ?? "",
+    objective: semilla?.objective ?? "trafico",
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
     dailyBudget: null,
@@ -213,7 +223,7 @@ function borradorInicial(
     metaPlacements: [],
     metaSurfaces: [],
     metaInterests: [],
-    targetCountries: [],
+    targetCountries: semilla?.targetCountries ?? [],
     geoRadius: null,
     excludedCountries: [],
     callToAction: "LEARN_MORE",
@@ -250,6 +260,7 @@ export function ConstructorView({
   clienteGlobal,
   onCambiarClienteGlobal,
   onPublicado,
+  semillaIA,
 }: {
   attachTo?: ConstructorAttachTo;
   /** Se llama cuando algo llegó a crearse, para que el resto de la app
@@ -261,6 +272,10 @@ export function ConstructorView({
   /** Sin esto, elegir otro cliente acá adentro no se reflejaba en el navbar
    * ni en el resto de la app — cada uno vivía su propia selección. */
   onCambiarClienteGlobal?: (portfolioId: string) => void;
+  /** Con qué precargar una campaña nueva, cuando se llega desde una
+   * propuesta del asistente de IA. Se ignora si `attachTo` ya trae un
+   * destino concreto — ahí manda lo que se está adjuntando, no la sugerencia. */
+  semillaIA?: SemillaDeCampana;
 } = {}) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -268,7 +283,7 @@ export function ConstructorView({
     attachTo?.adsetId ? "anuncio" : attachTo?.campaignId ? "conjunto" : "campana",
   );
   const [draft, setDraft] = useState<CampaignDraft>(() =>
-    borradorInicial(attachTo, clienteGlobal),
+    borradorInicial(attachTo, clienteGlobal, semillaIA),
   );
   const [plan, setPlan] = useState<Plan | null>(null);
   const [publicando, setPublicando] = useState(false);

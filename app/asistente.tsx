@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 
 import type { Propuesta } from "@/lib/asistente";
+import { OBJECTIVES, type SemillaDeCampana } from "@/lib/constructor";
+import { PAISES_SEGMENTABLES } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import { ThinkingOrb } from "./ui";
 
@@ -41,6 +43,7 @@ const SUGERENCIAS = [
   "¿Qué campañas están rindiendo peor este periodo?",
   "Recomiéndame qué pausar y por qué",
   "¿Cómo va este cliente en resumen?",
+  "Recomiéndame una campaña de tráfico en Google y Meta, presupuesto diario de $5.000, para promocionar nuestros planes, dirigida a Chile. Déjame el Constructor listo.",
 ];
 
 function nuevoId() {
@@ -73,7 +76,7 @@ export function AsistenteFlotante({
   clienteNombre: string | null;
   rango: string;
   puedeAprobar: boolean;
-  onAbrirConstructor: (portfolioId: string) => void;
+  onAbrirConstructor: (portfolioId: string, semilla: SemillaDeCampana) => void;
   onCambioAplicado: () => void;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -342,7 +345,13 @@ export function AsistenteFlotante({
                     onAbrirConstructor={() => {
                       if (p.tipo !== "constructor") return;
                       setAbierto(false);
-                      onAbrirConstructor(p.clienteId);
+                      onAbrirConstructor(p.clienteId, {
+                        name: p.nombreSugerido,
+                        objective: p.objetivo,
+                        platforms: p.plataformas,
+                        details: p.resumen,
+                        targetCountries: p.paises,
+                      });
                     }}
                   />
                 ))}
@@ -473,11 +482,33 @@ function TarjetaDePropuesta({
   onAbrirConstructor: () => void;
 }) {
   if (propuesta.tipo === "constructor") {
+    const paisesLabel = propuesta.paises
+      .map((iso2) => PAISES_SEGMENTABLES.find((p) => p.iso2 === iso2)?.label ?? iso2)
+      .join(", ");
     return (
       <div className="w-full rounded-xl border border-border bg-card p-3">
-        <p className="font-micro text-[0.6rem] text-muted-foreground">Campaña nueva sugerida</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">{propuesta.clienteNombre}</p>
-        <p className="mt-1 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+        <p className="font-micro text-[0.6rem] text-muted-foreground">
+          Campaña nueva sugerida · {propuesta.clienteNombre}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {propuesta.nombreSugerido || "Sin nombre"}
+        </p>
+        <p className="mt-1 flex flex-wrap gap-1.5 text-[0.68rem]">
+          <span className="rounded-full bg-brand/10 px-2 py-0.5 font-semibold text-brand">
+            {OBJECTIVES[propuesta.objetivo]?.label ?? propuesta.objetivo}
+          </span>
+          {propuesta.plataformas.map((p) => (
+            <span key={p} className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground">
+              {p === "google" ? "Google Ads" : "Meta Ads"}
+            </span>
+          ))}
+          {paisesLabel && (
+            <span className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground">
+              {paisesLabel}
+            </span>
+          )}
+        </p>
+        <p className="mt-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
           {propuesta.resumen}
         </p>
         <button

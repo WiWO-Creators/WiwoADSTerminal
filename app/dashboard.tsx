@@ -48,6 +48,7 @@ import { platformLabel } from "@/lib/plataformas";
 import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
 import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
+import type { SemillaDeCampana } from "@/lib/constructor";
 import { type HealthCheck, type ViewKey } from "./data";
 import type { AttachToCampana, AttachToConjunto } from "./anuncios-view";
 import { ClientesView } from "./clientes-view";
@@ -194,9 +195,10 @@ export type DashboardIdentity = {
   role: string;
 };
 
-/** A qué abrir el Constructor cuando se navega hacia él desde Clientes. */
+/** A qué abrir el Constructor cuando se navega hacia él desde Clientes o
+ * desde una propuesta del asistente de IA. */
 type BuilderContexto =
-  | { modo: "nueva"; portfolioId: string }
+  | { modo: "nueva"; portfolioId: string; semilla?: SemillaDeCampana }
   | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto };
 
 /**
@@ -210,7 +212,12 @@ function builderConstructorKey(
   clienteGlobal: string | null,
 ): string {
   if (!contexto) return `nuevo:${clienteGlobal ?? ""}`;
-  if (contexto.modo === "nueva") return contexto.portfolioId;
+  // Con el nombre de la semilla en la llave: dos propuestas seguidas del
+  // asistente para el mismo cliente igual fuerzan un Constructor nuevo, en
+  // vez de reusar uno que ya tenía otro borrador a medio escribir.
+  if (contexto.modo === "nueva") {
+    return `${contexto.portfolioId}:${contexto.semilla?.name ?? ""}`;
+  }
   const attachTo = contexto.attachTo;
   const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";
   return `${attachTo.campaignId}:${adsetId}`;
@@ -613,6 +620,9 @@ export default function WiwoDashboard({
               // arrastrar lo que se había escrito para otra cosa.
               key={builderConstructorKey(builderContexto, clienteSeleccionado)}
               attachTo={builderConstructorAttachTo(builderContexto)}
+              semillaIA={
+                builderContexto?.modo === "nueva" ? builderContexto.semilla : undefined
+              }
               clienteGlobal={clienteSeleccionado}
               onCambiarClienteGlobal={setClienteSeleccionado}
               onPublicado={() => void refreshOperationalData()}
@@ -657,9 +667,9 @@ export default function WiwoDashboard({
         puedeAprobar={
           initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
         }
-        onAbrirConstructor={(portfolioId) => {
+        onAbrirConstructor={(portfolioId, semilla) => {
           setClienteSeleccionado(portfolioId);
-          setBuilderContexto({ modo: "nueva", portfolioId });
+          setBuilderContexto({ modo: "nueva", portfolioId, semilla });
           setView("builder");
         }}
         onCambioAplicado={() => void refreshOperationalData()}
