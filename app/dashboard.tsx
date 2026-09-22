@@ -51,6 +51,7 @@ import {
   esRangoNombrado,
   type RangoId,
 } from "@/lib/rangos";
+import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
 import { type HealthCheck, type ViewKey } from "./data";
 import type { AttachToCampana, AttachToConjunto } from "./anuncios-view";
@@ -190,16 +191,6 @@ function modulosDeInicio(role: string): ModuloInicio[] {
 const TODOS_LOS_CLIENTES = "__todos__";
 
 /** "hace 5 min", "hace 3 h", "hace 2 días" — para decir de cuándo es un dato. */
-function haceTiempo(desde: number): string {
-  const minutos = Math.max(0, Math.round((Date.now() - desde) / 60_000));
-  if (minutos < 1) return "hace un momento";
-  if (minutos < 60) return `hace ${minutos} min`;
-  const horas = Math.round(minutos / 60);
-  if (horas < 24) return `hace ${horas} h`;
-  const dias = Math.round(horas / 24);
-  return `hace ${dias} ${dias === 1 ? "día" : "días"}`;
-}
-
 const roleLabels: Record<string, string> = {
   direction: "Dirección",
   lead: "Lead",
@@ -587,6 +578,9 @@ export default function WiwoDashboard({
               modulos={modulosDeInicio(initialSnapshot.user.role)}
               onNavigate={setView}
               onOpenIntegrations={() => setView("integrations")}
+              puedeVerResumen={
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+              }
             />
           )}
           {view === "health" && (

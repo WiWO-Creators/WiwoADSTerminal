@@ -25,6 +25,7 @@ import type { PortfolioSummary } from "@/lib/portafolios";
 import { cn } from "@/lib/utils";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
+import { TarjetaResumenSemanal } from "./resumen-semanal";
 import {
   HealthBadge,
   StatCard,
@@ -52,6 +53,7 @@ export function ControlRoomView({
   modulos,
   onNavigate,
   onOpenIntegrations,
+  puedeVerResumen,
 }: {
   /** Primer nombre de quien entró, para el saludo. */
   nombre: string;
@@ -60,6 +62,8 @@ export function ControlRoomView({
   modulos: ModuloInicio[];
   onNavigate: (key: ViewKey) => void;
   onOpenIntegrations: () => void;
+  /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
+  puedeVerResumen: boolean;
 }) {
   const hasLiveData = performance.accountsWithData > 0;
   const isCurrent = performance.mode === "live";
@@ -100,6 +104,8 @@ export function ControlRoomView({
           </Button>
         )}
       </div>
+
+      <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
 
       <nav aria-label="Módulos">
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

@@ -1,5 +1,10 @@
 import { getSession } from "@/app/sesion";
+import { generarAlertas } from "@/lib/alertas";
 import { can } from "@/lib/permisos";
+import { getPerformanceSnapshot } from "@/lib/performance-store";
+import { listPortfolios } from "@/lib/portafolios-store";
+import { construirResumenSemanal } from "@/lib/resumen-semanal";
+import { guardarResumenSemanal } from "@/lib/resumen-semanal-store";
 import {
   fetchWindsorCatalog,
   limpiarCacheDeMetricas,
@@ -60,6 +65,24 @@ export async function POST(request: Request) {
   const cacheBorrado = await limpiarCacheDeMetricas();
   const hoy = new Date().toISOString().slice(0, 10);
   const catalogo = await fetchWindsorCatalog(hoy, { construir: true, forzar: true });
+
+  // El resumen semanal se recalcula acá, no en cada lectura: es la misma
+  // ocasión en la que ya se pagó el costo de traer todo de nuevo. Si falla,
+  // no debe tumbar la actualización real — solo faltará el resumen hasta la
+  // próxima vez.
+  try {
+    const [snap, portfolios] = await Promise.all([
+      getPerformanceSnapshot(session.actor, new Date(), {
+        incluirCampanas: true,
+        incluirAnuncios: false,
+      }),
+      listPortfolios(),
+    ]);
+    const alertas = generarAlertas(portfolios, snap.campaigns);
+    await guardarResumenSemanal(construirResumenSemanal(snap, alertas));
+  } catch (error) {
+    console.error("WiWO.ADS resumen semanal", error);
+  }
 
   return Response.json(
     {
