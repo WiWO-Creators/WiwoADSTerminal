@@ -107,6 +107,10 @@ type Fila = {
   resultado: number | null;
   /** Invertido / resultado, en la moneda de la cuenta. Sin resultado, no hay costo que mostrar. */
   costo: number | null;
+  /** Miniatura real de la pieza (solo Meta, ver `WindsorAd.thumbnailUrl`).
+   * A nivel de campaña o conjunto es la del primer anuncio del grupo — una
+   * referencia visual, no "la" pieza del conjunto entero. */
+  thumbnailUrl: string | null;
 };
 
 /** Qué campaña y qué conjunto están abiertos. */
@@ -222,13 +226,15 @@ export function AnunciosView({
 
   // Clientes con más de una cuenta en la misma plataforma (SQM: SPN, España…)
   // — solo aparece el selector cuando de verdad hay más de una entre las que
-  // ya pasaron el filtro de plataforma, si no es ruido para el resto.
+  // ya pasaron el filtro de plataforma, si no es ruido para el resto. Con
+  // "Toda plataforma" no se muestra nada: antes contaba Google + Meta juntas
+  // (ej. Colbún, 1 cuenta de cada una) y el selector aparecía sin que hubiera
+  // ninguna ambigüedad real — elegir "cuál cuenta" solo tiene sentido una vez
+  // que ya se sabe de qué plataforma.
   const cuentasDelCliente = useMemo(() => {
-    if (portfolioId === "all") return [];
+    if (portfolioId === "all" || providerEfectivo === "all") return [];
     const cuentas = portfolios.find((p) => p.id === portfolioId)?.cuentas ?? [];
-    return cuentas.filter(
-      (c) => providerEfectivo === "all" || c.provider === providerEfectivo,
-    );
+    return cuentas.filter((c) => c.provider === providerEfectivo);
   }, [portfolioId, portfolios, providerEfectivo]);
 
   // Si cambia la plataforma (o se abre una campaña de otra) la cuenta elegida
@@ -825,21 +831,42 @@ export function AnunciosView({
                       />
                     </TableCell>
                     <TableCell>
-                      <span
-                        className="block max-w-[420px] truncate text-sm font-bold text-foreground"
-                        title={fila.nombre}
-                      >
-                        {fila.nombre}
-                      </span>
-                      <span className="mt-1 block max-w-[420px] truncate text-xs text-foreground/45">
-                        {platformLabel(fila.provider)} · {fila.contexto} ·{" "}
-                        <span
-                          className="metric-number"
-                          title="Id de la cuenta publicitaria: el mismo que ves en la barra del administrador de anuncios de la plataforma"
-                        >
-                          {idDeCuentaVisible(fila.provider, fila.accountId)}
-                        </span>
-                      </span>
+                      <div className="flex items-center gap-2.5">
+                        {fila.thumbnailUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- viene de la CDN de Meta, con firma y expiración: no es un asset local que Next pueda optimizar
+                          <img
+                            src={fila.thumbnailUrl}
+                            alt=""
+                            className="size-9 shrink-0 rounded-md object-cover"
+                          />
+                        ) : (
+                          <span
+                            className="size-9 shrink-0 rounded-md bg-foreground/8"
+                            title={
+                              fila.provider === "google"
+                                ? "Google no entrega miniatura de la pieza por esta vía"
+                                : "Sin miniatura disponible"
+                            }
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <span
+                            className="block max-w-[380px] truncate text-sm font-bold text-foreground"
+                            title={fila.nombre}
+                          >
+                            {fila.nombre}
+                          </span>
+                          <span className="mt-1 block max-w-[380px] truncate text-xs text-foreground/45">
+                            {platformLabel(fila.provider)} · {fila.contexto} ·{" "}
+                            <span
+                              className="metric-number"
+                              title="Id de la cuenta publicitaria: el mismo que ves en la barra del administrador de anuncios de la plataforma"
+                            >
+                              {idDeCuentaVisible(fila.provider, fila.accountId)}
+                            </span>
+                          </span>
+                        </div>
+                      </div>
                     </TableCell>
                     {/*
                       Sin actividad en el rango se escribe "—", nunca 0: un cero
@@ -1018,6 +1045,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         clicks: ad.clicks,
         resultado,
         costo: null,
+        thumbnailUrl: ad.thumbnailUrl ?? null,
       });
       continue;
     }
@@ -1036,6 +1064,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
     actual.campaignId = actual.campaignId ?? ad.campaignId;
     actual.adsetId = actual.adsetId ?? ad.adsetId;
     actual.adId = actual.adId ?? ad.adId;
+    actual.thumbnailUrl = actual.thumbnailUrl ?? ad.thumbnailUrl ?? null;
   }
 
   for (const fila of grupos.values()) {

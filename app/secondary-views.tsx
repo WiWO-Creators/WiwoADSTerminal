@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
+import { TarjetaResumenCliente } from "./resumen-cliente";
 import { TarjetaResumenSemanal } from "./resumen-semanal";
 import {
   HealthBadge,
@@ -380,6 +381,19 @@ export function HealthView({
         />
       </div>
 
+      {/* Del cliente elegido, no de toda la cartera — a diferencia del
+          resumen agregado de arriba cuando no hay cliente elegido, acá ya se
+          sabe de quién es la pantalla, así que no tiene sentido mezclarlo
+          con el gasto de otros clientes. */}
+      <TarjetaResumenCliente
+        portfolio={portfolio}
+        periodo={{
+          desde: performance.rangeStart,
+          hasta: performance.rangeEnd,
+          enCurso: performance.rango.enCurso,
+        }}
+      />
+
       <Surface className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-foreground/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -425,7 +439,12 @@ export function HealthView({
           <TableBody>
             {checks.map((check) => (
               <TableRow
-                key={check.account + "-" + check.check}
+                // Antes sin `platform`: Google Ads y Meta Ads de la misma
+                // cuenta compartían key ("Colbún Energía-Autorización e
+                // inventario" x2), React lo advertía en consola como "two
+                // children with the same key" y la tabla quedaba expuesta al
+                // mismo bug de reconciliación que ya se vio en Clientes.
+                key={`${check.account}-${check.platform}-${check.check}`}
                 className="h-16"
               >
                 <TableCell className="pl-4 text-sm font-bold text-foreground">
@@ -476,10 +495,6 @@ export function HealthView({
           </TableBody>
         </Table>
       </Surface>
-
-      <div className="mt-6">
-        <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
-      </div>
     </div>
   );
 }

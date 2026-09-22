@@ -954,12 +954,15 @@ function AppHeader({
                 carga mientras cambia) — acá solo se agrega lo que ese botón
                 no dice: que el periodo sigue abierto. Un periodo abierto se
                 marca porque compararlo con uno cerrado y leer una caída es
-                el error clásico. */}
-            {!cambiandoRango && performance.rango?.enCurso && (
-              <span className="hidden whitespace-nowrap text-[0.68rem] font-semibold text-muted-foreground 2xl:inline">
-                En curso
-              </span>
-            )}
+                el error clásico. Si el nombre del rango ya lo dice solo
+                ("Mes en curso"), no hace falta repetirlo al lado. */}
+            {!cambiandoRango &&
+              performance.rango?.enCurso &&
+              !performance.rango.label.toLowerCase().includes("en curso") && (
+                <span className="hidden whitespace-nowrap text-[0.68rem] font-semibold text-muted-foreground 2xl:inline">
+                  En curso
+                </span>
+              )}
           </div>
         )}
         {puedeActualizar && (
