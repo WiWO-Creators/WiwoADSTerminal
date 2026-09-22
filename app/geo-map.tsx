@@ -18,6 +18,7 @@ import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import type { LugarSegmentable } from "@/lib/constructor";
 import { cn } from "@/lib/utils";
 import {
   PAISES_SEGMENTABLES,
@@ -114,7 +115,7 @@ function GeoMap({
   radio,
   onRadioChange,
 }: {
-  modo: "paises" | "radio" | "excluir";
+  modo: "paises" | "lugares" | "radio" | "excluir";
   paisesSeleccionados: string[];
   onTogglePais: (iso2: string) => void;
   paisesExcluidos: string[];
@@ -308,6 +309,113 @@ function SelectorDePaises({
   );
 }
 
+/**
+ * Buscador de región/estado/provincia o ciudad/comuna reales, contra
+ * `/api/geo-targets` (tabla `geo_targets`, sembrada desde la misma fuente
+ * oficial que los 219 países). A diferencia de `SelectorDePaises`, la lista
+ * no cabe en memoria del cliente — son decenas de miles de filas — así que
+ * cada letra pide al servidor, con una pausa corta para no disparar una
+ * consulta por tecla.
+ */
+function SelectorDeLugares({
+  tier,
+  seleccionados,
+  onAgregar,
+  placeholder,
+}: {
+  tier: "region" | "city";
+  seleccionados: LugarSegmentable[];
+  onAgregar: (lugar: LugarSegmentable) => void;
+  placeholder: string;
+}) {
+  const [busqueda, setBusqueda] = useState("");
+  const [resultados, setResultados] = useState<
+    Array<{ id: string; nombre: string; nombreCanonico: string; countryCode: string }>
+  >([]);
+  const [buscando, setBuscando] = useState(false);
+  const idsElegidos = new Set(seleccionados.map((l) => l.id));
+
+  useEffect(() => {
+    const texto = busqueda.trim();
+    if (texto.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- limpia los resultados de la búsqueda anterior al borrar el texto
+      setResultados([]);
+      setBuscando(false);
+      return;
+    }
+    setBuscando(true);
+    let cancelado = false;
+    const espera = setTimeout(() => {
+      const params = new URLSearchParams({ tier, q: texto });
+      fetch(`/api/geo-targets?${params}`)
+        .then((r) => r.json())
+        .then((body: { resultados?: typeof resultados }) => {
+          if (!cancelado) setResultados(body.resultados ?? []);
+        })
+        .catch(() => {
+          if (!cancelado) setResultados([]);
+        })
+        .finally(() => {
+          if (!cancelado) setBuscando(false);
+        });
+    }, 300);
+    return () => {
+      cancelado = true;
+      clearTimeout(espera);
+    };
+  }, [busqueda, tier]);
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-foreground/35" />
+        <Input
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder={placeholder}
+          className="h-8 border-foreground/10 bg-field/50 pl-8 text-xs"
+        />
+      </div>
+
+      {busqueda.trim().length >= 2 && (
+        <div className="scrollbar-thin max-h-52 overflow-y-auto rounded-lg border border-foreground/10 bg-field/40">
+          {buscando ? (
+            <p className="px-3 py-2.5 text-xs text-foreground/40">Buscando…</p>
+          ) : resultados.length === 0 ? (
+            <p className="px-3 py-2.5 text-xs text-foreground/40">
+              Nada coincide con la búsqueda.
+            </p>
+          ) : (
+            resultados
+              .filter((lugar) => !idsElegidos.has(lugar.id))
+              .map((lugar) => (
+                <button
+                  key={lugar.id}
+                  type="button"
+                  onClick={() => {
+                    onAgregar({
+                      id: lugar.id,
+                      nombre: lugar.nombre,
+                      countryCode: lugar.countryCode,
+                      tier,
+                    });
+                    setBusqueda("");
+                  }}
+                  className="block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-foreground/[0.06]"
+                >
+                  <span className="block text-foreground/80">{lugar.nombre}</span>
+                  <span className="block text-[0.65rem] text-foreground/40">
+                    {lugar.nombreCanonico}
+                  </span>
+                </button>
+              ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Un chip removible del resumen — mismo look en las tres capas, solo cambia el color. */
 function ChipDeSegmentacion({
   label,
@@ -351,6 +459,8 @@ function ChipDeSegmentacion({
 function ResumenDeSegmentacion({
   targetCountries,
   onQuitarPais,
+  targetPlaces,
+  onQuitarLugar,
   excludedCountries,
   onQuitarExcluido,
   geoRadius,
@@ -358,6 +468,8 @@ function ResumenDeSegmentacion({
 }: {
   targetCountries: string[];
   onQuitarPais: (iso2: string) => void;
+  targetPlaces: LugarSegmentable[];
+  onQuitarLugar: (id: string) => void;
   excludedCountries: string[];
   onQuitarExcluido: (iso2: string) => void;
   geoRadius: GeoRadio | null;
@@ -369,7 +481,13 @@ function ResumenDeSegmentacion({
   const excluidos = PAISES_SEGMENTABLES.filter((pais) =>
     excludedCountries.includes(pais.iso2),
   );
-  if (incluidos.length === 0 && excluidos.length === 0 && !geoRadius) return null;
+  if (
+    incluidos.length === 0 &&
+    excluidos.length === 0 &&
+    targetPlaces.length === 0 &&
+    !geoRadius
+  )
+    return null;
 
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -379,6 +497,14 @@ function ResumenDeSegmentacion({
           label={pais.label}
           color="brand"
           onQuitar={() => onQuitarPais(pais.iso2)}
+        />
+      ))}
+      {targetPlaces.map((lugar) => (
+        <ChipDeSegmentacion
+          key={lugar.id}
+          label={`${lugar.nombre} · ${lugar.tier === "region" ? "Región" : "Ciudad"}`}
+          color="brand"
+          onQuitar={() => onQuitarLugar(lugar.id)}
         />
       ))}
       {geoRadius && (
@@ -407,13 +533,16 @@ function ResumenDeSegmentacion({
  * `custom_locations` en Meta y a `set_campaign_geo_targeting` en Google
  * (`lib/constructor.ts`, función `buildPlan`).
  *
- * Las dos capas conviven: se puede tener países marcados y un círculo a la
- * vez (por ejemplo, todo Chile más un radio puntual en Lima). La pestaña
- * activa solo decide a cuál capa responde el clic del mapa.
+ * Las capas conviven: se puede tener países marcados, regiones o ciudades
+ * elegidas y un círculo a la vez (por ejemplo, todo Chile más un radio
+ * puntual en Lima). La pestaña activa solo decide a cuál capa responde el
+ * clic del mapa o la búsqueda.
  */
 export function SegmentacionGeografica({
   targetCountries,
   onTargetCountriesChange,
+  targetPlaces,
+  onTargetPlacesChange,
   geoRadius,
   onGeoRadiusChange,
   excludedCountries,
@@ -421,14 +550,26 @@ export function SegmentacionGeografica({
 }: {
   targetCountries: string[];
   onTargetCountriesChange: (value: string[]) => void;
+  targetPlaces: LugarSegmentable[];
+  onTargetPlacesChange: (value: LugarSegmentable[]) => void;
   geoRadius: GeoRadio | null;
   onGeoRadiusChange: (value: GeoRadio | null) => void;
   excludedCountries: string[];
   onExcludedCountriesChange: (value: string[]) => void;
 }) {
-  const [modo, setModo] = useState<"paises" | "radio" | "excluir">(
+  const [modo, setModo] = useState<"paises" | "lugares" | "radio" | "excluir">(
     geoRadius ? "radio" : "paises",
   );
+  const [nivelLugar, setNivelLugar] = useState<"region" | "city">("city");
+
+  function agregarLugar(lugar: LugarSegmentable) {
+    if (targetPlaces.some((l) => l.id === lugar.id)) return;
+    onTargetPlacesChange([...targetPlaces, lugar]);
+  }
+
+  function quitarLugar(id: string) {
+    onTargetPlacesChange(targetPlaces.filter((l) => l.id !== id));
+  }
 
   function alternarPais(iso2: string) {
     onTargetCountriesChange(
@@ -452,6 +593,7 @@ export function SegmentacionGeografica({
         {(
           [
             { id: "paises" as const, label: "Por país" },
+            { id: "lugares" as const, label: "Región / Ciudad" },
             { id: "radio" as const, label: "Por radio" },
             { id: "excluir" as const, label: "Excluir" },
           ]
@@ -475,6 +617,8 @@ export function SegmentacionGeografica({
       <ResumenDeSegmentacion
         targetCountries={targetCountries}
         onQuitarPais={alternarPais}
+        targetPlaces={targetPlaces}
+        onQuitarLugar={quitarLugar}
         excludedCountries={excludedCountries}
         onQuitarExcluido={alternarExcluido}
         geoRadius={geoRadius}
@@ -504,9 +648,50 @@ export function SegmentacionGeografica({
           />
           <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
             Solo aparecen los países con id de destino geográfico de Google ya
-            verificado — ciudad y región todavía no, porque esas exigen
-            buscar un id que ninguna de las dos plataformas expone hoy desde
-            acá.
+            verificado. Para segmentar por región o ciudad, usa la pestaña
+            &quot;Región / Ciudad&quot;.
+          </p>
+        </>
+      )}
+
+      {modo === "lugares" && (
+        <>
+          <div className="inline-flex rounded-full border border-foreground/10 bg-field/40 p-0.5">
+            {(
+              [
+                { id: "city" as const, label: "Ciudad / Comuna" },
+                { id: "region" as const, label: "Región / Estado" },
+              ]
+            ).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setNivelLugar(item.id)}
+                className={cn(
+                  "rounded-full px-2.5 py-1 text-[0.68rem] font-semibold transition-colors",
+                  nivelLugar === item.id
+                    ? "bg-foreground/12 text-foreground"
+                    : "text-foreground/45 hover:text-foreground/75",
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <SelectorDeLugares
+            tier={nivelLugar}
+            seleccionados={targetPlaces}
+            onAgregar={agregarLugar}
+            placeholder={
+              nivelLugar === "city"
+                ? "Buscar ciudad o comuna…"
+                : "Buscar región, estado o provincia…"
+            }
+          />
+          <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
+            Solo afecta a Google: Meta no expone una forma de buscar sus
+            propios ids de región o ciudad —son un sistema de ids distinto—,
+            así que la campaña de Meta sigue segmentada por país o por radio.
           </p>
         </>
       )}

@@ -832,23 +832,24 @@ export function AnunciosView({
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2.5">
-                        {fila.thumbnailUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- viene de la CDN de Meta, con firma y expiración: no es un asset local que Next pueda optimizar
-                          <img
-                            src={fila.thumbnailUrl}
-                            alt=""
-                            className="size-9 shrink-0 rounded-md object-cover"
-                          />
-                        ) : (
-                          <span
-                            className="size-9 shrink-0 rounded-md bg-foreground/8"
-                            title={
-                              fila.provider === "google"
-                                ? "Google no entrega miniatura de la pieza por esta vía"
-                                : "Sin miniatura disponible"
-                            }
-                          />
-                        )}
+                        {nivel === "anuncio" &&
+                          (fila.thumbnailUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- viene de la CDN de Meta, con firma y expiración: no es un asset local que Next pueda optimizar
+                            <img
+                              src={fila.thumbnailUrl}
+                              alt=""
+                              className="size-9 shrink-0 rounded-md object-cover"
+                            />
+                          ) : (
+                            <span
+                              className="size-9 shrink-0 rounded-md bg-foreground/8"
+                              title={
+                                fila.provider === "google"
+                                  ? "Google no entrega miniatura de la pieza por esta vía"
+                                  : "Sin miniatura disponible"
+                              }
+                            />
+                          ))}
                         <div className="min-w-0">
                           <span
                             className="block max-w-[380px] truncate text-sm font-bold text-foreground"

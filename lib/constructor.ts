@@ -445,6 +445,15 @@ export type SemillaDeCampana = {
   targetCountries: string[];
 };
 
+/** Una región/estado/provincia o ciudad/comuna real, tal como la devuelve
+ * `/api/geo-targets` — `id` es el geo_target_constant_id real de Google. */
+export type LugarSegmentable = {
+  id: string;
+  nombre: string;
+  countryCode: string;
+  tier: "region" | "city";
+};
+
 export type CampaignDraft = {
   portfolioId: string;
   platforms: Platform[];
@@ -571,6 +580,16 @@ export type CampaignDraft = {
    * en este mismo archivo) — nunca uno inventado.
    */
   targetCountries: string[];
+  /**
+   * Regiones/estados/provincias y ciudades/comunas reales, elegidas por
+   * búsqueda (`/api/geo-targets`, tabla `geo_targets` sembrada desde la misma
+   * fuente oficial que `GOOGLE_GEO_TARGET_IDS`). Solo las usa Google: Meta no
+   * expone, a través de Windsor, una forma de buscar sus propios ids de
+   * región/ciudad —son un sistema de ids completamente distinto—, así que
+   * elegir un lugar acá no segmenta la campaña de Meta, que sigue por país o
+   * por radio.
+   */
+  targetPlaces: LugarSegmentable[];
   /**
    * Segmentación por radio — el círculo que se dibuja en el mapa—, además o
    * en vez de países. A diferencia de intereses o ciudades, esto NO exige
@@ -936,6 +955,13 @@ export function validateDraft(
 
   if (draft.platforms.includes("meta")) {
     const cuentaMeta = cuentaElegida(draft, cuentas, "meta");
+    if (draft.targetPlaces.length > 0) {
+      add(
+        "targetPlaces",
+        "Meta no segmenta por región o ciudad elegida acá: solo Google la usa. La campaña de Meta sigue por país o por radio.",
+        false,
+      );
+    }
     // Meta publica en nombre de una página: sin ella el anuncio no existe.
     if (!cuentaMeta?.pageId) {
       add(
@@ -1098,6 +1124,12 @@ export function buildPlan(
         ...paises
           .filter((p) => GOOGLE_GEO_TARGET_IDS[p])
           .map((p) => ({ geo_target_constant_id: GOOGLE_GEO_TARGET_IDS[p] })),
+        // Regiones y ciudades elegidas por búsqueda: mismo campo que país,
+        // solo que el id ya viene resuelto desde `geo_targets` en vez de la
+        // tabla estática de 219 países.
+        ...draft.targetPlaces.map((lugar) => ({
+          geo_target_constant_id: lugar.id,
+        })),
         // Exclusiones: mismo campo, con `negative: true` — el flag real que
         // expone la acción para dejar un país fuera a propósito.
         ...draft.excludedCountries
@@ -1611,6 +1643,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
       .map(String)
       .map((code) => code.trim().toUpperCase())
       .filter((code) => GOOGLE_GEO_TARGET_IDS[code]),
+    targetPlaces: normalizeTargetPlaces(body.targetPlaces),
     excludedCountries: (Array.isArray(body.excludedCountries)
       ? body.excludedCountries
       : []
@@ -1639,6 +1672,21 @@ function normalizeBudgetByPlatform(
     if (typeof monto === "number" && Number.isFinite(monto)) {
       salida[plataforma] = monto;
     }
+  }
+  return salida;
+}
+
+function normalizeTargetPlaces(value: unknown): LugarSegmentable[] {
+  if (!Array.isArray(value)) return [];
+  const salida: LugarSegmentable[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const { id, nombre, countryCode, tier } = item as Record<string, unknown>;
+    if (typeof id !== "string" || !id.trim()) continue;
+    if (typeof nombre !== "string" || !nombre.trim()) continue;
+    if (typeof countryCode !== "string" || !countryCode.trim()) continue;
+    if (tier !== "region" && tier !== "city") continue;
+    salida.push({ id: id.trim(), nombre: nombre.trim(), countryCode: countryCode.trim().toUpperCase(), tier });
   }
   return salida;
 }

@@ -241,6 +241,16 @@ export function SelectorDePublicaciones({
   }, [open, visibles, filtrados.length]);
 
   const cargando = !entrada && !error;
+  const [demorando, setDemorando] = useState(false);
+  useEffect(() => {
+    if (!cargando) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a la vista normal apenas termina de cargar
+      setDemorando(false);
+      return;
+    }
+    const aviso = setTimeout(() => setDemorando(true), 5000);
+    return () => clearTimeout(aviso);
+  }, [cargando]);
   const conteo = (plataformaId: Publicacion["platform"]) =>
     (entrada?.posts ?? []).filter((post) => post.platform === plataformaId).length;
 
@@ -359,9 +369,17 @@ export function SelectorDePublicaciones({
         >
           {cargando ? (
             <div>
-              <div className="flex items-center justify-center gap-2 pb-3 text-sm text-foreground/55">
-                <ThinkingOrb size="md" state="thinking" label="" />
-                Buscando publicaciones…
+              <div className="flex flex-col items-center justify-center gap-1.5 pb-3 text-center">
+                <div className="flex items-center gap-2 text-sm text-foreground/55">
+                  <ThinkingOrb size="md" state="thinking" label="" />
+                  Buscando publicaciones…
+                </div>
+                {demorando && (
+                  <p className="text-xs text-foreground/40">
+                    La primera vez que se lee esta cuenta puede tardar hasta
+                    un minuto — las siguientes son casi al instante.
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {Array.from({ length: 8 }, (_, indice) => (

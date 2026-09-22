@@ -224,6 +224,7 @@ function borradorInicial(
     metaSurfaces: [],
     metaInterests: [],
     targetCountries: semilla?.targetCountries ?? [],
+    targetPlaces: [],
     geoRadius: null,
     excludedCountries: [],
     callToAction: "LEARN_MORE",
@@ -1341,6 +1342,8 @@ function FaseConjunto({
           onTargetCountriesChange={(targetCountries) =>
             onChange({ targetCountries })
           }
+          targetPlaces={draft.targetPlaces}
+          onTargetPlacesChange={(targetPlaces) => onChange({ targetPlaces })}
           geoRadius={draft.geoRadius}
           onGeoRadiusChange={(geoRadius) => onChange({ geoRadius })}
           excludedCountries={draft.excludedCountries}
@@ -1794,11 +1797,20 @@ function FaseAnuncio({
       {conMeta && (
         <>
           <Seccion titulo="Identidad">
-            <p className="text-sm text-foreground/75">
-              {cuentaMeta?.pageId
-                ? `Publica como la página ${cuentaMeta.pageId}.`
-                : "Elige la cuenta de Meta en el paso de Campaña para resolver su página."}
-            </p>
+            {cuentaMeta ? (
+              <p className="text-sm text-foreground/75">
+                {cuentaMeta.pageId
+                  ? `Publica como la página ${cuentaMeta.pageId}.`
+                  : `Publica desde ${cuentaMeta.name}.`}
+              </p>
+            ) : (
+              <SelectorCuenta
+                platform="meta"
+                cuentas={cuentas}
+                draft={draft}
+                onChange={onChange}
+              />
+            )}
           </Seccion>
 
           <Seccion titulo="Configuración del anuncio">
