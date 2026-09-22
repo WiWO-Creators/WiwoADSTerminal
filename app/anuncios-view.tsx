@@ -1,7 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { ChevronRight, Search, Settings2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronRight,
+  Search,
+  Settings2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -14,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -47,6 +56,23 @@ const NIVELES: Array<{ id: Nivel; label: string }> = [
 
 type EstadoFiltro = "todos" | "activo" | "pausado" | "sin_actividad";
 
+type ColumnaOrden =
+  | "nombre"
+  | "invertido"
+  | "impresiones"
+  | "clics"
+  | "resultados"
+  | "costo";
+
+const COLUMNAS_ORDENABLES: Array<{ id: ColumnaOrden; label: string; align: "left" | "right" }> = [
+  { id: "nombre", label: "Nombre", align: "left" },
+  { id: "invertido", label: "Invertido", align: "right" },
+  { id: "impresiones", label: "Impresiones", align: "right" },
+  { id: "clics", label: "Clics", align: "right" },
+  { id: "resultados", label: "Resultados", align: "right" },
+  { id: "costo", label: "Costo/resultado", align: "right" },
+];
+
 const ESTADOS: Array<{ id: EstadoFiltro; label: string }> = [
   { id: "todos", label: "Todo estado" },
   { id: "activo", label: "Solo activos" },
@@ -79,6 +105,8 @@ type Fila = {
   impressions: number;
   clicks: number;
   resultado: number | null;
+  /** Invertido / resultado, en la moneda de la cuenta. Sin resultado, no hay costo que mostrar. */
+  costo: number | null;
 };
 
 /** Qué campaña y qué conjunto están abiertos. */
@@ -129,7 +157,12 @@ export function AnunciosView({
   puedeAprobar,
 }: {
   performance: PerformanceSnapshot;
-  portfolios: Array<{ id: string; name: string; accountKeys: string[] }>;
+  portfolios: Array<{
+    id: string;
+    name: string;
+    accountKeys: string[];
+    cuentas: Array<{ key: string; name: string; provider: string }>;
+  }>;
   /**
    * Cuando viene de la ficha de un cliente: fija el filtro a ese cliente y
    * esconde el selector, porque ya está claro de quién es esta tabla.
@@ -152,6 +185,7 @@ export function AnunciosView({
   // cuando cambia. Un segundo selector acá adentro solo duplicaba al primero.
   const [portfolioId] = useState(portfolioIdFijo ?? "all");
   const [provider, setProvider] = useState("all");
+  const [accountKey, setAccountKey] = useState("all");
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
   const [busqueda, setBusqueda] = useState("");
   const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
@@ -160,6 +194,17 @@ export function AnunciosView({
     activar: boolean;
   } | null>(null);
   const [gestionando, setGestionando] = useState<CampanaGestionable | null>(null);
+  const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
+  const [soloMarcadas, setSoloMarcadas] = useState(false);
+  const [orden, setOrden] = useState<{ columna: ColumnaOrden; asc: boolean } | null>(null);
+
+  // Las claves de fila son por nivel (campaña/conjunto/anuncio): al bajar o
+  // subir un nivel las marcas de antes ya no corresponden a nada visible acá.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    setMarcadas(new Set());
+    setSoloMarcadas(false);
+  }, [nivel, seleccion?.campana, seleccion?.conjunto]);
 
   const permitidas = useMemo(
     () =>
@@ -175,6 +220,27 @@ export function AnunciosView({
   // de Meta no tiene sentido seguir "filtrando" por Google.
   const providerEfectivo = seleccion?.provider ?? provider;
 
+  // Clientes con más de una cuenta en la misma plataforma (SQM: SPN, España…)
+  // — solo aparece el selector cuando de verdad hay más de una entre las que
+  // ya pasaron el filtro de plataforma, si no es ruido para el resto.
+  const cuentasDelCliente = useMemo(() => {
+    if (portfolioId === "all") return [];
+    const cuentas = portfolios.find((p) => p.id === portfolioId)?.cuentas ?? [];
+    return cuentas.filter(
+      (c) => providerEfectivo === "all" || c.provider === providerEfectivo,
+    );
+  }, [portfolioId, portfolios, providerEfectivo]);
+
+  // Si cambia la plataforma (o se abre una campaña de otra) la cuenta elegida
+  // puede haber dejado de existir en la lista filtrada; sin esto quedaba
+  // "elegida" una cuenta que ya no se ve en el selector.
+  useEffect(() => {
+    if (accountKey === "all") return;
+    if (cuentasDelCliente.some((c) => c.key === accountKey)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    setAccountKey("all");
+  }, [cuentasDelCliente, accountKey]);
+
   const ads = useMemo(
     () =>
       performance.ads.filter((ad) => {
@@ -182,6 +248,7 @@ export function AnunciosView({
         if (providerEfectivo !== "all" && ad.provider !== providerEfectivo) {
           return false;
         }
+        if (accountKey !== "all" && ad.accountKey !== accountKey) return false;
         if (seleccion) {
           if (ad.accountKey !== seleccion.accountKey) return false;
           if (ad.campaignName !== seleccion.campana) return false;
@@ -194,21 +261,58 @@ export function AnunciosView({
         }
         return true;
       }),
-    [performance.ads, permitidas, providerEfectivo, seleccion],
+    [performance.ads, permitidas, providerEfectivo, accountKey, seleccion],
   );
 
   const filas = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
-    return agrupar(ads, nivel).filter((fila) => {
+    const base = agrupar(ads, nivel).filter((fila) => {
       if (estadoFiltro === "activo" && !activo(fila.status)) return false;
       if (estadoFiltro === "pausado" && !pausado(fila.status)) return false;
       if (estadoFiltro === "sin_actividad" && fila.conActividad) return false;
+      if (soloMarcadas && !marcadas.has(fila.clave)) return false;
       if (!texto) return true;
       return `${fila.nombre} ${fila.contexto}`.toLowerCase().includes(texto);
     });
-  }, [ads, nivel, estadoFiltro, busqueda]);
+    if (!orden) return base;
+    const factor = orden.asc ? 1 : -1;
+    return [...base].sort((a, b) => {
+      switch (orden.columna) {
+        case "nombre":
+          return factor * a.nombre.localeCompare(b.nombre, "es");
+        case "invertido":
+          return factor * (a.spendMicros - b.spendMicros);
+        case "impresiones":
+          return factor * (a.impressions - b.impressions);
+        case "clics":
+          return factor * (a.clicks - b.clicks);
+        case "resultados":
+          return factor * ((a.resultado ?? -1) - (b.resultado ?? -1));
+        case "costo":
+          return factor * ((a.costo ?? Infinity) - (b.costo ?? Infinity));
+        default:
+          return 0;
+      }
+    });
+  }, [ads, nivel, estadoFiltro, busqueda, soloMarcadas, marcadas, orden]);
 
   const sinActividad = filas.filter((fila) => !fila.conActividad).length;
+
+  function alternarOrden(columna: ColumnaOrden) {
+    setOrden((actual) => {
+      if (!actual || actual.columna !== columna) return { columna, asc: columna === "nombre" };
+      return { columna, asc: !actual.asc };
+    });
+  }
+
+  function alternarMarcada(clave: string, marcar: boolean) {
+    setMarcadas((actual) => {
+      const siguiente = new Set(actual);
+      if (marcar) siguiente.add(clave);
+      else siguiente.delete(clave);
+      return siguiente;
+    });
+  }
 
   /** Abre una fila y baja un nivel, como el clic en Meta. */
   function abrir(fila: Fila) {
@@ -526,6 +630,26 @@ export function AnunciosView({
             </SelectContent>
           </Select>
         )}
+
+        {/* Solo aparece con más de una cuenta detrás del cliente en la
+            plataforma elegida — el caso SQM (España, SPN…) o ALO Group (una
+            cuenta de Google por país): sin esto, esas cuentas solo se podían
+            ver todas juntas o abriendo campaña por campaña. */}
+        {!seleccion && cuentasDelCliente.length > 1 && (
+          <Select value={accountKey} onValueChange={setAccountKey}>
+            <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las cuentas</SelectItem>
+              {cuentasDelCliente.map((cuenta) => (
+                <SelectItem key={cuenta.key} value={cuenta.key}>
+                  {cuenta.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </Surface>
 
       {seleccion ? (
@@ -580,12 +704,40 @@ export function AnunciosView({
               </span>
             ) : null}
           </h3>
-          <span className="font-micro text-[0.58rem] text-foreground/40">
-            {filas.length} FILAS
-            {sinActividad > 0
-              ? ` · ${sinActividad} SIN ACTIVIDAD EN EL RANGO`
-              : ""}
-          </span>
+          <div className="flex items-center gap-2">
+            {marcadas.size > 0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSoloMarcadas((actual) => !actual)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-[0.62rem] font-bold transition-colors",
+                    soloMarcadas
+                      ? "border-brand/30 bg-brand/12 text-brand"
+                      : "border-foreground/12 text-foreground/55 hover:text-foreground",
+                  )}
+                >
+                  {soloMarcadas ? "Viendo solo marcadas" : "Ver solo marcadas"} ({marcadas.size})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMarcadas(new Set());
+                    setSoloMarcadas(false);
+                  }}
+                  className="text-[0.62rem] font-semibold text-foreground/40 hover:text-foreground/70"
+                >
+                  Quitar marcas
+                </button>
+              </>
+            )}
+            <span className="font-micro text-[0.58rem] text-foreground/40">
+              {filas.length} FILAS
+              {sinActividad > 0
+                ? ` · ${sinActividad} SIN ACTIVIDAD EN EL RANGO`
+                : ""}
+            </span>
+          </div>
         </div>
 
         {filas.length === 0 ? (
@@ -597,26 +749,54 @@ export function AnunciosView({
             <Table>
               <TableHeader>
                 <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.04]">
-                  <TableHead className="pl-4 text-xs text-foreground/58">
-                    Nombre
+                  <TableHead className="w-10 pl-4">
+                    <Checkbox
+                      checked={
+                        filas.length > 0 && filas.every((fila) => marcadas.has(fila.clave))
+                      }
+                      onCheckedChange={(marcado) =>
+                        setMarcadas(
+                          marcado ? new Set(filas.map((fila) => fila.clave)) : new Set(),
+                        )
+                      }
+                      aria-label="Marcar todas las filas visibles"
+                    />
                   </TableHead>
+                  {COLUMNAS_ORDENABLES.map((columna) => (
+                    <TableHead
+                      key={columna.id}
+                      className={cn(
+                        "text-xs text-foreground/58",
+                        columna.align === "right" ? "text-right" : "",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => alternarOrden(columna.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+                          columna.align === "right" && "flex-row-reverse",
+                          orden?.columna === columna.id && "text-foreground",
+                        )}
+                      >
+                        {columna.label}
+                        {orden?.columna === columna.id ? (
+                          orden.asc ? (
+                            <ArrowUp className="size-3" />
+                          ) : (
+                            <ArrowDown className="size-3" />
+                          )
+                        ) : (
+                          <ArrowUpDown className="size-3 opacity-30" />
+                        )}
+                      </button>
+                    </TableHead>
+                  ))}
                   <TableHead className="text-xs text-foreground/58">
                     Objetivo
                   </TableHead>
-                  <TableHead className="text-xs text-foreground/58">
+                  <TableHead className="pr-4 text-xs text-foreground/58">
                     Estado
-                  </TableHead>
-                  <TableHead className="text-right text-xs text-foreground/58">
-                    Invertido
-                  </TableHead>
-                  <TableHead className="text-right text-xs text-foreground/58">
-                    Impresiones
-                  </TableHead>
-                  <TableHead className="text-right text-xs text-foreground/58">
-                    Clics
-                  </TableHead>
-                  <TableHead className="pr-4 text-right text-xs text-foreground/58">
-                    Resultados
                   </TableHead>
                   {puedeAprobar && (
                     <TableHead className="text-right text-xs text-foreground/58" />
@@ -637,7 +817,14 @@ export function AnunciosView({
                       !fila.conActividad && "opacity-70",
                     )}
                   >
-                    <TableCell className="pl-4">
+                    <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={marcadas.has(fila.clave)}
+                        onCheckedChange={(marcado) => alternarMarcada(fila.clave, Boolean(marcado))}
+                        aria-label={`Marcar ${fila.nombre}`}
+                      />
+                    </TableCell>
+                    <TableCell>
                       <span
                         className="block max-w-[420px] truncate text-sm font-bold text-foreground"
                         title={fila.nombre}
@@ -652,31 +839,6 @@ export function AnunciosView({
                         >
                           {idDeCuentaVisible(fila.provider, fila.accountId)}
                         </span>
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {fila.objetivo ? (
-                        <span className="inline-flex rounded-full bg-brand/12 px-2 py-0.5 text-[0.62rem] font-bold text-brand">
-                          {OBJETIVO_CORTO[
-                            fila.objetivo as keyof typeof OBJETIVO_CORTO
-                          ] ?? fila.objetivo}
-                        </span>
-                      ) : (
-                        <span className="text-[0.62rem] text-foreground/38">
-                          Sin sigla
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
-                          activo(estadosLocales[fila.clave] ?? fila.status)
-                            ? "bg-ok-deep/12 text-ok"
-                            : "bg-foreground/8 text-foreground/50",
-                        )}
-                      >
-                        {estado(estadosLocales[fila.clave] ?? fila.status)}
                       </span>
                     </TableCell>
                     {/*
@@ -695,10 +857,38 @@ export function AnunciosView({
                     <TableCell className="metric-number text-right text-sm text-foreground/66">
                       {fila.conActividad ? entero(fila.clicks) : "—"}
                     </TableCell>
-                    <TableCell className="metric-number pr-4 text-right text-sm font-bold text-foreground/82">
+                    <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
                       {!fila.conActividad || fila.resultado === null
                         ? "—"
                         : decimal(fila.resultado)}
+                    </TableCell>
+                    <TableCell className="metric-number text-right text-sm text-foreground/66">
+                      {fila.costo === null ? "—" : dinero(Math.round(fila.costo * 1_000_000), fila.currency)}
+                    </TableCell>
+                    <TableCell>
+                      {fila.objetivo ? (
+                        <span className="inline-flex rounded-full bg-brand/12 px-2 py-0.5 text-[0.62rem] font-bold text-brand">
+                          {OBJETIVO_CORTO[
+                            fila.objetivo as keyof typeof OBJETIVO_CORTO
+                          ] ?? fila.objetivo}
+                        </span>
+                      ) : (
+                        <span className="text-[0.62rem] text-foreground/38">
+                          Sin sigla
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="pr-4">
+                      <span
+                        className={cn(
+                          "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
+                          activo(estadosLocales[fila.clave] ?? fila.status)
+                            ? "bg-ok-deep/12 text-ok"
+                            : "bg-foreground/8 text-foreground/50",
+                        )}
+                      >
+                        {estado(estadosLocales[fila.clave] ?? fila.status)}
+                      </span>
                     </TableCell>
                     {puedeAprobar && (
                       <TableCell className="text-right">
@@ -827,6 +1017,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         impressions: ad.impressions,
         clicks: ad.clicks,
         resultado,
+        costo: null,
       });
       continue;
     }
@@ -845,6 +1036,13 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
     actual.campaignId = actual.campaignId ?? ad.campaignId;
     actual.adsetId = actual.adsetId ?? ad.adsetId;
     actual.adId = actual.adId ?? ad.adId;
+  }
+
+  for (const fila of grupos.values()) {
+    fila.costo =
+      fila.resultado && fila.resultado > 0
+        ? fila.spendMicros / 1_000_000 / fila.resultado
+        : null;
   }
 
   return [...grupos.values()].sort((a, b) => {

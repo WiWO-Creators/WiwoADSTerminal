@@ -22,6 +22,7 @@ import {
   type AttachToCampana,
   type AttachToConjunto,
 } from "./anuncios-view";
+import { TarjetaResumenCliente } from "./resumen-cliente";
 import { OrbeDeBoton, Surface } from "./ui";
 
 type CuentaVinculada = {
@@ -247,6 +248,8 @@ export function ClientesView({
 
   const portfolios = data?.portfolios ?? [];
   const seleccionadoObj = portfolios.find((p) => p.id === seleccionado) ?? null;
+  const performanceDelSeleccionado =
+    performance.portfolios.find((p) => p.id === seleccionado) ?? null;
   const pendientes = portfolios.filter((p) => faltantesDe(p).lista.length > 0);
   const porRevisar = portfolios.filter((p) => p.needsReview);
 
@@ -254,6 +257,15 @@ export function ClientesView({
     id: item.id,
     name: item.name,
     accountKeys: item.accounts.map((a) => a.id),
+    // Clientes como SQM facturan desde varias cuentas de la misma
+    // plataforma, una por país o mercado (SQM España, SQM SPN…). Sin esto,
+    // AnunciosView solo podía sumarlas todas o separarlas por plataforma —
+    // nunca ver "solo la cuenta de España".
+    cuentas: item.accounts.map((a) => ({
+      key: a.id,
+      name: a.name,
+      provider: a.provider,
+    })),
   }));
 
   return (
@@ -425,10 +437,26 @@ export function ClientesView({
         </div>
       ) : null}
 
+      {seleccionadoObj && performanceDelSeleccionado && (
+        <TarjetaResumenCliente
+          portfolio={performanceDelSeleccionado}
+          periodo={{
+            desde: performance.rangeStart,
+            hasta: performance.rangeEnd,
+            enCurso: performance.rango.enCurso,
+          }}
+        />
+      )}
+
       <div className="space-y-4">
         {seleccionadoObj && verFicha && (
           <Ficha
-            key={seleccionadoObj.id}
+            // Prefijado para no colisionar con la key de <AnunciosView> de
+            // abajo: las dos usaban el mismo id de cliente como key y, al
+            // ser hijos del mismo div, React las trataba como la misma
+            // entrada — "two children with the same key" — y terminaba
+            // duplicando la Ficha en vez de reemplazarla al cerrar/abrir.
+            key={`ficha-${seleccionadoObj.id}`}
             portfolio={seleccionadoObj}
             editable={Boolean(data?.canManage)}
             guardando={saving === seleccionadoObj.id}
@@ -444,7 +472,7 @@ export function ClientesView({
           // reinicia el filtro interno de la tabla: `useState` solo lee
           // `portfolioIdFijo` en el primer montaje, así que el segundo
           // cliente elegido seguía mostrando las campañas del primero.
-          key={seleccionadoObj?.id ?? "todos"}
+          key={`anuncios-${seleccionadoObj?.id ?? "todos"}`}
           performance={performance}
           portfolios={anunciosPortfolios}
           portfolioIdFijo={seleccionadoObj?.id}
