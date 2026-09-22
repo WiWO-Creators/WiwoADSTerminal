@@ -68,6 +68,7 @@ import {
   precargarPublicaciones,
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
+import { CopilotoDeCreativos } from "./copiloto-creativos";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
 
 /**
@@ -1853,6 +1854,20 @@ function FaseAnuncio({
                 />
               </Campo>
             </div>
+            <CopilotoDeCreativos
+              plataforma="meta"
+              portfolioId={draft.portfolioId}
+              objetivoLabel={OBJECTIVES[draft.objective].label}
+              nombreCampana={draft.name}
+              notaInterna={draft.details}
+              landingUrl={draft.landingUrl}
+              actual={{
+                textoPrincipal: draft.message,
+                titulo: draft.metaHeadline,
+                descripcion: draft.metaDescription,
+              }}
+              onAplicar={onChange}
+            />
             {draft.mediaType !== "none" && (
               <Campo etiqueta="URL PÚBLICA DE LA PIEZA" className="mt-3">
                 <div className="flex flex-wrap gap-2">
@@ -1976,6 +1991,16 @@ function FaseAnuncio({
               />
               <Contador lineas={draft.descriptions} limite={90} minimo={2} maximo={4} />
             </Campo>
+            <CopilotoDeCreativos
+              plataforma="google"
+              portfolioId={draft.portfolioId}
+              objetivoLabel={OBJECTIVES[draft.objective].label}
+              nombreCampana={draft.name}
+              notaInterna={draft.details}
+              landingUrl={draft.landingUrl}
+              actual={{ titulos: draft.headlines, descripciones: draft.descriptions }}
+              onAplicar={onChange}
+            />
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Campo etiqueta="RUTA 1 (OPCIONAL) · MÁX 15 CARACTERES">
                 <Input

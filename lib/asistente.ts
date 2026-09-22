@@ -358,7 +358,7 @@ async function ejecutarHerramienta(
   return { error: `Herramienta desconocida: ${nombre}` };
 }
 
-function mensajeDeError(error: unknown): string {
+export function mensajeDeError(error: unknown): string {
   if (error instanceof Anthropic.AuthenticationError) {
     return "La clave de la IA no es válida. Avisa a quien administra el sistema.";
   }
