@@ -922,22 +922,6 @@ function AppHeader({
               cargando={cambiandoRango}
               disabled={cambiandoRango}
             />
-            <span
-              className={cn(
-                "hidden whitespace-nowrap text-[0.68rem] font-semibold 2xl:inline",
-                cambiandoRango ? "text-brand" : "text-muted-foreground",
-              )}
-            >
-              {cambiandoRango ? (
-                "Leyendo Windsor…"
-              ) : (
-                <>
-                  {performance.rangeStart} a {performance.rangeEnd}
-                  {/* Un periodo abierto se marca: compararlo con uno cerrado y leer una caída es el error clásico. */}
-                  {performance.rango?.enCurso ? " · en curso" : ""}
-                </>
-              )}
-            </span>
           </div>
         )}
         {puedeActualizar && (

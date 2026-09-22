@@ -77,10 +77,6 @@ export function SettingsView({
   return (
     <div className="mx-auto w-full max-w-[900px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <LayoutDashboard className="size-3 text-brand" />
-          Preferencias de esta cuenta
-        </p>
         <h2 className="neo-section-title">Ajustes generales</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Cómo arranca la app para ti. No afecta a nadie más del equipo.

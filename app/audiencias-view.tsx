@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Users } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -98,10 +97,6 @@ export function AudienciasView({
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Users className="size-3 text-brand" />
-          Audiencias y mensajería
-        </p>
         <h2 className="neo-section-title">Audiencias</h2>
       </div>
       <div className="mb-4 flex gap-2">
