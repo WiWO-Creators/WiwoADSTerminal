@@ -14,7 +14,7 @@ import {
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
 
-import { Search, X } from "lucide-react";
+import { MapPinned, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -465,30 +465,41 @@ export function SegmentacionGeografica({
       {modo === "radio" && (
         <>
           {geoRadius ? (
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-micro text-[0.58rem] text-foreground/45">
-                RADIO
-              </span>
-              <Slider
-                min={RADIO_MINIMO_KM}
-                max={RADIO_MAXIMO_KM}
-                step={1}
-                value={[geoRadius.radiusKm]}
-                onValueChange={([valor]) =>
-                  onGeoRadiusChange({ ...geoRadius, radiusKm: valor })
-                }
-                className="max-w-[14rem]"
-              />
-              <span className="text-xs font-semibold text-foreground">
-                {geoRadius.radiusKm} km
-              </span>
-              <button
-                type="button"
-                onClick={() => onGeoRadiusChange(null)}
-                className="text-[0.7rem] font-semibold text-foreground/45 underline-offset-2 hover:text-danger hover:underline"
-              >
-                Quitar círculo
-              </button>
+            <div className="space-y-2.5">
+              {/* Mismo resumen compacto que Meta Ads Manager en "Lugares":
+                  el centro exacto y el radio, de un vistazo — antes solo se
+                  veía el radio, sin las coordenadas que de verdad se envían. */}
+              <div className="flex items-center gap-2 rounded-lg border border-foreground/10 bg-field/40 px-3 py-2">
+                <MapPinned className="size-3.5 shrink-0 text-brand" />
+                <span className="metric-number text-xs text-foreground/80">
+                  ({geoRadius.lat.toFixed(4)}, {geoRadius.lng.toFixed(4)}) + {geoRadius.radiusKm} km
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-micro text-[0.58rem] text-foreground/45">
+                  RADIO
+                </span>
+                <Slider
+                  min={RADIO_MINIMO_KM}
+                  max={RADIO_MAXIMO_KM}
+                  step={1}
+                  value={[geoRadius.radiusKm]}
+                  onValueChange={([valor]) =>
+                    onGeoRadiusChange({ ...geoRadius, radiusKm: valor })
+                  }
+                  className="max-w-[14rem]"
+                />
+                <span className="text-xs font-semibold text-foreground">
+                  {geoRadius.radiusKm} km
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onGeoRadiusChange(null)}
+                  className="text-[0.7rem] font-semibold text-foreground/45 underline-offset-2 hover:text-danger hover:underline"
+                >
+                  Quitar círculo
+                </button>
+              </div>
             </div>
           ) : (
             <p className="text-xs text-foreground/45">
