@@ -14,6 +14,9 @@ import {
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
 
+import { Search } from "lucide-react";
+
+import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import {
@@ -165,7 +168,7 @@ function GeoMap({
         center={[-15, -68]}
         zoom={3}
         minZoom={2}
-        scrollWheelZoom={false}
+        scrollWheelZoom
         style={{ height: 320, width: "100%", background: "#20211f" }}
       >
         <TileLayer
@@ -266,6 +269,10 @@ export function SegmentacionGeografica({
   const [modo, setModo] = useState<"paises" | "radio" | "excluir">(
     geoRadius ? "radio" : "paises",
   );
+  const [busquedaPais, setBusquedaPais] = useState("");
+  const paisesFiltrados = PAISES_SEGMENTABLES.filter((pais) =>
+    pais.label.toLowerCase().includes(busquedaPais.trim().toLowerCase()),
+  );
 
   function alternarPais(iso2: string) {
     onTargetCountriesChange(
@@ -319,6 +326,18 @@ export function SegmentacionGeografica({
         onRadioChange={onGeoRadiusChange}
       />
 
+      {(modo === "paises" || modo === "excluir") && (
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-foreground/35" />
+          <Input
+            value={busquedaPais}
+            onChange={(e) => setBusquedaPais(e.target.value)}
+            placeholder="Buscar país…"
+            className="h-8 border-foreground/10 bg-field/50 pl-8 text-xs"
+          />
+        </div>
+      )}
+
       {modo === "paises" && (
         <>
           <p className="font-micro text-[0.58rem] text-foreground/45">
@@ -326,7 +345,10 @@ export function SegmentacionGeografica({
             DECLARADOS EN LA CUENTA
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {PAISES_SEGMENTABLES.map((pais) => {
+            {paisesFiltrados.length === 0 && (
+              <p className="text-xs text-foreground/40">Ningún país coincide con la búsqueda.</p>
+            )}
+            {paisesFiltrados.map((pais) => {
               const activo = targetCountries.includes(pais.iso2);
               return (
                 <button
@@ -361,7 +383,10 @@ export function SegmentacionGeografica({
             EN &quot;POR PAÍS&quot;
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {PAISES_SEGMENTABLES.map((pais) => {
+            {paisesFiltrados.length === 0 && (
+              <p className="text-xs text-foreground/40">Ningún país coincide con la búsqueda.</p>
+            )}
+            {paisesFiltrados.map((pais) => {
               const activo = excludedCountries.includes(pais.iso2);
               return (
                 <button

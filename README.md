@@ -75,12 +75,16 @@ lateral tiene dos grupos:
 | Sección | Qué hace |
 |---|---|
 | **Auditoría** | Bitácora de cada intento real de publicación (éxito o error), con el detalle de cada paso |
-| **Cuentas** | Conexión de cuentas publicitarias por cliente |
-| **Ajustes** | Preferencias personales: periodo por defecto, tema |
+| **Cuentas** | Conexión de cuentas publicitarias por cliente. Incluye una tabla "Estado por cliente y plataforma": un cliente puede estar bien en Google y con problemas en Meta a la vez, y esto lo muestra por separado en vez de mezclar todos los clientes de una plataforma en un solo estado |
 | **Equipo** (engranaje junto a tu ficha) | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
 
 Transversal a todo:
 
+- **Puerta de cliente al entrar**: la primera vez en cada sesión de navegador,
+  antes de ver nada más, hay que elegir un cliente (como el selector de
+  cuenta de Google Ads Manager). Después de elegir, el resto de la app sigue
+  igual — incluido poder volver a "Todos los clientes" desde el selector del
+  encabezado.
 - **Selector de cliente** solo en el encabezado: cambiar ahí cambia el cliente
   activo en toda la app y **no cambia de pantalla**. Ninguna vista debería
   tener su propio selector; si ves uno, es un bug.

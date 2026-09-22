@@ -44,6 +44,8 @@ import type {
   IntegrationProvider,
   IntegrationSummary,
 } from "@/lib/integration-store";
+import type { PerformanceAccountSummary } from "@/lib/performance-store";
+import type { PortfolioSummary } from "@/lib/portafolios";
 import { OrbeDeBoton, Surface } from "./ui";
 
 type WindsorAccount = { name: string; currency: string | null };
@@ -86,10 +88,14 @@ export function IntegrationsView({
   currentUser,
   signOutPath,
   onPerformanceUpdated,
+  portfolios,
 }: {
   currentUser: { email: string; displayName: string };
   signOutPath: string;
   onPerformanceUpdated?: () => void;
+  /** Para el estado por cliente y plataforma, más abajo — mismo snapshot que
+   * ya usa el resto de la app, sin pedirlo aparte. */
+  portfolios: PortfolioSummary[];
 }) {
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [canManage, setCanManage] = useState(false);
@@ -453,6 +459,8 @@ export function IntegrationsView({
 
       <CatalogoPanel canManage={canManage} />
 
+      <TablaEstadoPorCliente portfolios={portfolios} />
+
       <Surface className="mt-4 grid gap-4 p-4 md:grid-cols-3">
         <ConnectionPrinciple
           number="01"
@@ -621,6 +629,118 @@ type CatalogoEstado = {
  * tuvo actividad en el rango consultado: sin catálogo, una campaña pausada hace
  * dos semanas simplemente no existe para el sistema.
  */
+type EstadoDeCelda = "ok" | "atencion" | "sin_cuenta";
+
+function estadoDePlataforma(
+  cuentas: PerformanceAccountSummary[],
+): { estado: EstadoDeCelda; detalle: string } {
+  if (cuentas.length === 0) {
+    return { estado: "sin_cuenta", detalle: "Sin cuenta conectada en esta plataforma" };
+  }
+  const conProblema = cuentas.filter(
+    (c) => c.connectionStatus === "needs_attention" || c.metricsStatus === "error",
+  );
+  if (conProblema.length > 0) {
+    return {
+      estado: "atencion",
+      detalle: conProblema
+        .map(
+          (c) =>
+            `${c.name}: ${
+              c.issue ??
+              (c.connectionStatus === "needs_attention"
+                ? "conexión requiere atención"
+                : "métricas con error")
+            }`,
+        )
+        .join(" · "),
+    };
+  }
+  return {
+    estado: "ok",
+    detalle: `${cuentas.length} cuenta${cuentas.length === 1 ? "" : "s"} conectada${cuentas.length === 1 ? "" : "s"}`,
+  };
+}
+
+const ESTILO_CELDA: Record<EstadoDeCelda, string> = {
+  ok: "border-ok-deep/25 bg-ok-deep/10 text-ok",
+  atencion: "border-danger-deep/25 bg-danger-deep/10 text-danger",
+  sin_cuenta: "border-foreground/10 bg-card/50 text-foreground/38",
+};
+
+function CeldaEstado({
+  label,
+  info,
+}: {
+  label: string;
+  info: { estado: EstadoDeCelda; detalle: string };
+}) {
+  return (
+    <span
+      title={info.detalle}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold",
+        ESTILO_CELDA[info.estado],
+      )}
+    >
+      {info.estado === "atencion" && <AlertCircle className="size-3" />}
+      {info.estado === "ok" && <CheckCircle2 className="size-3" />}
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Estado real por cliente, no solo por plataforma: un cliente puede estar
+ * bien en Google y con problemas en Meta a la vez, y las dos tarjetas de
+ * arriba (una por plataforma) no dejan verlo — mezclan todos los clientes de
+ * esa plataforma en un solo estado. Acá cada fila es un cliente y cada
+ * columna una plataforma, para encontrar justo ese caso ("¿por qué Meta no
+ * lee a este cliente si en Google está bien?") sin tener que cruzar dos
+ * tarjetas a mano.
+ */
+function TablaEstadoPorCliente({ portfolios }: { portfolios: PortfolioSummary[] }) {
+  const declarados = portfolios.filter((p) => p.declared);
+  if (declarados.length === 0) return null;
+
+  return (
+    <Surface className="mt-4 overflow-hidden">
+      <div className="border-b border-foreground/8 px-5 py-4">
+        <h3 className="text-sm font-bold text-foreground">
+          Estado por cliente y plataforma
+        </h3>
+        <p className="mt-1 text-xs leading-5 text-foreground/48">
+          Pasa el mouse sobre una insignia para ver el detalle de la cuenta.
+        </p>
+      </div>
+      <div className="max-h-[420px] overflow-y-auto divide-y divide-foreground/8">
+        {declarados.map((portfolio) => {
+          const google = estadoDePlataforma(
+            portfolio.accounts.filter((a) => a.provider === "google"),
+          );
+          const meta = estadoDePlataforma(
+            portfolio.accounts.filter((a) => a.provider === "meta"),
+          );
+          return (
+            <div
+              key={portfolio.id}
+              className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <p className="truncate text-sm font-bold text-foreground">
+                {portfolio.name}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <CeldaEstado label="Google" info={google} />
+                <CeldaEstado label="Meta" info={meta} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Surface>
+  );
+}
+
 function CatalogoPanel({ canManage }: { canManage: boolean }) {
   const [estado, setEstado] = useState<CatalogoEstado | null>(null);
   const [construyendo, setConstruyendo] = useState(false);
@@ -777,6 +897,11 @@ function ProviderCard({
   const metricsIssue =
     integration.performanceStatus === "partial" ||
     integration.performanceStatus === "error";
+  // Sin OAuth directo, la lectura real sigue viniendo de Windsor — la
+  // insignia de arriba antes decía "Sin conexión" en ese caso, que se leía
+  // como una falla aunque el dato estuviera llegando sin problema. Solo dice
+  // eso cuando de verdad no hay ni OAuth ni Windsor leyendo nada.
+  const windsorActivo = windsorAccounts.length > 0;
   const status = attention
     ? { label: "Atención requerida", className: "border-danger-deep/25 bg-danger-deep/10 text-danger" }
     : needsSelection
@@ -789,7 +914,9 @@ function ProviderCard({
         ? { label: "Datos actualizados", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : connected
           ? { label: "OAuth conectado", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
-        : { label: "Sin conexión", className: "border-foreground/10 bg-card/60 text-foreground/48" };
+        : windsorActivo
+          ? { label: "Lectura por Windsor", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
+          : { label: "Sin conexión", className: "border-foreground/10 bg-card/60 text-foreground/48" };
 
   return (
     <Surface className="flex min-h-[330px] flex-col overflow-hidden">
@@ -817,7 +944,7 @@ function ProviderCard({
         <Badge variant="outline" className={status.className}>
           {attention || needsSelection || metricsIssue || metricsStale ? (
             <AlertCircle />
-          ) : connected ? (
+          ) : connected || windsorActivo ? (
             <CheckCircle2 />
           ) : (
             <Link2 />

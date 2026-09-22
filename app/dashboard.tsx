@@ -11,7 +11,6 @@ import {
   Plug,
   RefreshCw,
   Search,
-  SlidersHorizontal,
   Sun,
   Target,
   type LucideIcon,
@@ -46,11 +45,7 @@ import type {
   PerformanceSnapshot,
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
-import {
-  RANGO_POR_DEFECTO,
-  esRangoNombrado,
-  type RangoId,
-} from "@/lib/rangos";
+import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
 import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
 import { type HealthCheck, type ViewKey } from "./data";
@@ -69,14 +64,10 @@ import {
   HealthView,
   type ModuloInicio,
 } from "./secondary-views";
-import {
-  DEFAULT_RANGO_STORAGE_KEY,
-  DEFAULT_VIEW_STORAGE_KEY,
-  SettingsView,
-} from "./settings-view";
 import { BotonDeAlertas } from "./alertas";
 import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
+import { PuertaDeCliente } from "./puerta-cliente";
 import { SelectorDeFechas } from "./selector-fechas";
 import { ThinkingOrb } from "./ui";
 
@@ -142,12 +133,6 @@ const navItemsGestion: ItemDeMenu[] = [
     icono: Plug,
     resumen: "Conecta Google y Meta, y elige qué cuentas se leen.",
   },
-  {
-    key: "settings",
-    label: "Ajustes",
-    icono: SlidersHorizontal,
-    resumen: "Periodo por defecto, tema y preferencias del panel.",
-  },
 ];
 
 /**
@@ -189,6 +174,10 @@ function modulosDeInicio(role: string): ModuloInicio[] {
 
 /** Radix Select no admite value="" — un id de portafolio real nunca vale esto. */
 const TODOS_LOS_CLIENTES = "__todos__";
+
+/** Marca de que ya se eligió cliente en la puerta de entrada, esta sesión de
+ * navegador (ver `PuertaDeCliente` más abajo). */
+const PUERTA_CLIENTE_STORAGE_KEY = "wiwo-ads-puerta-cliente-resuelta";
 
 /** "hace 5 min", "hace 3 h", "hace 2 días" — para decir de cuándo es un dato. */
 const roleLabels: Record<string, string> = {
@@ -293,6 +282,27 @@ export default function WiwoDashboard({
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [builderContexto, setBuilderContexto] = useState<BuilderContexto | null>(null);
 
+  // Solo los clientes declarados tienen sentido para elegir acá — una cuenta
+  // suelta sin cliente asignado no es algo que alguien "elija" al entrar.
+  const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
+  const [mostrarPuertaCliente, setMostrarPuertaCliente] = useState(false);
+  useEffect(() => {
+    // Una vez por sesión de navegador (no en cada recarga dentro de la misma
+    // pestaña): si ya se eligió, la marca queda en sessionStorage y no
+    // vuelve a interrumpir hasta que se cierre la pestaña o se cierre sesión
+    // y se abra otra. Arranca en `false` a propósito (ver la nota del tema,
+    // arriba): así la mayoría de las cargas —donde ya se eligió antes— no
+    // parpadean con la puerta encima.
+    if (
+      clientesDeclarados.length > 0 &&
+      window.sessionStorage.getItem(PUERTA_CLIENTE_STORAGE_KEY) !== "1"
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+      setMostrarPuertaCliente(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
+  }, []);
+
   useEffect(() => {
     // A propósito en un efecto y no en el inicializador de useState: leer
     // localStorage durante el render rompería la hidratación (el servidor
@@ -300,35 +310,6 @@ export default function WiwoDashboard({
     const savedTheme = window.localStorage.getItem("wiwo-ads-theme");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
     if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
-  }, []);
-
-  useEffect(() => {
-    // Solo se aplica la vista de inicio guardada cuando en verdad se llegó a
-    // la portada genérica. Si `initialView` ya trae algo específico (por
-    // ejemplo `?view=integrations` al volver de conectar una cuenta), esa
-    // intención manda por sobre la preferencia guardada.
-    if (initialView !== "control") return;
-    const vistaGuardada = window.localStorage.getItem(
-      DEFAULT_VIEW_STORAGE_KEY,
-    ) as ViewKey | null;
-    if (
-      vistaGuardada &&
-      vistaGuardada !== "control" &&
-      ["control", "clients", "builder", "health"].includes(vistaGuardada)
-    ) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
-      setView(vistaGuardada);
-    }
-
-    const rangoGuardado = window.localStorage.getItem(
-      DEFAULT_RANGO_STORAGE_KEY,
-    );
-    // Solo un periodo con nombre puede ser el predeterminado: uno a mano
-    // ("1 sep – 21 sep") sería otro mes distinto cada vez que se abre la app.
-    if (rangoGuardado && esRangoNombrado(rangoGuardado)) {
-      void cambiarRango(rangoGuardado);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
   }, []);
 
   // Los diálogos y menús se pintan fuera de este árbol (portales): el tema
@@ -519,6 +500,16 @@ export default function WiwoDashboard({
 
   return (
     <div className="theme-shell" data-theme={theme}>
+    {mostrarPuertaCliente && (
+      <PuertaDeCliente
+        clientes={clientesDeclarados}
+        onElegir={(portfolioId) => {
+          setClienteSeleccionado(portfolioId);
+          window.sessionStorage.setItem(PUERTA_CLIENTE_STORAGE_KEY, "1");
+          setMostrarPuertaCliente(false);
+        }}
+      />
+    )}
     <SidebarProvider>
       <AppSidebar
         view={view}
@@ -641,15 +632,7 @@ export default function WiwoDashboard({
               currentUser={initialSnapshot.user}
               signOutPath={signOutPath}
               onPerformanceUpdated={() => void refreshOperationalData()}
-            />
-          )}
-          {view === "settings" && (
-            <SettingsView
-              rango={rango}
-              cambiandoRango={cambiandoRango}
-              onRangoChange={(valor) => void cambiarRango(valor)}
-              theme={theme}
-              onThemeChange={changeTheme}
+              portfolios={performance.portfolios}
             />
           )}
           {view === "audiencias" && (
@@ -833,6 +816,12 @@ function AppSidebar({
         </div>
         <a
           href={signOutPath}
+          onClick={() => {
+            // Para que la próxima persona que entre en esta misma pestaña
+            // (u otra sesión) vuelva a pasar por la puerta de cliente, en
+            // vez de heredar en silencio la marca de que "ya se eligió".
+            window.sessionStorage.removeItem(PUERTA_CLIENTE_STORAGE_KEY);
+          }}
           className="w-fit rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-danger"
         >
           Cerrar sesion

@@ -14,7 +14,6 @@ export type ViewKey =
   | "builder"
   | "clients"
   | "historial"
-  | "settings"
   | "audiencias";
 
 export type Severity = "critical" | "high" | "medium" | "info";
