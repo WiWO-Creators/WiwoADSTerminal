@@ -578,15 +578,12 @@ export default function WiwoDashboard({
               modulos={modulosDeInicio(initialSnapshot.user.role)}
               onNavigate={setView}
               onOpenIntegrations={() => setView("integrations")}
-              puedeVerResumen={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
-              }
             />
           )}
           {view === "health" && (
             <HealthView
               client={clienteSeleccionado}
-              portfolios={performance.portfolios}
+              performance={performance}
               onOpenIntegrations={() => setView("integrations")}
               checks={healthChecks}
               okCount={healthOk}
@@ -594,6 +591,9 @@ export default function WiwoDashboard({
               score={healthScore}
               critical={healthCritical}
               warnings={healthWarnings}
+              puedeVerResumen={
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+              }
             />
           )}
           {view === "clients" && (

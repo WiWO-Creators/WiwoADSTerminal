@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  CircleDollarSign,
   HeartPulse,
   LockKeyhole,
   RefreshCw,
@@ -21,7 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { PortfolioSummary } from "@/lib/portafolios";
 import { cn } from "@/lib/utils";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
@@ -53,7 +53,6 @@ export function ControlRoomView({
   modulos,
   onNavigate,
   onOpenIntegrations,
-  puedeVerResumen,
 }: {
   /** Primer nombre de quien entró, para el saludo. */
   nombre: string;
@@ -62,8 +61,6 @@ export function ControlRoomView({
   modulos: ModuloInicio[];
   onNavigate: (key: ViewKey) => void;
   onOpenIntegrations: () => void;
-  /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
-  puedeVerResumen: boolean;
 }) {
   const hasLiveData = performance.accountsWithData > 0;
   const isCurrent = performance.mode === "live";
@@ -104,8 +101,6 @@ export function ControlRoomView({
           </Button>
         )}
       </div>
-
-      <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
 
       <nav aria-label="Módulos">
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -168,7 +163,7 @@ function TarjetaDeModulo({
 
 export function HealthView({
   client,
-  portfolios,
+  performance,
   onOpenIntegrations,
   checks,
   score,
@@ -176,6 +171,7 @@ export function HealthView({
   totalCount,
   critical,
   warnings,
+  puedeVerResumen,
 }: {
   /**
    * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
@@ -183,7 +179,7 @@ export function HealthView({
    * repetir la misma elección en dos lugares que podían desincronizarse.
    */
   client: string | null;
-  portfolios: PortfolioSummary[];
+  performance: PerformanceSnapshot;
   onOpenIntegrations: () => void;
   checks: HealthCheck[];
   score: number;
@@ -191,12 +187,17 @@ export function HealthView({
   totalCount: number;
   critical: number;
   warnings: number;
+  /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
+  puedeVerResumen: boolean;
 }) {
+  const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
+  const monthLabel = etiquetaPeriodo(performance);
 
   // Sin cliente elegido no hay nada que medir: antes el selector arrancaba
   // solo en una de sus cuentas de Windsor, elegida al azar, sin decir a qué
-  // cliente pertenecía ni qué pasaba con sus otras cuentas.
+  // cliente pertenecía ni qué pasaba con sus otras cuentas. El resumen de la
+  // cartera completa no depende de elegir uno, así que se muestra igual.
   if (!portfolio) {
     return (
       <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
@@ -213,7 +214,7 @@ export function HealthView({
             lectura sigue autorizada y si los datos llegaron al día.
           </p>
         </div>
-        <Surface className="flex flex-col items-center gap-2 p-10 text-center">
+        <Surface className="mb-6 flex flex-col items-center gap-2 p-10 text-center">
           <p className="text-sm leading-6 text-foreground/60">
             Usa el selector de cliente de la barra superior para elegir a
             quién revisar.
@@ -224,6 +225,7 @@ export function HealthView({
             </p>
           )}
         </Surface>
+        <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
       </div>
     );
   }
@@ -263,9 +265,45 @@ export function HealthView({
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
         <p className="text-xs leading-5 text-foreground/60">
           Este sistema no ejecuta cambios automáticos en ninguna cuenta: crear,
-          pausar o activar algo siempre pasa primero por Decisiones, con
-          aprobación explícita.
+          pausar o activar algo siempre lo confirma una persona — desde el
+          Constructor, el botón de una campaña o una propuesta del asistente.
         </p>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <StatCard
+          label={`Inversión · ${monthLabel}`}
+          value={
+            portfolio.currencyTotals.length === 0
+              ? "—"
+              : portfolio.currencyTotals
+                  .map((t) => formatCurrency(t.spendMicros, t.currency))
+                  .join(" · ")
+          }
+          note={
+            portfolio.accountsWithData > 0
+              ? `${portfolio.accountsWithData} de ${portfolio.accountCount} cuentas con datos`
+              : "Sin datos en el periodo"
+          }
+          icon={CircleDollarSign}
+        />
+        <StatCard
+          label={`Clics · ${monthLabel}`}
+          value={portfolio.clicks === null ? "—" : formatInteger(portfolio.clicks)}
+          note={
+            portfolio.impressions === null
+              ? "Sin lectura disponible"
+              : `${formatInteger(portfolio.impressions)} impresiones`
+          }
+          icon={Activity}
+        />
+        <StatCard
+          label={`Resultados · ${monthLabel}`}
+          value={portfolio.conversions === null ? "—" : formatConversiones(portfolio.conversions)}
+          note="Conversiones reportadas por la plataforma"
+          icon={HeartPulse}
+          tone="cyan"
+        />
       </div>
 
       {critical > 0 && (
@@ -438,6 +476,10 @@ export function HealthView({
           </TableBody>
         </Table>
       </Surface>
+
+      <div className="mt-6">
+        <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
+      </div>
     </div>
   );
 }
@@ -456,6 +498,30 @@ function etiquetaPeriodo(performance: PerformanceSnapshot): string {
     return formatMonth(performance.rangeEnd);
   }
   return performance.rango.label;
+}
+
+function formatCurrency(valorMicros: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(valorMicros / 1_000_000);
+  } catch {
+    return `${currency} ${Math.round(valorMicros / 1_000_000).toLocaleString("es-CL")}`;
+  }
+}
+
+function formatInteger(valor: number): string {
+  return valor.toLocaleString("es-CL");
+}
+
+/** Las conversiones pueden venir fraccionadas (atribución repartida entre
+ * varios puntos de contacto) — "12.9983" se lee como un error, no precisión. */
+function formatConversiones(valor: number): string {
+  return valor % 1 === 0
+    ? formatInteger(valor)
+    : valor.toLocaleString("es-CL", { maximumFractionDigits: 1 });
 }
 
 function formatMonth(value: string): string {
