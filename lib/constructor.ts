@@ -649,6 +649,17 @@ export function validateDraft(
   if (draft.platforms.includes("google") && !url) {
     add("landingUrl", "Google Ads exige una URL de destino");
   }
+  // Meta no la exige cuando el destino de conversión es mensajes (no hay
+  // sitio al que llevar), pero con un destino de sitio web publicar sin
+  // link crea un anuncio sin URL — antes esto pasaba la validación y
+  // solo se notaba al fallar (o al quedar roto) ya en la plataforma.
+  if (
+    draft.platforms.includes("meta") &&
+    draft.conversionLocation !== "mensajes" &&
+    !url
+  ) {
+    add("landingUrl", "Meta Ads exige una URL de destino (o cambia el destino de conversión a mensajes)");
+  }
   if (url && !/^https?:\/\//i.test(url)) {
     add("landingUrl", "La URL debe empezar con http:// o https://");
   }
@@ -961,9 +972,17 @@ export function buildPlan(
           special_ad_categories: categoria ? [categoria] : [],
           // Meta trabaja en la unidad menor: 5000 = 50,00.
           ...(conCBO
-            ? draft.budgetMode === "total"
-              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
-              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+            ? {
+                ...(draft.budgetMode === "total"
+                  ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+                  : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
+                // El presupuesto vive en la campaña (CBO), así que la puja
+                // también va acá. "Sin límite" es el default real de Meta
+                // Ads Manager — no pide bid_amount, a diferencia de "con
+                // límite de puja" o "costo objetivo", que sí lo exigen y que
+                // nadie puede inventar sin conocer la cuenta.
+                bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+              }
             : // Sin presupuesto de campaña, Windsor avisa que algunas cuentas
               // exigen declarar esto explícito: que el gasto NO se comparte
               // entre conjuntos, porque cada uno trae el suyo propio.
@@ -1062,11 +1081,18 @@ export function buildPlan(
           // así — "omit both only when the campaign uses campaign budget
           // optimization" — y ponerlos igual haría que Meta rechace la
           // creación por tener presupuesto declarado en dos niveles a la vez.
+          // La puja sigue al presupuesto: sin CBO, el conjunto es quien
+          // gasta, así que `bid_strategy` va acá (ver la nota igual en
+          // `create_campaign` sobre por qué "sin límite" y no un monto
+          // inventado).
           ...(conCBO
             ? {}
-            : draft.budgetMode === "total"
-              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
-              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
+            : {
+                ...(draft.budgetMode === "total"
+                  ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+                  : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
+                bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+              }),
           // ON_POST + POST_ENGAGEMENT: la forma simple de boostear que Meta
           // documenta sin exigir un botón de acción.
           ...(boosteando
@@ -1175,6 +1201,48 @@ export function buildPlan(
     budget: recommendBudget(portfolio, principal, snapshot),
     steps,
     simulation: true,
+  };
+}
+
+/**
+ * Solo la campaña de Meta, sin conjunto ni anuncio — el cascarón vacío que el
+ * asistente de IA puede crear de verdad (ver `crear_campana_real` en
+ * `lib/asistente.ts`), a diferencia de la campaña + conjunto + anuncio
+ * completos que sí puede armar para Google. Meta exige un presupuesto real (o
+ * el de la campaña, con Advantage Campaign Budget) para crear un conjunto, y
+ * un texto y una pieza real para el anuncio — nada de eso lo puede inventar
+ * la IA, así que ninguna de las dos cosas se crea acá. Deliberadamente NO
+ * reutiliza `buildPlan`: esa función valida también el anuncio (mensaje,
+ * imagen/video), que no aplica a un cascarón sin conjunto ni anuncio, y
+ * filtrar esos errores a mano tras el hecho es más fácil de romper por
+ * accidente que tener esta versión mínima aparte. Si la forma real de
+ * `create_campaign` para Meta cambia en `buildPlan`, hay que replicar el
+ * cambio acá también.
+ *
+ * Nace sin presupuesto propio (`is_adset_budget_sharing_enabled: false`,
+ * igual que cuando el borrador completo NO usa presupuesto de campaña): así
+ * el "+ Conjunto" que se usa para completarla después no choca con un
+ * presupuesto ya declarado en dos niveles a la vez.
+ */
+export function buildBareMetaCampaignStep(
+  name: string,
+  objective: Objective,
+  cuenta: CuentaCliente | null,
+): PlanStep {
+  const objetivo = OBJECTIVES[objective];
+  return {
+    platform: "meta",
+    action: "create_campaign",
+    label: cuenta
+      ? `Crear campaña en ${cuenta.name} (pausada)`
+      : "Crear campaña (pausada)",
+    params: {
+      name: nombreCompuesto(objetivo.sigla, "meta", name),
+      objective: objetivo.meta,
+      special_ad_categories: [],
+      is_adset_budget_sharing_enabled: false,
+      status: "paused",
+    },
   };
 }
 

@@ -91,7 +91,10 @@ const navItems: ItemDeMenu[] = [
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
     // trae su tabla de anuncios embebida, así que es una sola entrada.
     key: "clients",
-    label: "Clientes",
+    // Singular a propósito: adentro siempre es la ficha, las cuentas y las
+    // campañas de UN cliente — la lista de arriba es solo el punto de
+    // entrada, no lo que define la pantalla.
+    label: "Cliente",
     roles: ["admin", "lead", "buyer"],
     icono: Building2,
     resumen: "Ficha de cada cliente, sus cuentas y sus anuncios en vivo.",
@@ -670,6 +673,11 @@ export default function WiwoDashboard({
         onAbrirConstructor={(portfolioId, semilla) => {
           setClienteSeleccionado(portfolioId);
           setBuilderContexto({ modo: "nueva", portfolioId, semilla });
+          setView("builder");
+        }}
+        onAgregarConjunto={(attachTo) => {
+          setClienteSeleccionado(attachTo.portfolioId);
+          setBuilderContexto({ modo: "adjuntar", attachTo });
           setView("builder");
         }}
         onCambioAplicado={() => void refreshOperationalData()}

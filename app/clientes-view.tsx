@@ -273,10 +273,10 @@ export function ClientesView({
       <div className="mb-5">
         <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
           <Building2 className="size-3 text-brand" />
-          Cartera · clientes y sus anuncios
+          Cartera · cliente y sus anuncios
         </p>
         <h2 className="neo-section-title">
-          Clientes
+          Cliente
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Usa el selector de cliente de la barra superior para abrir uno y ver

@@ -66,7 +66,7 @@ lateral tiene dos grupos:
 **Operación** (trabajo de campaña, día a día):
 | Sección | Qué hace |
 |---|---|
-| **Clientes** | Cartera de clientes, cuentas conectadas por cliente, tabla de campañas/conjuntos/anuncios con pausar/activar y gestión (ver abajo) |
+| **Cliente** | Cartera de clientes para elegir uno; adentro, ficha, cuentas conectadas y tabla de campañas/conjuntos/anuncios de ese cliente, con pausar/activar y gestión (ver abajo) |
 | **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
 | **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios) |
 | **Dashboard C-Level** | Lectura ejecutiva: inversión, resultados, estado de cartera y calidad del dato |

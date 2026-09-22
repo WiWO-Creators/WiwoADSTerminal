@@ -16,6 +16,7 @@ import type { Propuesta } from "@/lib/asistente";
 import { OBJECTIVES, type SemillaDeCampana } from "@/lib/constructor";
 import { PAISES_SEGMENTABLES } from "@/lib/geo";
 import { cn } from "@/lib/utils";
+import type { AttachToCampana } from "./anuncios-view";
 import { ThinkingOrb } from "./ui";
 
 type EstadoDePropuesta = "pendiente" | "aplicando" | "aplicada" | "descartada" | "error";
@@ -60,9 +61,13 @@ function conNegritas(texto: string): React.ReactNode[] {
 /**
  * El asistente de IA: un orbe flotante que abre un chat con Claude.
  *
- * Lee campañas y analiza CSV por su cuenta, pero nunca escribe en una
- * plataforma: sus cambios llegan como tarjetas con un botón, y la persona
- * decide (ver `lib/asistente.ts`).
+ * Lee campañas y analiza CSV por su cuenta. Para pausar o activar algo que ya
+ * existe, o para una campaña nueva que todavía necesita completarse a mano,
+ * nunca escribe directo: deja una tarjeta con un botón y la persona decide.
+ * Solo tiene una excepción real, acotada: puede crear de verdad una campaña
+ * nueva pausada cuando ya juntó en la conversación todo lo que hace falta —
+ * ver `crear_campana_real` en `lib/asistente.ts`. Nace pausada siempre; nada
+ * de esto puede gastar sin que alguien la active después en la plataforma.
  */
 export function AsistenteFlotante({
   clienteId,
@@ -70,6 +75,7 @@ export function AsistenteFlotante({
   rango,
   puedeAprobar,
   onAbrirConstructor,
+  onAgregarConjunto,
   onCambioAplicado,
 }: {
   clienteId: string | null;
@@ -77,6 +83,10 @@ export function AsistenteFlotante({
   rango: string;
   puedeAprobar: boolean;
   onAbrirConstructor: (portfolioId: string, semilla: SemillaDeCampana) => void;
+  /** Campaña de Meta que la IA ya creó de verdad, pausada, y a la que le
+   * falta el conjunto de anuncios — mismo camino que el botón "+ Conjunto" de
+   * Clientes. */
+  onAgregarConjunto: (attachTo: AttachToCampana) => void;
   onCambioAplicado: () => void;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -353,6 +363,11 @@ export function AsistenteFlotante({
                         targetCountries: p.paises,
                       });
                     }}
+                    onAgregarConjunto={() => {
+                      if (p.tipo !== "campana_creada" || !p.metaPendiente) return;
+                      setAbierto(false);
+                      onAgregarConjunto(p.metaPendiente);
+                    }}
                   />
                 ))}
               </div>
@@ -474,12 +489,14 @@ function TarjetaDePropuesta({
   onAplicar,
   onDescartar,
   onAbrirConstructor,
+  onAgregarConjunto,
 }: {
   propuesta: PropuestaEnPantalla;
   puedeAprobar: boolean;
   onAplicar: () => void;
   onDescartar: () => void;
   onAbrirConstructor: () => void;
+  onAgregarConjunto: () => void;
 }) {
   if (propuesta.tipo === "constructor") {
     const paisesLabel = propuesta.paises
@@ -519,6 +536,44 @@ function TarjetaDePropuesta({
           Abrir en el Constructor
           <ArrowRight className="size-3.5" />
         </button>
+      </div>
+    );
+  }
+
+  if (propuesta.tipo === "campana_creada") {
+    return (
+      <div className="w-full rounded-xl border border-border bg-card p-3">
+        <p className="font-micro text-[0.6rem] text-muted-foreground">
+          Campaña creada · {propuesta.clienteNombre}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {propuesta.nombreCampana}
+        </p>
+        <ul className="mt-2 space-y-1.5">
+          {propuesta.resultados.map((r) => (
+            <li key={r.plataforma} className="flex items-start gap-1.5 text-xs leading-5">
+              <span
+                className={cn(
+                  "mt-0.5 shrink-0 rounded-full px-2 py-0.5 font-semibold",
+                  r.ok ? "bg-ok/10 text-ok" : "bg-danger/10 text-danger",
+                )}
+              >
+                {r.plataforma === "google" ? "Google Ads" : "Meta Ads"}
+              </span>
+              <span className="text-muted-foreground">{r.detalle}</span>
+            </li>
+          ))}
+        </ul>
+        {propuesta.metaPendiente && (
+          <button
+            type="button"
+            onClick={onAgregarConjunto}
+            className="mt-3 flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground"
+          >
+            Completar el conjunto en el Constructor
+            <ArrowRight className="size-3.5" />
+          </button>
+        )}
       </div>
     );
   }
