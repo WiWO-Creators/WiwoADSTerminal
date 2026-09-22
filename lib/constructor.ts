@@ -1081,18 +1081,21 @@ export function buildPlan(
           // así — "omit both only when the campaign uses campaign budget
           // optimization" — y ponerlos igual haría que Meta rechace la
           // creación por tener presupuesto declarado en dos niveles a la vez.
-          // La puja sigue al presupuesto: sin CBO, el conjunto es quien
-          // gasta, así que `bid_strategy` va acá (ver la nota igual en
-          // `create_campaign` sobre por qué "sin límite" y no un monto
-          // inventado).
+          //
+          // Sin CBO no hay forma de fijar la puja acá: el esquema real de
+          // `create_adset` en Windsor (`list_actions`, verificado) no tiene
+          // `bid_strategy` — solo `bid_amount`, un monto que nadie puede
+          // inventar. Un primer intento lo agregó igual y Windsor lo rechazó
+          // de plano ("Extra inputs are not permitted"). Con metaBudgetLevel
+          // "conjunto" queda expuesto al default de puja de la cuenta, el
+          // mismo problema original si ese default exige bid_amount — sin
+          // otra acción de Windsor que lo permita, no hay arreglo real acá
+          // todavía.
           ...(conCBO
             ? {}
-            : {
-                ...(draft.budgetMode === "total"
-                  ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
-                  : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
-                bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-              }),
+            : draft.budgetMode === "total"
+              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
           // ON_POST + POST_ENGAGEMENT: la forma simple de boostear que Meta
           // documenta sin exigir un botón de acción.
           ...(boosteando
