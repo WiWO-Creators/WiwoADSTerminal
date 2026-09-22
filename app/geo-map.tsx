@@ -14,7 +14,7 @@ import {
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
 
-import { MapPinned, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -241,23 +241,22 @@ function GeoMap({
 }
 
 /**
- * Buscador + lista de elegidos, para países — como "Lugares" en Meta Ads
- * Manager: nunca se muestran los 219 países de un saque (eran ilegibles y
- * no dejaban ver qué ya estaba marcado), solo aparece una lista corta al
- * escribir, y lo que se toca pasa a una lista de chips abajo, con su propia
- * cruz para sacarlo. Compartido entre "Por país" y "Excluir" (una instancia
- * de cada uno, con su propia búsqueda) porque las dos son exactamente este
- * mismo patrón, solo con destino distinto.
+ * Solo el buscador y sus resultados — como "Lugares" en Meta Ads Manager:
+ * nunca se muestran los 219 países de un saque, solo una lista corta al
+ * escribir. Lo ya elegido NO se repite acá: vive en un único resumen
+ * siempre visible (`ResumenDeSegmentacion`, más abajo), no uno por pestaña
+ * — antes cada pestaña tenía su propia lista de chips, así que un radio
+ * marcado en "Por radio" desaparecía de la vista al pasar a "Por país",
+ * aunque siguiera activo (se veía en el mapa, pero en ningún listado).
+ * Compartido entre "Por país" y "Excluir", cada uno con su propia búsqueda.
  */
 function SelectorDePaises({
   seleccionados,
   onToggle,
-  colorActivo,
   placeholder,
 }: {
   seleccionados: string[];
   onToggle: (iso2: string) => void;
-  colorActivo: "brand" | "danger";
   placeholder: string;
 }) {
   const [busqueda, setBusqueda] = useState("");
@@ -269,9 +268,6 @@ function SelectorDePaises({
           pais.label.toLowerCase().includes(texto),
       ).slice(0, 8)
     : [];
-  const elegidos = PAISES_SEGMENTABLES.filter((pais) =>
-    seleccionados.includes(pais.iso2),
-  );
 
   return (
     <div className="space-y-2">
@@ -308,32 +304,98 @@ function SelectorDePaises({
           )}
         </div>
       )}
+    </div>
+  );
+}
 
-      {elegidos.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {elegidos.map((pais) => (
-            <span
-              key={pais.iso2}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium",
-                colorActivo === "danger"
-                  ? "border-red-500/40 bg-red-500/15 text-red-400"
-                  : "border-brand/40 bg-brand/15 text-brand",
-              )}
-            >
-              {pais.label}
-              <button
-                type="button"
-                onClick={() => onToggle(pais.iso2)}
-                aria-label={`Quitar ${pais.label}`}
-                className="rounded-full opacity-70 transition-opacity hover:opacity-100"
-              >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
-        </div>
+/** Un chip removible del resumen — mismo look en las tres capas, solo cambia el color. */
+function ChipDeSegmentacion({
+  label,
+  color,
+  onQuitar,
+}: {
+  label: string;
+  color: "brand" | "danger";
+  onQuitar: () => void;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium",
+        color === "danger"
+          ? "border-red-500/40 bg-red-500/15 text-red-400"
+          : "border-brand/40 bg-brand/15 text-brand",
       )}
+    >
+      {label}
+      <button
+        type="button"
+        onClick={onQuitar}
+        aria-label={`Quitar ${label}`}
+        className="rounded-full opacity-70 transition-opacity hover:opacity-100"
+      >
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
+
+/**
+ * Todo lo que hoy segmenta esta campaña, en un solo lugar — países
+ * incluidos, excluidos y el círculo por radio juntos, sin importar qué
+ * pestaña está abierta. Antes cada capa solo se veía dentro de su propia
+ * pestaña: marcar un radio y después pasar a "Por país" lo dejaba activo
+ * (se seguía viendo en el mapa) pero invisible en cualquier lista, como si
+ * se hubiera perdido.
+ */
+function ResumenDeSegmentacion({
+  targetCountries,
+  onQuitarPais,
+  excludedCountries,
+  onQuitarExcluido,
+  geoRadius,
+  onQuitarRadio,
+}: {
+  targetCountries: string[];
+  onQuitarPais: (iso2: string) => void;
+  excludedCountries: string[];
+  onQuitarExcluido: (iso2: string) => void;
+  geoRadius: GeoRadio | null;
+  onQuitarRadio: () => void;
+}) {
+  const incluidos = PAISES_SEGMENTABLES.filter((pais) =>
+    targetCountries.includes(pais.iso2),
+  );
+  const excluidos = PAISES_SEGMENTABLES.filter((pais) =>
+    excludedCountries.includes(pais.iso2),
+  );
+  if (incluidos.length === 0 && excluidos.length === 0 && !geoRadius) return null;
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {incluidos.map((pais) => (
+        <ChipDeSegmentacion
+          key={pais.iso2}
+          label={pais.label}
+          color="brand"
+          onQuitar={() => onQuitarPais(pais.iso2)}
+        />
+      ))}
+      {geoRadius && (
+        <ChipDeSegmentacion
+          label={`(${geoRadius.lat.toFixed(4)}, ${geoRadius.lng.toFixed(4)}) + ${geoRadius.radiusKm} km`}
+          color="brand"
+          onQuitar={onQuitarRadio}
+        />
+      )}
+      {excluidos.map((pais) => (
+        <ChipDeSegmentacion
+          key={pais.iso2}
+          label={`Excluye ${pais.label}`}
+          color="danger"
+          onQuitar={() => onQuitarExcluido(pais.iso2)}
+        />
+      ))}
     </div>
   );
 }
@@ -410,6 +472,15 @@ export function SegmentacionGeografica({
         ))}
       </div>
 
+      <ResumenDeSegmentacion
+        targetCountries={targetCountries}
+        onQuitarPais={alternarPais}
+        excludedCountries={excludedCountries}
+        onQuitarExcluido={alternarExcluido}
+        geoRadius={geoRadius}
+        onQuitarRadio={() => onGeoRadiusChange(null)}
+      />
+
       <GeoMap
         modo={modo}
         paisesSeleccionados={targetCountries}
@@ -429,7 +500,6 @@ export function SegmentacionGeografica({
           <SelectorDePaises
             seleccionados={targetCountries}
             onToggle={alternarPais}
-            colorActivo="brand"
             placeholder="Buscar país…"
           />
           <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
@@ -450,7 +520,6 @@ export function SegmentacionGeografica({
           <SelectorDePaises
             seleccionados={excludedCountries}
             onToggle={alternarExcluido}
-            colorActivo="danger"
             placeholder="Buscar país para excluir…"
           />
           <p className="text-[0.65rem] leading-5 text-foreground/35">
@@ -465,41 +534,33 @@ export function SegmentacionGeografica({
       {modo === "radio" && (
         <>
           {geoRadius ? (
-            <div className="space-y-2.5">
-              {/* Mismo resumen compacto que Meta Ads Manager en "Lugares":
-                  el centro exacto y el radio, de un vistazo — antes solo se
-                  veía el radio, sin las coordenadas que de verdad se envían. */}
-              <div className="flex items-center gap-2 rounded-lg border border-foreground/10 bg-field/40 px-3 py-2">
-                <MapPinned className="size-3.5 shrink-0 text-brand" />
-                <span className="metric-number text-xs text-foreground/80">
-                  ({geoRadius.lat.toFixed(4)}, {geoRadius.lng.toFixed(4)}) + {geoRadius.radiusKm} km
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="font-micro text-[0.58rem] text-foreground/45">
-                  RADIO
-                </span>
-                <Slider
-                  min={RADIO_MINIMO_KM}
-                  max={RADIO_MAXIMO_KM}
-                  step={1}
-                  value={[geoRadius.radiusKm]}
-                  onValueChange={([valor]) =>
-                    onGeoRadiusChange({ ...geoRadius, radiusKm: valor })
-                  }
-                  className="max-w-[14rem]"
-                />
-                <span className="text-xs font-semibold text-foreground">
-                  {geoRadius.radiusKm} km
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onGeoRadiusChange(null)}
-                  className="text-[0.7rem] font-semibold text-foreground/45 underline-offset-2 hover:text-danger hover:underline"
-                >
-                  Quitar círculo
-                </button>
-              </div>
+            // Las coordenadas y el radio ya se ven en el resumen de arriba
+            // (activo sin importar la pestaña); acá solo queda el control
+            // para ajustar el radio o sacar el círculo.
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-micro text-[0.58rem] text-foreground/45">
+                RADIO
+              </span>
+              <Slider
+                min={RADIO_MINIMO_KM}
+                max={RADIO_MAXIMO_KM}
+                step={1}
+                value={[geoRadius.radiusKm]}
+                onValueChange={([valor]) =>
+                  onGeoRadiusChange({ ...geoRadius, radiusKm: valor })
+                }
+                className="max-w-[14rem]"
+              />
+              <span className="text-xs font-semibold text-foreground">
+                {geoRadius.radiusKm} km
+              </span>
+              <button
+                type="button"
+                onClick={() => onGeoRadiusChange(null)}
+                className="text-[0.7rem] font-semibold text-foreground/45 underline-offset-2 hover:text-danger hover:underline"
+              >
+                Quitar círculo
+              </button>
             </div>
           ) : (
             <p className="text-xs text-foreground/45">
