@@ -14,7 +14,7 @@ import {
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
 
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -241,6 +241,104 @@ function GeoMap({
 }
 
 /**
+ * Buscador + lista de elegidos, para países — como "Lugares" en Meta Ads
+ * Manager: nunca se muestran los 219 países de un saque (eran ilegibles y
+ * no dejaban ver qué ya estaba marcado), solo aparece una lista corta al
+ * escribir, y lo que se toca pasa a una lista de chips abajo, con su propia
+ * cruz para sacarlo. Compartido entre "Por país" y "Excluir" (una instancia
+ * de cada uno, con su propia búsqueda) porque las dos son exactamente este
+ * mismo patrón, solo con destino distinto.
+ */
+function SelectorDePaises({
+  seleccionados,
+  onToggle,
+  colorActivo,
+  placeholder,
+}: {
+  seleccionados: string[];
+  onToggle: (iso2: string) => void;
+  colorActivo: "brand" | "danger";
+  placeholder: string;
+}) {
+  const [busqueda, setBusqueda] = useState("");
+  const texto = busqueda.trim().toLowerCase();
+  const resultados = texto
+    ? PAISES_SEGMENTABLES.filter(
+        (pais) =>
+          !seleccionados.includes(pais.iso2) &&
+          pais.label.toLowerCase().includes(texto),
+      ).slice(0, 8)
+    : [];
+  const elegidos = PAISES_SEGMENTABLES.filter((pais) =>
+    seleccionados.includes(pais.iso2),
+  );
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-foreground/35" />
+        <Input
+          value={busqueda}
+          onChange={(e) => setBusqueda(e.target.value)}
+          placeholder={placeholder}
+          className="h-8 border-foreground/10 bg-field/50 pl-8 text-xs"
+        />
+      </div>
+
+      {texto && (
+        <div className="scrollbar-thin max-h-52 overflow-y-auto rounded-lg border border-foreground/10 bg-field/40">
+          {resultados.length === 0 ? (
+            <p className="px-3 py-2.5 text-xs text-foreground/40">
+              Ningún país coincide con la búsqueda.
+            </p>
+          ) : (
+            resultados.map((pais) => (
+              <button
+                key={pais.iso2}
+                type="button"
+                onClick={() => {
+                  onToggle(pais.iso2);
+                  setBusqueda("");
+                }}
+                className="block w-full px-3 py-2 text-left text-xs text-foreground/75 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+              >
+                {pais.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      {elegidos.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {elegidos.map((pais) => (
+            <span
+              key={pais.iso2}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium",
+                colorActivo === "danger"
+                  ? "border-red-500/40 bg-red-500/15 text-red-400"
+                  : "border-brand/40 bg-brand/15 text-brand",
+              )}
+            >
+              {pais.label}
+              <button
+                type="button"
+                onClick={() => onToggle(pais.iso2)}
+                aria-label={`Quitar ${pais.label}`}
+                className="rounded-full opacity-70 transition-opacity hover:opacity-100"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Segmentación geográfica del conjunto de anuncios — global para las dos
  * plataformas a la vez, no una configuración aparte por cada una: el mismo
  * país o círculo elegido acá se traduce a `geo_locations.countries` /
@@ -268,10 +366,6 @@ export function SegmentacionGeografica({
 }) {
   const [modo, setModo] = useState<"paises" | "radio" | "excluir">(
     geoRadius ? "radio" : "paises",
-  );
-  const [busquedaPais, setBusquedaPais] = useState("");
-  const paisesFiltrados = PAISES_SEGMENTABLES.filter((pais) =>
-    pais.label.toLowerCase().includes(busquedaPais.trim().toLowerCase()),
   );
 
   function alternarPais(iso2: string) {
@@ -326,47 +420,18 @@ export function SegmentacionGeografica({
         onRadioChange={onGeoRadiusChange}
       />
 
-      {(modo === "paises" || modo === "excluir") && (
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-foreground/35" />
-          <Input
-            value={busquedaPais}
-            onChange={(e) => setBusquedaPais(e.target.value)}
-            placeholder="Buscar país…"
-            className="h-8 border-foreground/10 bg-field/50 pl-8 text-xs"
-          />
-        </div>
-      )}
-
       {modo === "paises" && (
         <>
           <p className="font-micro text-[0.58rem] text-foreground/45">
-            TOCA UN PAÍS EN EL MAPA O ACÁ ABAJO · VACÍO USA LOS PAÍSES YA
+            BUSCA UN PAÍS O TÓCALO EN EL MAPA · VACÍO USA LOS PAÍSES YA
             DECLARADOS EN LA CUENTA
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {paisesFiltrados.length === 0 && (
-              <p className="text-xs text-foreground/40">Ningún país coincide con la búsqueda.</p>
-            )}
-            {paisesFiltrados.map((pais) => {
-              const activo = targetCountries.includes(pais.iso2);
-              return (
-                <button
-                  key={pais.iso2}
-                  type="button"
-                  onClick={() => alternarPais(pais.iso2)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
-                    activo
-                      ? "border-brand/40 bg-brand/15 text-brand"
-                      : "border-foreground/10 bg-field/50 text-foreground/60 hover:text-foreground/85",
-                  )}
-                >
-                  {pais.label}
-                </button>
-              );
-            })}
-          </div>
+          <SelectorDePaises
+            seleccionados={targetCountries}
+            onToggle={alternarPais}
+            colorActivo="brand"
+            placeholder="Buscar país…"
+          />
           <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
             Solo aparecen los países con id de destino geográfico de Google ya
             verificado — ciudad y región todavía no, porque esas exigen
@@ -382,29 +447,12 @@ export function SegmentacionGeografica({
             ESTOS PAÍSES QUEDAN FUERA A PROPÓSITO, AUNQUE ESTÉN EN LA CUENTA O
             EN &quot;POR PAÍS&quot;
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {paisesFiltrados.length === 0 && (
-              <p className="text-xs text-foreground/40">Ningún país coincide con la búsqueda.</p>
-            )}
-            {paisesFiltrados.map((pais) => {
-              const activo = excludedCountries.includes(pais.iso2);
-              return (
-                <button
-                  key={pais.iso2}
-                  type="button"
-                  onClick={() => alternarExcluido(pais.iso2)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-[0.7rem] font-medium transition-colors",
-                    activo
-                      ? "border-red-500/40 bg-red-500/15 text-red-400"
-                      : "border-foreground/10 bg-field/50 text-foreground/60 hover:text-foreground/85",
-                  )}
-                >
-                  {pais.label}
-                </button>
-              );
-            })}
-          </div>
+          <SelectorDePaises
+            seleccionados={excludedCountries}
+            onToggle={alternarExcluido}
+            colorActivo="danger"
+            placeholder="Buscar país para excluir…"
+          />
           <p className="text-[0.65rem] leading-5 text-foreground/35">
             Útil para dejar a mano una zona de control (comparar con/sin
             anuncio) o para no entrar a un mercado que ya cubre otro equipo.
