@@ -25,6 +25,16 @@ import type { WindsorCampaign } from "@/lib/windsor";
 const AGENTE = "Motor de reglas";
 const VENCE_EN_MS = 72 * 60 * 60 * 1000;
 
+/**
+ * Umbrales compartidos con `lib/alertas.ts` (las alertas proactivas del
+ * encabezado): mismos números, dos consumidores — este archivo los persiste
+ * como decisiones a firmar; el otro los muestra en vivo con un botón real de
+ * pausar. Cambiar uno de estos valores cambia el criterio en los dos lados.
+ */
+export const UMBRAL_DESPERDICIO_X_CPA = 2;
+export const UMBRAL_DEGRADACION_X_CPA = 1.4;
+export const CONVERSIONES_MINIMAS_DEGRADACION = 3;
+
 export type CandidatoDecision = Omit<
   Decision,
   "age" | "expires" | "version" | "owner" | "autonomy" | "agent"
@@ -121,7 +131,7 @@ export function evaluarReglas(
     if (
       portfolio.targetCpaMicros !== null &&
       spend > 0 &&
-      spend >= 2 * portfolio.targetCpaMicros &&
+      spend >= UMBRAL_DESPERDICIO_X_CPA * portfolio.targetCpaMicros &&
       conversions === 0
     ) {
       candidatos.push({
@@ -152,9 +162,9 @@ export function evaluarReglas(
     // Regla 2: degradación de eficiencia — con volumen suficiente para
     // confiar en el número (3+ conversiones), el CPA real ya es 40% peor
     // que la meta.
-    if (portfolio.targetCpaMicros !== null && conversions >= 3) {
+    if (portfolio.targetCpaMicros !== null && conversions >= CONVERSIONES_MINIMAS_DEGRADACION) {
       const cpaReal = spend / conversions;
-      if (cpaReal > 1.4 * portfolio.targetCpaMicros) {
+      if (cpaReal > UMBRAL_DEGRADACION_X_CPA * portfolio.targetCpaMicros) {
         candidatos.push({
           id: `degradacion-${base}-${dia}`,
           severity: "high",

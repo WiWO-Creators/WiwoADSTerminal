@@ -74,7 +74,8 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
       properties: {
         cliente_id: {
           type: "string",
-          description: "Id de cliente de listar_clientes. Omitir para el cliente activo en pantalla o todos.",
+          description:
+            "Id de cliente de listar_clientes. Si ya hay un cliente elegido en pantalla, se ignora y se usa ese siempre.",
         },
         plataforma: { type: "string", enum: ["google", "meta"] },
         estado: { type: "string", enum: ["activas", "pausadas", "todas"] },
@@ -140,7 +141,11 @@ function sistema(ctx: ContextoDelAsistente, cliente: string | null): string {
   return `Eres el asistente de WiWO.ADS, el sistema de medios pagados de una agencia. Ayudas al equipo (buyers y leads) a entender cómo van sus campañas de Google Ads y Meta Ads, a decidir qué hacer y a prepararlo.
 
 Hoy es ${new Date().toISOString().slice(0, 10)}. Cliente activo en pantalla: ${cliente ?? "ninguno (todos)"}. Rol de quien pregunta: ${ctx.actor.role}${puedeAprobar ? "" : " (NO puede aprobar cambios: solo aconseja, no uses proponer_cambio)"}.
-
+${
+  cliente
+    ? `\nHay un cliente elegido: todo lo que digas, busques o propongas es sobre ${cliente} exclusivamente. No menciones, compares ni traigas datos de ningún otro cliente aunque los conozcas por el historial de la conversación. Si te piden mirar otro cliente, contesta que cambien el selector de cliente en la barra superior — vas a seguir viendo solo ${cliente} aunque pidas otro id.\n`
+    : ""
+}
 Cómo trabajas:
 - Cualquier cifra o id sale de una herramienta. No inventes campañas, ids ni números; si la herramienta no lo trae, dilo.
 - Cada moneda va por separado: nunca sumes CLP con USD.
@@ -193,8 +198,10 @@ async function ejecutarHerramienta(
   if (nombre === "listar_clientes") {
     return {
       periodo: `${snap.rangeStart} a ${snap.rangeEnd}`,
+      // Con un cliente elegido en pantalla, esta lista no debe darle al modelo
+      // ids de otros clientes para que después los consulte por su cuenta.
       clientes: snap.portfolios
-        .filter((p) => p.declared)
+        .filter((p) => p.declared && (!ctx.clienteId || p.id === ctx.clienteId))
         .map((p) => ({
           cliente_id: p.id,
           nombre: p.name,
@@ -207,7 +214,10 @@ async function ejecutarHerramienta(
   }
 
   if (nombre === "buscar_campanas") {
-    const clienteId = (entrada.cliente_id as string | undefined) ?? ctx.clienteId;
+    // El cliente de pantalla manda siempre: no se acepta que el modelo pida
+    // otro id mientras hay uno elegido, así nunca se filtra información de un
+    // cliente que la persona no está mirando.
+    const clienteId = ctx.clienteId ?? (entrada.cliente_id as string | undefined);
     const cuentas = clienteId
       ? new Set(
           snap.portfolios.find((p) => p.id === clienteId)?.accounts.map((a) => a.id) ?? [],
@@ -298,7 +308,14 @@ async function ejecutarHerramienta(
         c.campaignId === String(entrada.campana_id) &&
         c.accountId === String(entrada.cuenta_id),
     );
-    if (!campana?.campaignId) {
+    // Con un cliente elegido, una campaña de otro cliente se trata como si no
+    // existiera — ni siquiera se confirma que existe en otra parte.
+    const cuentasDelClienteActivo = ctx.clienteId
+      ? new Set(
+          snap.portfolios.find((p) => p.id === ctx.clienteId)?.accounts.map((a) => a.id) ?? [],
+        )
+      : null;
+    if (!campana?.campaignId || (cuentasDelClienteActivo && !cuentasDelClienteActivo.has(campana.accountKey))) {
       return {
         error: "No encontré esa campaña con esos ids. Consulta buscar_campanas y usa los ids exactos.",
       };
@@ -318,7 +335,10 @@ async function ejecutarHerramienta(
   }
 
   if (nombre === "abrir_constructor") {
-    const cliente = snap.portfolios.find((p) => p.declared && p.id === entrada.cliente_id);
+    // Igual que en buscar_campanas: el cliente de pantalla manda, no lo que
+    // pida el modelo.
+    const clienteIdPedido = ctx.clienteId ?? (entrada.cliente_id as string | undefined);
+    const cliente = snap.portfolios.find((p) => p.declared && p.id === clienteIdPedido);
     if (!cliente) {
       return { error: "Ese cliente no existe o no tienes acceso. Usa listar_clientes." };
     }

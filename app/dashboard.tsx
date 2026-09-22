@@ -73,6 +73,7 @@ import {
   DEFAULT_VIEW_STORAGE_KEY,
   SettingsView,
 } from "./settings-view";
+import { BotonDeAlertas } from "./alertas";
 import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
 import { SelectorDeFechas } from "./selector-fechas";
@@ -536,6 +537,15 @@ export default function WiwoDashboard({
         onThemeChange={changeTheme}
         onNavigate={setView}
         onBuscar={() => setPaletaAbierta(true)}
+        clienteId={clienteSeleccionado}
+        clienteNombre={
+          performance.portfolios.find((item) => item.id === clienteSeleccionado)?.name ?? null
+        }
+        rango={rango}
+        puedeAprobar={
+          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+        }
+        onCambioAplicado={() => void refreshOperationalData()}
       />
       <PaletaDeComandos
         open={paletaAbierta}
@@ -702,6 +712,11 @@ function AppSidebar({
   onThemeChange,
   onNavigate,
   onBuscar,
+  clienteId,
+  clienteNombre,
+  rango,
+  puedeAprobar,
+  onCambioAplicado,
 }: {
   view: ViewKey;
   currentUser: DashboardIdentity;
@@ -710,6 +725,11 @@ function AppSidebar({
   onThemeChange: (checked: boolean) => void;
   onNavigate: (view: ViewKey) => void;
   onBuscar: () => void;
+  clienteId: string | null;
+  clienteNombre: string | null;
+  rango: string;
+  puedeAprobar: boolean;
+  onCambioAplicado: () => void;
 }) {
   function grupo(titulo: string | null, items: ItemDeMenu[]) {
     const visibles = items.filter((item) => puedeVerItem(item, currentUser.role));
@@ -772,6 +792,13 @@ function AppSidebar({
             ⌘K
           </kbd>
         </button>
+        <BotonDeAlertas
+          clienteId={clienteId}
+          clienteNombre={clienteNombre}
+          rango={rango}
+          puedeAprobar={puedeAprobar}
+          onCambioAplicado={onCambioAplicado}
+        />
       </SidebarHeader>
 
       <SidebarContent className="gap-2 py-3">
