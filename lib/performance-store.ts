@@ -18,13 +18,13 @@ import {
   type PortfolioSummary,
 } from "@/lib/portafolios";
 import { accountIndex } from "@/lib/portafolios-store";
-import { valorPorObjetivo, type ConversionBreakdown } from "@/lib/conversiones";
+import type { ConversionBreakdown } from "@/lib/conversiones";
 import {
   objetivoDeNombre,
   objetivoDePlataforma,
-  OBJETIVO_LABELS,
-  RESULTADO_POR_OBJETIVO,
+  summarizeObjectives,
   type Objetivo,
+  type ObjectiveTotal,
 } from "@/lib/objetivos";
 import {
   fetchGoogleConversionBreakdown,
@@ -108,24 +108,7 @@ export type CampaignSummary = WindsorCampaign & {
   conversionBreakdown: ConversionBreakdown | null;
 };
 
-/**
- * Totales de una familia de objetivo.
- *
- * Cada objetivo se mide con su propia métrica: en awareness la interacción, en
- * leads el formulario, en ventas la compra. Reportar una sola cifra de
- * "resultados" para todos mezcla cosas que no se comparan entre sí.
- */
-export type ObjectiveTotal = {
-  objetivo: Objetivo;
-  label: string;
-  resultLabel: string;
-  campaigns: number;
-  currencyTotals: CurrencyTotal[];
-  impressions: number;
-  clicks: number;
-  /** La métrica propia del objetivo. null: no se mide con conversiones. */
-  result: number | null;
-};
+export type { ObjectiveTotal };
 
 /** Fila de anuncio con su cuenta resuelta, para filtrar por portafolio. */
 export type AdSummary = WindsorAd & {
@@ -672,77 +655,3 @@ function allowedAccounts(
   );
 }
 
-/**
- * Agrupa las campañas por objetivo y calcula el resultado propio de cada uno.
- *
- * Meta reporta la métrica directamente; Google la obtiene de las categorías de
- * conversión que corresponden a ese objetivo. Las campañas sin sigla quedan
- * fuera: clasificarlas a ciegas las pondría en la familia equivocada.
- */
-function summarizeObjectives(campaigns: CampaignSummary[]): ObjectiveTotal[] {
-  const grupos = new Map<Objetivo, CampaignSummary[]>();
-  for (const campaign of campaigns) {
-    if (!campaign.objetivo) continue;
-    // Las campañas que existen pero no entregaron en el rango quedan fuera de
-    // este resumen: es el resumen del periodo. Contarlas diría "12 campañas de
-    // ventas" cuando solo dos estuvieron al aire. En la tabla sí aparecen.
-    if (!campaign.conActividad) continue;
-    grupos.set(campaign.objetivo, [
-      ...(grupos.get(campaign.objetivo) ?? []),
-      campaign,
-    ]);
-  }
-
-  return [...grupos.entries()]
-    .map(([objetivo, items]) => {
-      const totals = new Map<string, CurrencyTotal>();
-      for (const item of items) {
-        const currency = item.currency ?? "N/D";
-        const actual = totals.get(currency) ?? {
-          currency,
-          spendMicros: 0,
-          conversionValueMicros: null,
-        };
-        actual.spendMicros += item.spendMicros;
-        totals.set(currency, actual);
-      }
-
-      let result: number | null = null;
-      for (const item of items) {
-        const valor =
-          item.provider === "google"
-            ? valorPorObjetivo(item.conversionBreakdown, objetivo)
-            : metaResult(item, objetivo);
-        if (valor === null) continue;
-        result = (result ?? 0) + valor;
-      }
-
-      return {
-        objetivo,
-        label: OBJETIVO_LABELS[objetivo],
-        resultLabel: RESULTADO_POR_OBJETIVO[objetivo],
-        campaigns: items.length,
-        currencyTotals: [...totals.values()].sort((a, b) =>
-          a.currency.localeCompare(b.currency),
-        ),
-        impressions: items.reduce((sum, i) => sum + i.impressions, 0),
-        clicks: items.reduce((sum, i) => sum + i.clicks, 0),
-        result: result === null ? null : Math.round(result * 100) / 100,
-      };
-    })
-    .sort((a, b) => b.campaigns - a.campaigns);
-}
-
-/** La métrica que Meta usa como resultado en cada familia. */
-function metaResult(
-  campaign: CampaignSummary,
-  objetivo: Objetivo,
-): number | null {
-  if (objetivo === "AE") return campaign.engagement;
-  if (objetivo === "TRF") return campaign.linkClicks;
-  if (objetivo === "LDS") return campaign.leads;
-  if (objetivo === "VTA") return campaign.purchases;
-  // Otras conversiones: Meta las reporta como conversaciones iniciadas, un
-  // campo que solo viene en el corte diario, no en el de campaña.
-  return null;
-}

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { summarizeObjectives } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
@@ -249,6 +250,14 @@ export function ClientesView({
   const seleccionadoObj = portfolios.find((p) => p.id === seleccionado) ?? null;
   const performanceDelSeleccionado =
     performance.portfolios.find((p) => p.id === seleccionado) ?? null;
+  const cuentasDelSeleccionado = new Set(
+    performanceDelSeleccionado?.accounts.map((a) => a.id) ?? [],
+  );
+  const objetivosDelSeleccionado = performanceDelSeleccionado
+    ? summarizeObjectives(
+        performance.campaigns.filter((c) => cuentasDelSeleccionado.has(c.accountKey)),
+      )
+    : [];
   const pendientes = portfolios.filter((p) => faltantesDe(p).lista.length > 0);
   const porRevisar = portfolios.filter((p) => p.needsReview);
 
@@ -440,6 +449,7 @@ export function ClientesView({
             hasta: performance.rangeEnd,
             enCurso: performance.rango.enCurso,
           }}
+          objetivos={objetivosDelSeleccionado}
         />
       )}
 

@@ -23,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { summarizeObjectives, type ObjectiveTotal } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
 import { TarjetaResumenCliente } from "./resumen-cliente";
@@ -184,6 +185,16 @@ export function HealthView({
   const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
   const monthLabel = etiquetaPeriodo(performance);
+  // Resultado de "Resultados" mezclando ventas, leads y awareness en una
+  // sola cifra: cada objetivo se mide con su propia métrica (ver
+  // `summarizeObjectives`), así que acá se recalcula solo con las campañas
+  // de este cliente — `byObjective` en el snapshot es de toda la cartera.
+  const cuentasDelCliente = new Set(portfolio?.accounts.map((a) => a.id) ?? []);
+  const objetivosDelCliente = portfolio
+    ? summarizeObjectives(
+        performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)),
+      )
+    : [];
 
   // Sin cliente elegido no hay nada que medir: antes el selector arrancaba
   // solo en una de sus cuentas de Windsor, elegida al azar, sin decir a qué
@@ -273,13 +284,7 @@ export function HealthView({
           }
           icon={Activity}
         />
-        <StatCard
-          label={`Resultados · ${monthLabel}`}
-          value={portfolio.conversions === null ? "—" : formatConversiones(portfolio.conversions)}
-          note="Conversiones reportadas por la plataforma"
-          icon={HeartPulse}
-          tone="cyan"
-        />
+        <TarjetaResultadosPorObjetivo objetivos={objetivosDelCliente} monthLabel={monthLabel} />
       </div>
 
       {critical > 0 && (
@@ -367,6 +372,7 @@ export function HealthView({
           hasta: performance.rangeEnd,
           enCurso: performance.rango.enCurso,
         }}
+        objetivos={objetivosDelCliente}
       />
 
       <Surface className="overflow-hidden">
@@ -471,6 +477,59 @@ export function HealthView({
         </Table>
       </Surface>
     </div>
+  );
+}
+
+/**
+ * Reemplaza la tarjeta genérica de "Resultados": una sola cifra mezclando
+ * ventas, leads, tráfico y awareness no dice nada, porque cada objetivo se
+ * mide con una métrica distinta (una compra no es un clic). Una fila por
+ * objetivo que el cliente de verdad corrió en el rango — el que no tuvo
+ * campañas activas simplemente no aparece, no hace falta un caso especial
+ * para ocultarlo.
+ */
+function TarjetaResultadosPorObjetivo({
+  objetivos,
+  monthLabel,
+}: {
+  objetivos: ObjectiveTotal[];
+  monthLabel: string;
+}) {
+  if (objetivos.length === 0) {
+    return (
+      <StatCard
+        label={`Resultados · ${monthLabel}`}
+        value="—"
+        note="Sin campañas con sigla de objetivo activas en el rango"
+        icon={HeartPulse}
+        tone="cyan"
+      />
+    );
+  }
+  return (
+    <Surface className="neo-card-accent p-5">
+      <p className="font-micro text-[0.62rem] text-foreground/45">
+        RESULTADOS POR OBJETIVO · {monthLabel.toUpperCase()}
+      </p>
+      <div className="mt-3 space-y-2.5">
+        {objetivos.map((obj) => (
+          <div
+            key={obj.objetivo}
+            className="flex items-center justify-between gap-3"
+          >
+            <span className="min-w-0 truncate text-xs font-semibold text-foreground/70">
+              {obj.label}
+            </span>
+            <span className="metric-number shrink-0 text-sm font-extrabold text-foreground">
+              {obj.result === null ? "—" : formatConversiones(obj.result)}
+              <span className="ml-1.5 text-[0.62rem] font-normal text-foreground/40">
+                {obj.resultLabel.toLowerCase()}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Surface>
   );
 }
 

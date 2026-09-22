@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, TrendingUp } from "lucide-react";
 
 import type { Alerta, Severidad } from "@/lib/alertas";
+import type { ObjectiveTotal } from "@/lib/objetivos";
 import type { PortfolioSummary } from "@/lib/portafolios";
 import { Surface } from "./ui";
 
@@ -37,9 +38,14 @@ function entero(valor: number): string {
 export function TarjetaResumenCliente({
   portfolio,
   periodo,
+  objetivos,
 }: {
   portfolio: PortfolioSummary;
   periodo: { desde: string; hasta: string; enCurso: boolean };
+  /** Resultado propio de cada objetivo que este cliente corrió en el
+   * periodo — ver la nota en `TarjetaResultadosPorObjetivo`, mismo motivo:
+   * una sola cifra de "resultados" mezcla compras, leads y awareness. */
+  objetivos: ObjectiveTotal[];
 }) {
   const [alertas, setAlertas] = useState<Alerta[] | null>(null);
 
@@ -114,11 +120,24 @@ export function TarjetaResumenCliente({
             {portfolio.clicks === null ? "—" : entero(portfolio.clicks)}{" "}
             <span className="text-sm font-normal text-muted-foreground">clics</span>
           </p>
-          <p className="metric-number text-sm text-muted-foreground">
-            {portfolio.conversions === null
-              ? "Sin resultados en el rango"
-              : `${entero(portfolio.conversions)} resultados`}
-          </p>
+          {objetivos.length === 0 ? (
+            <p className="metric-number text-sm text-muted-foreground">
+              Sin resultados en el rango
+            </p>
+          ) : (
+            <div className="mt-0.5 space-y-0.5">
+              {objetivos.map((obj) => (
+                <p
+                  key={obj.objetivo}
+                  className="metric-number text-sm text-muted-foreground"
+                >
+                  {obj.result === null ? "—" : entero(obj.result)}{" "}
+                  {obj.resultLabel.toLowerCase()}
+                  <span className="text-xs"> · {obj.label}</span>
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         <div>
