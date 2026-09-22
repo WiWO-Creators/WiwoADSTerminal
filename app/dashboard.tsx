@@ -950,22 +950,16 @@ function AppHeader({
               cargando={cambiandoRango}
               disabled={cambiandoRango}
             />
-            <span
-              className={cn(
-                "hidden whitespace-nowrap text-[0.68rem] font-semibold 2xl:inline",
-                cambiandoRango ? "text-brand" : "text-muted-foreground",
-              )}
-            >
-              {cambiandoRango ? (
-                "Leyendo Windsor…"
-              ) : (
-                <>
-                  {performance.rangeStart} a {performance.rangeEnd}
-                  {/* Un periodo abierto se marca: compararlo con uno cerrado y leer una caída es el error clásico. */}
-                  {performance.rango?.enCurso ? " · en curso" : ""}
-                </>
-              )}
-            </span>
+            {/* El botón ya muestra el rango elegido (con su propio ícono de
+                carga mientras cambia) — acá solo se agrega lo que ese botón
+                no dice: que el periodo sigue abierto. Un periodo abierto se
+                marca porque compararlo con uno cerrado y leer una caída es
+                el error clásico. */}
+            {!cambiandoRango && performance.rango?.enCurso && (
+              <span className="hidden whitespace-nowrap text-[0.68rem] font-semibold text-muted-foreground 2xl:inline">
+                En curso
+              </span>
+            )}
           </div>
         )}
         {puedeActualizar && (

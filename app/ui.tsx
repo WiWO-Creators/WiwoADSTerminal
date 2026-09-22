@@ -34,7 +34,7 @@ export type OrbState =
 const ORB_STATE_LABEL: Record<OrbState, string> = {
   idle: "En espera",
   listening: "Escuchando",
-  thinking: "Pensando",
+  thinking: "Cargando",
   generating: "Generando",
   routing: "Coordinando",
   success: "Listo",

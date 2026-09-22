@@ -376,7 +376,7 @@ export function AsistenteFlotante({
             {(esperandoTexto || herramienta) && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <ThinkingOrb size="sm" state="generating" label="" />
-                {herramienta ?? "Pensando…"}
+                {herramienta ?? "Un momento…"}
               </div>
             )}
             {errorDeCarga && (
