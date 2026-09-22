@@ -230,6 +230,11 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       // que permite encontrar los anuncios de mensajería de un vistazo.
       // Verificado contra get_fields de Windsor, tabla "Ad".
       "call_to_action_type",
+      // Miniatura real de la pieza. Verificado contra get_fields (tabla "Ad")
+      // y contra datos reales de una cuenta activa: viene poblada de forma
+      // consistente, a diferencia de `link_url` (el destino), que llega
+      // vacío incluso en anuncios sin botón de mensajería.
+      "thumbnail_url",
     ],
     camposAnuncio: [
       "account_id",
@@ -243,6 +248,7 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "ad_name",
       "effective_status",
       "call_to_action_type",
+      "thumbnail_url",
       "spend",
       "impressions",
       "reach",

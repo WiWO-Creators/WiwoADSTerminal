@@ -1079,6 +1079,14 @@ export type WindsorAd = {
   purchases: number | null;
   conversions: number | null;
   /**
+   * Miniatura real de la pieza, tal como la sirve Meta (`thumbnail_url`,
+   * tabla "Ad" — verificado con `get_fields`, no es un supuesto). `null` en
+   * Google o si Windsor no la trae. A diferencia de `link_url` — el destino
+   * del anuncio —, esta sí llega poblada de forma consistente: es lo único
+   * verificado que permite ver la pieza real, no una maqueta.
+   */
+  thumbnailUrl?: string | null;
+  /**
    * false: la entidad existe en la cuenta pero no tuvo actividad en el rango.
    *
    * Sus métricas valen cero porque la plataforma no reporta nada para ella, no
@@ -1179,6 +1187,7 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
       leads: optionalNumber(row.actions_lead),
       purchases: optionalNumber(row.actions_omni_purchase),
       conversions: optionalNumber(row.conversions),
+      thumbnailUrl: text(row.thumbnail_url),
       conActividad: true,
     };
 
@@ -1202,6 +1211,7 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.campaignId = actual.campaignId ?? fila.campaignId;
     actual.adsetId = actual.adsetId ?? fila.adsetId;
     actual.adId = actual.adId ?? fila.adId;
+    actual.thumbnailUrl = actual.thumbnailUrl ?? fila.thumbnailUrl;
   }
 
   return [...merged.values()];

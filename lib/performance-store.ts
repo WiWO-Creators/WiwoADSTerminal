@@ -54,6 +54,13 @@ export type PerformanceAccountSummary = {
   clicks: number | null;
   conversions: number | null;
   conversionValueMicros: number | null;
+  /**
+   * Conversaciones de mensajería iniciadas (Meta, ventana de 7 días —
+   * `actions_onsite_conversion_messaging_conversation_started_7d`). Es un
+   * conteo, no el contenido: cuántas personas escribieron, no qué dijeron ni
+   * qué se les contestó — Windsor no expone la conversación en sí.
+   */
+  messagingConversations: number | null;
   dataFrom: string | null;
   dataThrough: string | null;
   lastSyncedAt: number | null;
@@ -406,6 +413,9 @@ function toAccountSummary(row: PerformanceRow): PerformanceAccountSummary {
           : null
       : null,
     conversionBreakdown: null,
+    // Solo Windsor trae conversaciones de mensajería; el camino OAuth de
+    // respaldo (esta función) no lo pide todavía.
+    messagingConversations: null,
     conversionValueMicros: hasData
       ? row.provider === "google"
         ? Number(row.conversion_value_micros ?? 0)
@@ -508,6 +518,9 @@ async function windsorSnapshot(
         )
           ? null
           : daily.reduce((sum, row) => sum + (row.conversionValueMicros ?? 0), 0),
+        messagingConversations: daily.some((row) => row.conversations === null)
+          ? null
+          : daily.reduce((sum, row) => sum + (row.conversations ?? 0), 0),
         dataFrom: dates.at(0) ?? null,
         dataThrough: dates.at(-1) ?? null,
         lastSyncedAt: fetchedAt,
@@ -580,6 +593,7 @@ async function windsorSnapshot(
       clicks: 0,
       conversions: null,
       conversionValueMicros: null,
+      messagingConversations: null,
       dataFrom: null,
       dataThrough: null,
       lastSyncedAt: fetchedAt,

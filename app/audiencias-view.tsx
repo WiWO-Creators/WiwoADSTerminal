@@ -88,12 +88,16 @@ export function AudienciasView({
   puedeAprobar: boolean;
 }) {
   const [pestana, setPestana] = useState<"mensajeria" | "listas">("mensajeria");
-  const cuentasDelCliente = new Set(
-    portfolios
-      .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
-      .flatMap((p) => p.accounts.map((a) => a.id)),
-  );
+  const cuentasVisibles = portfolios
+    .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
+    .flatMap((p) => p.accounts);
+  const cuentasDelCliente = new Set(cuentasVisibles.map((a) => a.id));
   const adsDelCliente = ads.filter((ad) => cuentasDelCliente.has(ad.accountKey));
+  // Conversaciones de mensajería iniciadas (Meta, 7 días) por cuenta — solo
+  // el conteo, ver la nota en MensajeriaView sobre por qué no hay contenido.
+  const conversacionesPorCuenta = new Map(
+    cuentasVisibles.map((a) => [a.id, a.messagingConversations] as const),
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
@@ -127,7 +131,11 @@ export function AudienciasView({
         ))}
       </div>
       {pestana === "mensajeria" ? (
-        <MensajeriaView ads={adsDelCliente} puedeAprobar={puedeAprobar} />
+        <MensajeriaView
+          ads={adsDelCliente}
+          puedeAprobar={puedeAprobar}
+          conversacionesPorCuenta={conversacionesPorCuenta}
+        />
       ) : (
         <ListasDeContactos
           portfolios={portfolios}
