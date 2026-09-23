@@ -101,6 +101,9 @@ type Fila = {
   status: string | null;
   /** false: existe, pero la plataforma no reporta nada en el rango. */
   conActividad: boolean;
+  /** Se publicó de verdad hace poco y Windsor todavía no la sincronizó —
+   * ver `WindsorCampaign.pendienteSincronizacion`. */
+  pendienteSincronizacion: boolean;
   spendMicros: number;
   impressions: number;
   clicks: number;
@@ -915,15 +918,25 @@ export function AnunciosView({
                       )}
                     </TableCell>
                     <TableCell className="pr-4">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
-                          activo(estadosLocales[fila.clave] ?? fila.status)
-                            ? "bg-ok-deep/12 text-ok"
-                            : "bg-foreground/8 text-foreground/50",
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={cn(
+                            "inline-flex rounded-full px-2 py-0.5 text-[0.62rem] font-bold",
+                            activo(estadosLocales[fila.clave] ?? fila.status)
+                              ? "bg-ok-deep/12 text-ok"
+                              : "bg-foreground/8 text-foreground/50",
+                          )}
+                        >
+                          {estado(estadosLocales[fila.clave] ?? fila.status)}
+                        </span>
+                        {fila.pendienteSincronizacion && (
+                          <span
+                            title="Se publicó de verdad hace poco — Windsor todavía no la sincronizó, así que las cifras siguen en cero acá hasta que lo haga."
+                            className="inline-flex rounded-full bg-warn-deep/12 px-2 py-0.5 text-[0.62rem] font-bold text-warn"
+                          >
+                            Publicada, sincronizando
+                          </span>
                         )}
-                      >
-                        {estado(estadosLocales[fila.clave] ?? fila.status)}
                       </span>
                     </TableCell>
                     {puedeAprobar && (
@@ -1049,6 +1062,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         objetivo: ad.objetivo,
         status: ad.status,
         conActividad: ad.conActividad,
+        pendienteSincronizacion: ad.pendienteSincronizacion === true,
         spendMicros: ad.spendMicros,
         impressions: ad.impressions,
         clicks: ad.clicks,
@@ -1068,6 +1082,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         : actual.resultado + resultado;
     // Basta un elemento con actividad para que el grupo tenga cifras reales.
     if (ad.conActividad) actual.conActividad = true;
+    if (ad.pendienteSincronizacion) actual.pendienteSincronizacion = true;
     // Basta un elemento activo para que el grupo esté entregando.
     if (activo(ad.status)) actual.status = ad.status;
     actual.campaignId = actual.campaignId ?? ad.campaignId;

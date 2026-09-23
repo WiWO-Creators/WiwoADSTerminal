@@ -18,6 +18,7 @@ import {
   type PortfolioSummary,
 } from "@/lib/portafolios";
 import { accountIndex } from "@/lib/portafolios-store";
+import { publicacionesPendientes } from "@/lib/publicaciones-pendientes";
 import type { ConversionBreakdown } from "@/lib/conversiones";
 import {
   objetivoDeNombre,
@@ -589,11 +590,55 @@ async function windsorSnapshot(
   const visibles = allowedAccounts(accounts, actor, index);
   const clavesVisibles = new Set(visibles.map((account) => account.id));
 
+  // Cliente con una única cuenta por plataforma: ahí (y solo ahí) se puede
+  // ofrecer una campaña recién publicada que Windsor todavía no sincronizó,
+  // sin arriesgarse a adivinar a cuál cuenta pertenece. Ver
+  // `campanasPendientesDeSincronizar` para el porqué completo.
+  const cuentaUnicaPorPortfolio = new Map<
+    string,
+    Array<{ provider: Platform; accountId: string; accountName: string }>
+  >();
+  {
+    const porPortfolio = new Map<
+      string,
+      Map<Platform, Array<{ provider: Platform; accountId: string; accountName: string }>>
+    >();
+    for (const cuenta of visibles) {
+      const portfolioId = portfolioIdFor(cuenta, index);
+      const externalId = cuenta.id.split(":").at(-1) ?? cuenta.id;
+      const porProvider = porPortfolio.get(portfolioId) ?? new Map();
+      const lista = porProvider.get(cuenta.provider) ?? [];
+      lista.push({ provider: cuenta.provider, accountId: externalId, accountName: cuenta.name });
+      porProvider.set(cuenta.provider, lista);
+      porPortfolio.set(portfolioId, porProvider);
+    }
+    for (const [portfolioId, porProvider] of porPortfolio) {
+      const unicas = [...porProvider.values()]
+        .filter((lista) => lista.length === 1)
+        .map((lista) => lista[0]);
+      if (unicas.length > 0) cuentaUnicaPorPortfolio.set(portfolioId, unicas);
+    }
+  }
+
+  const pendientes = await publicacionesPendientes(
+    new Set(
+      campaignsResult.status === "fulfilled"
+        ? campaignsResult.value.flatMap((c) => (c.campaignId ? [c.campaignId] : []))
+        : [],
+    ),
+    new Set(
+      adsResult.status === "fulfilled"
+        ? adsResult.value.flatMap((a) => (a.adId ? [a.adId] : []))
+        : [],
+    ),
+    cuentaUnicaPorPortfolio,
+  );
+
   // Las campañas son un pedido aparte y agregado; si falla, el tablero sigue
   // mostrando el nivel de cuenta en vez de caerse entero.
   let campaigns: CampaignSummary[] = [];
   if (options.incluirCampanas && campaignsResult.status === "fulfilled") {
-    campaigns = campaignsResult.value
+    campaigns = [...campaignsResult.value, ...pendientes.campanas]
       .map((row) => {
         const porSigla = objetivoDeNombre(row.name);
         const deducido = porSigla
@@ -623,7 +668,7 @@ async function windsorSnapshot(
   // resto del tablero sigue funcionando sin ese detalle.
   let ads: AdSummary[] = [];
   if (options.incluirAnuncios && adsResult.status === "fulfilled") {
-    ads = adsResult.value
+    ads = [...adsResult.value, ...pendientes.anuncios]
       .map((row) => ({
         ...row,
         accountKey: `windsor:${row.provider}:${row.accountId}`,

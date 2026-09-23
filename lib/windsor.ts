@@ -130,6 +130,15 @@ export type WindsorCampaign = {
    * el campo (no se pide junto con las métricas de actividad).
    */
   dailyBudgetMicros: number | null;
+  /**
+   * `true` solo para las filas que arma `campanasPendientesDeSincronizar`
+   * (`lib/publicaciones-pendientes.ts`): se creó de verdad hace poco a través
+   * del Constructor, con su id real, pero Windsor todavía no la sincronizó
+   * a `get_data` — ausente (no `false`) en cualquier fila que sí viene del
+   * catálogo real de Windsor, para no confundir "recién publicada" con
+   * "confirmada".
+   */
+  pendienteSincronizacion?: true;
 };
 
 type Row = Record<string, unknown>;
@@ -1143,6 +1152,9 @@ export type WindsorAd = {
    * leería como "no rindió".
    */
   conActividad: boolean;
+  /** Ver `WindsorCampaign.pendienteSincronizacion` — mismo significado, a
+   * nivel de anuncio. */
+  pendienteSincronizacion?: true;
 };
 
 /** Anuncios y conjuntos del rango, completados con el catálogo. */
