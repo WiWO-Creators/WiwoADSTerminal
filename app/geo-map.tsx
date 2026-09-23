@@ -14,7 +14,7 @@ import {
 } from "react-leaflet";
 import type { Layer, Path, StyleFunction } from "leaflet";
 
-import { Search, X } from "lucide-react";
+import { Ban, Building2, CircleDot, Flag, MapPin, Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -417,24 +417,40 @@ function SelectorDeLugares({
 }
 
 /** Un chip removible del resumen — mismo look en las tres capas, solo cambia el color. */
+/** Un tipo de segmentación por chip — color e ícono distintos para que se
+ * note de un vistazo si algo es un país entero, una región, una ciudad
+ * puntual o un radio, sin tener que leer la etiqueta. */
+type TipoDeChip = "pais" | "region" | "ciudad" | "radio" | "excluir";
+
+const ESTILO_POR_TIPO: Record<
+  TipoDeChip,
+  { icono: typeof Flag; clase: string }
+> = {
+  pais: { icono: Flag, clase: "border-brand/40 bg-brand/15 text-brand" },
+  region: { icono: MapPin, clase: "border-sky-500/40 bg-sky-500/15 text-sky-400" },
+  ciudad: { icono: Building2, clase: "border-violet-500/40 bg-violet-500/15 text-violet-400" },
+  radio: { icono: CircleDot, clase: "border-amber-500/40 bg-amber-500/15 text-amber-400" },
+  excluir: { icono: Ban, clase: "border-red-500/40 bg-red-500/15 text-red-400" },
+};
+
 function ChipDeSegmentacion({
   label,
-  color,
+  tipo,
   onQuitar,
 }: {
   label: string;
-  color: "brand" | "danger";
+  tipo: TipoDeChip;
   onQuitar: () => void;
 }) {
+  const { icono: Icono, clase } = ESTILO_POR_TIPO[tipo];
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium",
-        color === "danger"
-          ? "border-red-500/40 bg-red-500/15 text-red-400"
-          : "border-brand/40 bg-brand/15 text-brand",
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[0.7rem] font-medium",
+        clase,
       )}
     >
+      <Icono className="size-3" />
       {label}
       <button
         type="button"
@@ -495,7 +511,7 @@ function ResumenDeSegmentacion({
         <ChipDeSegmentacion
           key={pais.iso2}
           label={pais.label}
-          color="brand"
+          tipo="pais"
           onQuitar={() => onQuitarPais(pais.iso2)}
         />
       ))}
@@ -503,14 +519,14 @@ function ResumenDeSegmentacion({
         <ChipDeSegmentacion
           key={lugar.id}
           label={`${lugar.nombre} · ${lugar.tier === "region" ? "Región" : "Ciudad"}`}
-          color="brand"
+          tipo={lugar.tier === "region" ? "region" : "ciudad"}
           onQuitar={() => onQuitarLugar(lugar.id)}
         />
       ))}
       {geoRadius && (
         <ChipDeSegmentacion
           label={`(${geoRadius.lat.toFixed(4)}, ${geoRadius.lng.toFixed(4)}) + ${geoRadius.radiusKm} km`}
-          color="brand"
+          tipo="radio"
           onQuitar={onQuitarRadio}
         />
       )}
@@ -518,7 +534,7 @@ function ResumenDeSegmentacion({
         <ChipDeSegmentacion
           key={pais.iso2}
           label={`Excluye ${pais.label}`}
-          color="danger"
+          tipo="excluir"
           onQuitar={() => onQuitarExcluido(pais.iso2)}
         />
       ))}
