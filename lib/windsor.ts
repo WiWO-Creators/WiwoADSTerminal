@@ -578,6 +578,15 @@ export async function actualizarCatalogoDeCuentas(
           if (c.campaignId) campaignIdsVistos.add(c.campaignId);
         }
 
+        // Ojo: esta lectura parcial solo cubre los últimos
+        // CATALOGO_PARCIAL_DIAS (45) días, a propósito, para que sea rápida —
+        // nada que ver con los 36 meses del barrido completo. Por eso NO se
+        // puede usar esto para detectar borrados: una campaña real, pausada
+        // hace más de 45 días pero no borrada, tampoco aparecería acá, y
+        // sacarla del catálogo sería peor que el problema que se quiere
+        // resolver (una campaña que sigue existiendo desaparecería sola de
+        // WiWO.ADS). Detectar borrados de verdad exige el rango de 3 años del
+        // barrido completo — ver `fetchWindsorCatalog`/"Actualizar".
         const porCampana = new Map(catalogo.campanas.map((c) => [claveDeCampana(c), c]));
         for (const c of campanas) {
           if (!porCampana.has(claveDeCampana(c))) agregadas += 1;

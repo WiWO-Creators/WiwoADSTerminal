@@ -290,7 +290,7 @@ export default function WiwoDashboard({
   /** null: todavía no se consultó. `puedeActualizar` sale del servidor. */
   const [estadoDatos, setEstadoDatos] = useState<{
     construidoEn: number | null;
-    tocaSemanal: boolean;
+    tocaAutoActualizar: boolean;
     puedeActualizar: boolean;
   } | null>(null);
   // Cuenta la petición de rango más reciente: si dos llegan a destiempo, solo
@@ -400,16 +400,17 @@ export default function WiwoDashboard({
 
   /**
    * Relee todo desde Windsor: borra el caché de métricas, reconstruye el
-   * catálogo de campañas (lo único que conoce lo recién creado y lo pausado) y
-   * vuelve a pedir el tablero. Es lo que hace el botón "Actualizar" y, sola,
-   * la actualización semanal.
+   * catálogo de campañas (lo único que nota lo recién creado, lo pausado y lo
+   * borrado de verdad en la plataforma) y vuelve a pedir el tablero. Es lo
+   * que hace el botón "Actualizar" y, sola, la actualización automática
+   * (cada 2 h como mucho, ver `INTERVALO_AUTOACTUALIZACION_MS`).
    */
   async function actualizarDatos(automatica = false) {
     if (actualizando) return;
     setActualizando(true);
     const aviso = toast.loading(
-      automatica ? "Actualización semanal de datos…" : "Actualizando datos…",
-      { description: "Lee Windsor de nuevo; puede tardar un par de minutos." },
+      automatica ? "Actualización automática de datos…" : "Actualizando datos…",
+      { description: "Lee Windsor de nuevo; puede tardar unos segundos." },
     );
     try {
       const response = await fetch("/api/actualizar", { method: "POST" });
@@ -419,6 +420,9 @@ export default function WiwoDashboard({
         campanas?: number;
         anuncios?: number;
         fallos?: string[];
+        /** Alguien más (otra pestaña, otra persona) ya está en medio del
+         * mismo barrido completo — ver el candado en app/api/actualizar. */
+        yaEnCurso?: boolean;
       };
       try {
         body = await response.json();
@@ -433,11 +437,18 @@ export default function WiwoDashboard({
         );
       }
       if (!response.ok) throw new Error(body.error ?? "No se pudo actualizar");
+      if (body.yaEnCurso) {
+        toast.info("Ya se estaba actualizando", {
+          id: aviso,
+          description: "Alguien más lo pidió hace un momento — esperá a que termine.",
+        });
+        return;
+      }
       await refreshOperationalData();
       setEstadoDatos((actual) => ({
         puedeActualizar: actual?.puedeActualizar ?? true,
         construidoEn: body.construidoEn ?? Date.now(),
-        tocaSemanal: false,
+        tocaAutoActualizar: false,
       }));
       if (body.fallos && body.fallos.length > 0) {
         toast.warning("Datos actualizados, con avisos", {
@@ -468,20 +479,21 @@ export default function WiwoDashboard({
         if (!response.ok) return;
         const estado = (await response.json()) as {
           construidoEn: number | null;
-          tocaSemanal: boolean;
+          tocaAutoActualizar: boolean;
           puedeActualizar: boolean;
         };
         if (cancelado) return;
         setEstadoDatos(estado);
-        // Actualización semanal: no hay cron en este hosting, así que la hace
-        // la primera sesión con permiso que abre la app pasada la semana. Un
-        // intento por sesión-día como mucho, para que un fallo no la relance
-        // cada vez que alguien recarga la página.
-        if (estado.puedeActualizar && estado.tocaSemanal) {
+        // No hay cron en este hosting, así que la dispara la primera sesión
+        // con permiso que abre la app pasado el intervalo (2 h, ver
+        // INTERVALO_AUTOACTUALIZACION_MS en app/api/actualizar/route.ts). Acá
+        // se suma un tope de 1 intento por hora por navegador, para que un
+        // fallo no la relance cada vez que alguien recarga la página.
+        if (estado.puedeActualizar && estado.tocaAutoActualizar) {
           const ultimo = Number(
             window.localStorage.getItem("wiwo-ads-ultima-actualizacion-auto") ?? 0,
           );
-          if (Date.now() - ultimo > 6 * 60 * 60 * 1000) {
+          if (Date.now() - ultimo > 60 * 60 * 1000) {
             window.localStorage.setItem(
               "wiwo-ads-ultima-actualizacion-auto",
               String(Date.now()),
