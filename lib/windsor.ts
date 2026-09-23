@@ -541,7 +541,7 @@ export async function actualizarCatalogoDeCuentas(
   // forma de llenar `campaignIdsVistos`, y quien llama la necesita aunque
   // todavía no exista un catálogo guardado.
   const catalogo: Omit<Catalogo, "construidoEn"> = cached
-    ? (JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">)
+    ? (JSON.parse(await descomprimirTexto(cached.value)) as Omit<Catalogo, "construidoEn">)
     : { campanas: [], anuncios: [], rango, fallos: [] };
   const desde = iso(new Date(hoy.getTime() - CATALOGO_PARCIAL_DIAS * 86_400_000));
   const hasta = iso(hoy);
@@ -596,10 +596,42 @@ export async function actualizarCatalogoDeCuentas(
            updated_at = excluded.updated_at`,
       )
       // `updated_at` se conserva: es la fecha del barrido completo.
-      .bind(cacheId, JSON.stringify(catalogo), Number(cached.updated_at))
+      .bind(cacheId, await comprimirTexto(JSON.stringify(catalogo)), Number(cached.updated_at))
       .run();
   }
   return { agregadas, fallos, campaignIdsVistos };
+}
+
+/**
+ * Prefijo que marca un valor de `app_meta` comprimido con gzip y codificado
+ * en base64 — necesario desde que el catálogo completo (todas las campañas y
+ * anuncios de todos los clientes, sin filtrar por actividad) empezó a superar
+ * el límite real de D1 para una fila (~1 MB: `SQLITE_TOOBIG`, confirmado en
+ * vivo el 2026-09-23). El texto comprime muy bien —son miles de objetos con
+ * las mismas claves repetidas— así que esto solo debería volver a hacer falta
+ * si el catálogo crece mucho más; ahí el siguiente paso es partirlo por
+ * plataforma en vez de una sola fila.
+ */
+const PREFIJO_COMPRIMIDO = "gz:";
+
+async function comprimirTexto(texto: string): Promise<string> {
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  void writer.write(new TextEncoder().encode(texto));
+  void writer.close();
+  const comprimido = await new Response(cs.readable).arrayBuffer();
+  return PREFIJO_COMPRIMIDO + Buffer.from(comprimido).toString("base64");
+}
+
+async function descomprimirTexto(valor: string): Promise<string> {
+  if (!valor.startsWith(PREFIJO_COMPRIMIDO)) return valor;
+  const bytes = Buffer.from(valor.slice(PREFIJO_COMPRIMIDO.length), "base64");
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  void writer.write(bytes);
+  void writer.close();
+  const descomprimido = await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(descomprimido);
 }
 
 /**
@@ -646,7 +678,7 @@ export async function fetchWindsorCatalog(
 
   const guardado = cached
     ? ({
-        ...(JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">),
+        ...(JSON.parse(await descomprimirTexto(cached.value)) as Omit<Catalogo, "construidoEn">),
         construidoEn: Number(cached.updated_at),
       } satisfies Catalogo)
     : null;
@@ -719,7 +751,7 @@ export async function fetchWindsorCatalog(
          ON CONFLICT(key) DO UPDATE SET value = excluded.value,
            updated_at = excluded.updated_at`,
       )
-      .bind(cacheId, JSON.stringify(catalogo), catalogo.construidoEn)
+      .bind(cacheId, await comprimirTexto(JSON.stringify(catalogo)), catalogo.construidoEn)
       .run();
   }
 

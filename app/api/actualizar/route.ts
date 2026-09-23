@@ -62,9 +62,26 @@ export async function POST(request: Request) {
   if (!windsorConfigured()) return fail("Falta configurar WINDSOR_API_KEY", 503);
 
   const inicio = Date.now();
-  const cacheBorrado = await limpiarCacheDeMetricas();
-  const hoy = new Date().toISOString().slice(0, 10);
-  const catalogo = await fetchWindsorCatalog(hoy, { construir: true, forzar: true });
+  let cacheBorrado: number;
+  let catalogo: Awaited<ReturnType<typeof fetchWindsorCatalog>>;
+  try {
+    cacheBorrado = await limpiarCacheDeMetricas();
+    const hoy = new Date().toISOString().slice(0, 10);
+    catalogo = await fetchWindsorCatalog(hoy, { construir: true, forzar: true });
+  } catch (error) {
+    // Sin este try/catch, cualquier error acá (por ejemplo, el catálogo
+    // completo pesando más de lo que D1 admite guardar en una fila) tumbaba
+    // la ruta entera: la plataforma devolvía su propia página de error, no
+    // JSON, y el navegador mostraba un mensaje de parseo que no decía nada
+    // del problema real. Este si dice qué pasó.
+    console.error("WiWO.ADS actualizar", error);
+    return fail(
+      error instanceof Error
+        ? `No se pudo actualizar: ${error.message}`
+        : "No se pudo actualizar: error inesperado",
+      500,
+    );
+  }
 
   // El resumen semanal se recalcula acá, no en cada lectura: es la misma
   // ocasión en la que ya se pagó el costo de traer todo de nuevo. Si falla,
