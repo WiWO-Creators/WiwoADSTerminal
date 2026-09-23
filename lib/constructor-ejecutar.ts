@@ -25,6 +25,17 @@ const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   create_responsive_search_ad: { campo: "ad_group_id", de: "adGroup" },
   push_keywords: { campo: "ad_group_id", de: "adGroup" },
   set_campaign_geo_targeting: { campo: "campaign_id", de: "campaign" },
+  // Los tres de acá abajo faltaban: buildPlan (lib/constructor.ts) ya los
+  // arma con `campaign_id: MARCADOR_PASO_ANTERIOR` para una campaña nueva,
+  // pero sin una entrada acá ese marcador nunca se reemplazaba por el id
+  // real — se le mandaba a Windsor el texto literal "(del paso anterior)"
+  // como campaign_id. Encontrado en una revisión de código, no en un reporte
+  // de usuario: nunca llegó a fallar en vivo porque las pruebas de esta
+  // sesión con negativas/tope de CPC/idiomas siempre se hicieron adjuntando
+  // a una cuenta con `enCampanaExistente`, el otro camino que sí trae el id.
+  push_negative_keywords: { campo: "campaign_id", de: "campaign" },
+  set_cpc_bid_ceiling: { campo: "campaign_id", de: "campaign" },
+  set_campaign_language_targeting: { campo: "campaign_id", de: "campaign" },
   create_adset: { campo: "campaign_id", de: "campaign" },
   create_ad: { campo: "adset_id", de: "adset" },
   boost_post: { campo: "adset_id", de: "adset" },
