@@ -856,16 +856,28 @@ function cuentaElegida(
 /**
  * Países efectivos para segmentar: los elegidos a mano en el mapa
  * (`targetCountries`), o si no se tocó nada, los que la cuenta ya trae
- * declarados — el comportamiento de siempre, ahora como valor por defecto en
- * vez de la única opción.
+ * declarados — pero solo cuando tampoco hay una segmentación más fina
+ * (comunas/regiones o un radio en el mapa).
+ *
+ * Antes el fallback a los países de la cuenta se aplicaba siempre que
+ * `targetCountries` viniera vacío, sin mirar si ya había comunas elegidas.
+ * `set_campaign_geo_targeting` (Google) y `geo_locations` (Meta) sirven cada
+ * ubicación en la lista por separado — es una unión, no una intersección —
+ * así que agregar el país junto a las comunas no las acota: las vuelve
+ * irrelevantes, porque el país ya cubre todo lo que las comunas cubrían y
+ * más. Auditado en vivo contra la cuenta real de Colbún (2026-09-23,
+ * "Plan Hogar"): con Chile + 4 comunas, Google Ads mostró la campaña
+ * segmentada a los 18,7 M de habitantes del país, no a las comunas pedidas —
+ * en las dos plataformas, con el mismo origen.
  */
 function paisesEfectivos(
   draft: CampaignDraft,
   cuenta: CuentaCliente | null,
 ): string[] {
-  return draft.targetCountries.length > 0
-    ? draft.targetCountries
-    : (cuenta?.countries ?? []);
+  if (draft.targetCountries.length > 0) return draft.targetCountries;
+  const yaSegmentadoMasFino = draft.targetPlaces.length > 0 || draft.geoRadius !== null;
+  if (yaSegmentadoMasFino) return [];
+  return cuenta?.countries ?? [];
 }
 
 /**
@@ -1119,7 +1131,14 @@ export function validateDraft(
       );
     }
     const paisesMeta = paisesEfectivos(draft, cuentaMeta);
-    if (paisesMeta.length === 0 && !draft.geoRadius) {
+    // Una comuna o región ya geocodificada (círculo lat/lng/radio real, ver
+    // más abajo en buildPlan) segmenta la campaña de Meta tan bien como un
+    // país — cuenta acá para no pedir un país de más cuando `paisesEfectivos`
+    // ya lo dejó vacío a propósito por haber una segmentación más fina.
+    const hayLugaresGeocodificados = draft.targetPlaces.some(
+      (lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm,
+    );
+    if (paisesMeta.length === 0 && !draft.geoRadius && !hayLugaresGeocodificados) {
       add(
         "accountByPlatform",
         "Falta un país o una zona por radio para segmentar: la cuenta de Meta no trae países declarados y no se eligió ninguno en el mapa",
@@ -1512,6 +1531,27 @@ export function buildPlan(
     }
 
     const aMensajes = draft.conversionLocation === "mensajes";
+    // OFFSITE_CONVERSIONS —el objetivo real para leads y ventas con destino
+    // sitio web— exige `promoted_object` (pixel_id + custom_event_type):
+    // verificado contra `list_actions` real de `create_adset` en Windsor
+    // ("some optimization goals require promoted_object ... for conversions").
+    // WiWO.ADS todavía no tiene dónde guardar el pixel de un cliente, así que
+    // mandarlo igual crea el conjunto de anuncios roto — confirmado en vivo
+    // contra Colbún (2026-09-23, "Plan Hogar"): Meta rechazó la creación y el
+    // Constructor nunca se enteró ni avisó, dejando la campaña sin conjunto
+    // ni anuncio. Mientras no haya soporte de pixel, se optimiza a clics
+    // (funciona sin `promoted_object`) y se avisa del porqué en vez de
+    // publicar algo que la API real rechaza.
+    const sinPixelParaConversiones =
+      !enConjuntoMetaExistente && !boosteando && !aMensajes && draft.objective !== "trafico";
+    if (sinPixelParaConversiones) {
+      issues.push({
+        field: "objective",
+        message:
+          "Meta: sin un píxel configurado para este cliente, el conjunto de anuncios no puede optimizar a conversiones (Meta lo rechazaría). Se crea optimizando a clics en el enlace en su lugar.",
+        blocking: false,
+      });
+    }
     if (!enConjuntoMetaExistente) {
       steps.push({
         platform: "meta",
@@ -1524,13 +1564,14 @@ export function buildPlan(
           ...(enCampanaMetaExistente
             ? { campaign_id: enCampanaMetaExistente.campaignId }
             : {}),
+          // "trafico" siempre fue LINK_CLICKS; ahora lo es también leads,
+          // ventas y alcance, mientras no haya pixel — ver
+          // `sinPixelParaConversiones` arriba.
           optimization_goal: boosteando
             ? "POST_ENGAGEMENT"
             : aMensajes
               ? "CONVERSATIONS"
-              : draft.objective === "trafico"
-                ? "LINK_CLICKS"
-                : "OFFSITE_CONVERSIONS",
+              : "LINK_CLICKS",
           billing_event: "IMPRESSIONS",
           status: "paused",
           // Con presupuesto de campaña se omiten los dos: Windsor lo pide
