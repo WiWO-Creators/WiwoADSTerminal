@@ -2,12 +2,23 @@ import { getRawDb } from "@/db";
 import type { PasoEjecutado } from "@/lib/constructor-ejecutar";
 import { idDeResultado, type WindsorAd, type WindsorCampaign, type WindsorProvider } from "@/lib/windsor";
 
-/** Cuánto se sigue ofreciendo una publicación reciente como "pendiente",
- * incluso si Windsor todavía no la sincronizó. Más allá de esto, se asume
- * que algo más raro pasa (falló de verdad, o Windsor tarda demasiado) y
- * seguir insistiendo sin que nadie lo revise sería peor que dejar de
- * mostrarla. */
-const VENTANA_MS = 48 * 60 * 60 * 1000;
+/**
+ * Cuánto se sigue ofreciendo una publicación reciente como "pendiente",
+ * incluso si Windsor todavía no la sincronizó.
+ *
+ * 12 horas, no 48: una ventana larga terminó mostrando como "pendiente" dos
+ * campañas de prueba de una sesión anterior que alguien ya había borrado a
+ * mano en la plataforma real (confirmado en el registro de actividad de
+ * Meta) — como Windsor tampoco las sincroniza nunca (están borradas, no
+ * atrasadas), quedaban marcadas "pendiente" para siempre. No hay forma de
+ * distinguir acá "borrada" de "Windsor todavía no la sincroniza": esta app
+ * no tiene su propia acción para borrar campañas, así que `ejecuciones`
+ * nunca se entera de un borrado hecho afuera. Achicar la ventana es la
+ * mitigación real: el atraso medido en vivo fue de ~6 horas (creada 8:24,
+ * sin sincronizar todavía pasado el mediodía), así que 12 horas cubre ese
+ * caso real sin arrastrar campañas de pruebas de hace más de medio día.
+ */
+const VENTANA_MS = 12 * 60 * 60 * 1000;
 
 type CuentaConocida = { provider: WindsorProvider; accountId: string; accountName: string };
 
