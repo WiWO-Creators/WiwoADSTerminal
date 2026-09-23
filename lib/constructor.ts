@@ -459,8 +459,11 @@ export const RADIO_MAXIMO_KM = 80;
 /**
  * Base con la que el asistente de IA puede precargar una campaña nueva
  * (ver `abrir_constructor` en `lib/asistente.ts`). Deliberadamente no trae
- * presupuesto ni segmentación fina: eso se elige recién dentro del
- * Constructor, una vez que se sabe la cuenta real y su moneda.
+ * presupuesto: eso se elige recién dentro del Constructor, una vez que se
+ * sabe la cuenta real y su moneda. La segmentación por región/ciudad sí
+ * puede venir precargada (`targetPlaces`) porque su id de Google es global,
+ * no depende de la cuenta — así una campaña pedida "para Santiago y
+ * Valparaíso" no se queda solo en el texto del resumen.
  */
 export type SemillaDeCampana = {
   name: string;
@@ -469,6 +472,10 @@ export type SemillaDeCampana = {
   /** Nota interna visible en "Detalles" — nunca se envía a ninguna plataforma. */
   details: string;
   targetCountries: string[];
+  /** Regiones/ciudades ya resueltas a un id real de Google (ver `LugarSegmentable`
+   * más abajo) — el asistente las busca con `buscarGeoTargets` antes de proponer,
+   * nunca inventa un id. */
+  targetPlaces?: LugarSegmentable[];
   /**
    * Contenido sugerido para el anuncio — el asistente de IA lo escribe
    * cuando ya sabe qué se promociona, con la sintaxis real de cada campo

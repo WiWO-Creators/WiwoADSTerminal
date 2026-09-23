@@ -404,13 +404,25 @@ export default function WiwoDashboard({
     );
     try {
       const response = await fetch("/api/actualizar", { method: "POST" });
-      const body = (await response.json()) as {
+      let body: {
         error?: string;
         construidoEn?: number | null;
         campanas?: number;
         anuncios?: number;
         fallos?: string[];
       };
+      try {
+        body = await response.json();
+      } catch {
+        // Reconstruir el catálogo completo puede tardar varios minutos —
+        // si la plataforma corta la conexión a mitad de camino, el cuerpo
+        // llega vacío y `.json()` explota con un mensaje de navegador que no
+        // dice nada útil. Esto no significa que nada se haya leído: solo que
+        // no llegó a tiempo la respuesta.
+        throw new Error(
+          "La actualización tardó demasiado y se cortó la conexión. Intenta de nuevo — puede que solo falte volver a pedirla.",
+        );
+      }
       if (!response.ok) throw new Error(body.error ?? "No se pudo actualizar");
       await refreshOperationalData();
       setEstadoDatos((actual) => ({

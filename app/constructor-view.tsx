@@ -231,7 +231,7 @@ function borradorInicial(
     metaSurfaces: [],
     metaInterests: [],
     targetCountries: semilla?.targetCountries ?? [],
-    targetPlaces: [],
+    targetPlaces: semilla?.targetPlaces ?? [],
     geoRadius: null,
     excludedCountries: [],
     callToAction: "LEARN_MORE",
@@ -294,6 +294,11 @@ export function ConstructorView({
     borradorInicial(attachTo, clienteGlobal, semillaIA),
   );
   const [plan, setPlan] = useState<Plan | null>(null);
+  // Con qué borrador se armó `plan` — si `draft` cambió desde entonces (se
+  // tocó el presupuesto, la segmentación, etc.), el plan queda desactualizado
+  // y no hay que confiar en su lista de bloqueantes ni mostrar "Publicar"
+  // con un estado que ya no es el real.
+  const [planDraftJson, setPlanDraftJson] = useState<string | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [duplicado, setDuplicado] = useState<{ creado: string[]; hace: number } | null>(null);
@@ -379,8 +384,14 @@ export function ConstructorView({
       });
       const body = (await response.json()) as Plan & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "No se pudo armar");
+      const autocompletaPresupuesto = body.budget.suggested !== null && draft.dailyBudget === null;
       setPlan(body);
-      if (body.budget.suggested !== null && draft.dailyBudget === null) {
+      setPlanDraftJson(
+        JSON.stringify(
+          autocompletaPresupuesto ? { ...draft, dailyBudget: body.budget.suggested } : draft,
+        ),
+      );
+      if (autocompletaPresupuesto) {
         actualizar({ dailyBudget: body.budget.suggested });
       }
     } catch (issue) {
@@ -423,8 +434,9 @@ export function ConstructorView({
     }
   }
 
-  const bloqueantes = plan?.issues.filter((i) => i.blocking) ?? [];
-  const avisos = plan?.issues.filter((i) => !i.blocking) ?? [];
+  const planVigente = plan !== null && planDraftJson === JSON.stringify(draft);
+  const bloqueantes = planVigente ? (plan?.issues.filter((i) => i.blocking) ?? []) : [];
+  const avisos = planVigente ? (plan?.issues.filter((i) => !i.blocking) ?? []) : [];
   const indiceFase = FASES.findIndex((f) => f.id === fase);
 
   return (
@@ -580,7 +592,20 @@ export function ConstructorView({
 
           {plan && (
             <>
-              {plan.budget.basis && (
+              {!planVigente && (
+                <Surface className="border-warn-deep/25 bg-warn-deep/[0.06] p-4">
+                  <p className="text-sm font-bold text-foreground">
+                    Cambiaste algo después de revisar el plan
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-foreground/60">
+                    Lo de abajo quedó desactualizado. Tocá &quot;Revisar el
+                    plan&quot; de nuevo para ver el estado real antes de
+                    publicar.
+                  </p>
+                </Surface>
+              )}
+
+              {planVigente && plan.budget.basis && (
                 <Surface className="p-4">
                   <p className="font-micro text-[0.6rem] text-foreground/45">
                     PRESUPUESTO SUGERIDO
@@ -596,7 +621,7 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              {bloqueantes.length > 0 && (
+              {planVigente && bloqueantes.length > 0 && (
                 <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-4">
                   <p className="text-sm font-bold text-foreground">
                     Falta resolver {bloqueantes.length}
@@ -615,7 +640,7 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              {avisos.length > 0 && (
+              {planVigente && avisos.length > 0 && (
                 <Surface className="border-warn-deep/25 bg-warn-deep/[0.06] p-4">
                   <ul className="space-y-1.5">
                     {avisos.map((issue, index) => (
@@ -631,69 +656,71 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              <Surface className="overflow-hidden">
-                <div className="border-b border-foreground/10 px-4 py-3">
-                  <h3 className="font-bold text-foreground">
-                    Lo que se ejecutaría
-                  </h3>
-                  <p className="mt-1 text-xs text-foreground/50">
-                    {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
-                    {resultado ? "ya ejecutado" : "todavía sin enviar"}
-                  </p>
-                </div>
-                <ol className="divide-y divide-foreground/8">
-                  {plan.steps.map((step, index) => (
-                    <li key={index} className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
-                          {platformLabel(step.platform).toUpperCase()}
-                        </span>
-                        <span className="text-sm font-bold text-foreground">
-                          {step.label}
-                        </span>
-                        {step.informativo && (
-                          <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[0.52rem] text-brand">
-                            INFORMATIVO
-                          </span>
-                        )}
-                      </div>
-                      <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
-                        {JSON.stringify(step.params, null, 2)}
-                      </pre>
-                    </li>
-                  ))}
-                </ol>
-
-                {/*
-                  El único punto del sistema que cambia algo fuera de acá.
-                  Aparece solo cuando no queda nada bloqueante, y lo que se
-                  ejecuta es este mismo plan: el servidor lo vuelve a armar
-                  con el borrador, no confía en lo que mande el navegador.
-                */}
-                {bloqueantes.length === 0 && !resultado && (
-                  <div className="border-t border-foreground/10 p-4">
-                    <Button
-                      type="button"
-                      onClick={() => void publicar(false)}
-                      disabled={publicando}
-                      className="w-full font-extrabold"
-                    >
-                      {publicando ? (
-                        <OrbeDeBoton />
-                      ) : (
-                        <Rocket />
-                      )}
-                      Publicar pausado en{" "}
-                      {draft.platforms.map(platformLabel).join(" y ")}
-                    </Button>
-                    <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
-                      Se crea de verdad en la cuenta del cliente, en estado
-                      pausado. No empieza a gastar hasta que lo actives en la
-                      plataforma.
+              {planVigente && (
+                <Surface className="overflow-hidden">
+                  <div className="border-b border-foreground/10 px-4 py-3">
+                    <h3 className="font-bold text-foreground">
+                      Lo que se ejecutaría
+                    </h3>
+                    <p className="mt-1 text-xs text-foreground/50">
+                      {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
+                      {resultado ? "ya ejecutado" : "todavía sin enviar"}
                     </p>
                   </div>
-                )}
-              </Surface>
+                  <ol className="divide-y divide-foreground/8">
+                    {plan.steps.map((step, index) => (
+                      <li key={index} className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
+                            {platformLabel(step.platform).toUpperCase()}
+                          </span>
+                          <span className="text-sm font-bold text-foreground">
+                            {step.label}
+                          </span>
+                          {step.informativo && (
+                            <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[0.52rem] text-brand">
+                              INFORMATIVO
+                            </span>
+                          )}
+                        </div>
+                        <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
+                          {JSON.stringify(step.params, null, 2)}
+                        </pre>
+                      </li>
+                    ))}
+                  </ol>
+
+                  {/*
+                    El único punto del sistema que cambia algo fuera de acá.
+                    Aparece solo cuando no queda nada bloqueante, y lo que se
+                    ejecuta es este mismo plan: el servidor lo vuelve a armar
+                    con el borrador, no confía en lo que mande el navegador.
+                  */}
+                  {bloqueantes.length === 0 && !resultado && (
+                    <div className="border-t border-foreground/10 p-4">
+                      <Button
+                        type="button"
+                        onClick={() => void publicar(false)}
+                        disabled={publicando}
+                        className="w-full font-extrabold"
+                      >
+                        {publicando ? (
+                          <OrbeDeBoton />
+                        ) : (
+                          <Rocket />
+                        )}
+                        Publicar pausado en{" "}
+                        {draft.platforms.map(platformLabel).join(" y ")}
+                      </Button>
+                      <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
+                        Se crea de verdad en la cuenta del cliente, en estado
+                        pausado. No empieza a gastar hasta que lo actives en la
+                        plataforma.
+                      </p>
+                    </div>
+                  )}
+                </Surface>
+              )}
 
               {resultado && (() => {
                 const sinConfirmar = Boolean(
@@ -1251,14 +1278,18 @@ function FaseCampana({
         </div>
       </Seccion>
 
-      <Seccion titulo="Detalles">
+      <Seccion titulo="Detalles (nota interna)">
         <Textarea
           value={draft.details}
           onChange={(e) => onChange({ details: e.target.value })}
           rows={2}
-          placeholder="Nota interna para el equipo — no se envía a ninguna plataforma"
+          placeholder="Ej. a quién apunta, contexto de la oferta, algo a tener en cuenta al revisar"
           className="bg-field/60"
         />
+        <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+          Solo la ve el equipo acá adentro — no se publica ni se envía a
+          ninguna plataforma. Es para dejar contexto, no un campo obligatorio.
+        </p>
       </Seccion>
 
       <Seccion titulo="Categoría" soloPlataforma="meta">
@@ -1301,7 +1332,7 @@ function FaseCampana({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="default">
-              El de arriba ({OBJECTIVES[draft.objective].label})
+              Automático — {OBJECTIVES[draft.objective].label}
             </SelectItem>
             {(Object.keys(META_OBJECTIVE_LABELS) as MetaObjectiveOverride[]).map((key) => (
               <SelectItem key={key} value={key}>
@@ -1311,11 +1342,12 @@ function FaseCampana({
           </SelectContent>
         </Select>
         <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
-          El objetivo de arriba ya elige uno de estos cinco por defecto — acá
-          solo hace falta tocarlo si el que corresponde de verdad no es el
-          que ese mapeo asume (por ejemplo, una campaña de &quot;Tráfico&quot;
-          pensada en realidad para Interacción). No cambia nada en Google:
-          ese concepto no existe ahí, es puramente de Meta.
+          &quot;Automático&quot; ya traduce el objetivo de arriba a uno de
+          estos cinco por su cuenta — acá solo hace falta elegir uno a mano
+          si el que corresponde de verdad no es el que esa traducción asume
+          (por ejemplo, una campaña de &quot;Tráfico&quot; pensada en
+          realidad para Interacción). No cambia nada en Google: ese concepto
+          no existe ahí, es puramente de Meta.
         </p>
       </Seccion>
     </>
@@ -1565,10 +1597,13 @@ function FaseConjunto({
           </Seccion>
 
           <Seccion titulo="Ubicaciones">
-            <p className="font-micro mb-1.5 text-[0.58rem] text-foreground/45">
-              VACÍO ES AUTOMÁTICAS
+            <p className="text-xs leading-5 text-foreground/55">
+              Sin marcar nada acá, Meta reparte el anuncio solo entre
+              Facebook, Instagram, Messenger y Audience Network — es la
+              ubicación automática de Meta (Advantage+), no que falte
+              elegir. Marcá una o más solo si querés limitarlo a esas.
             </p>
-            <div className="flex flex-wrap gap-4">
+            <div className="mt-2 flex flex-wrap gap-4">
               {Object.entries(META_PLACEMENTS).map(([id, label]) => (
                 <label
                   key={id}
@@ -1589,8 +1624,9 @@ function FaseConjunto({
                 </label>
               ))}
             </div>
-            <p className="font-micro mb-1.5 mt-4 text-[0.58rem] text-foreground/45">
-              FORMATO DE ENTREGA · VACÍO ES AUTOMÁTICO
+            <p className="mt-4 text-xs leading-5 text-foreground/55">
+              Igual con el formato — sin marcar nada, Meta usa Feed,
+              Historias y Reels según cuál rinda mejor para cada persona.
             </p>
             <div className="flex flex-wrap gap-4">
               {Object.entries(META_SURFACES).map(([id, item]) => (

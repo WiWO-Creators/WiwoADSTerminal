@@ -574,7 +574,7 @@ export function SegmentacionGeografica({
   onExcludedCountriesChange: (value: string[]) => void;
 }) {
   const [modo, setModo] = useState<"paises" | "lugares" | "radio" | "excluir">(
-    geoRadius ? "radio" : "paises",
+    targetPlaces.length > 0 ? "lugares" : geoRadius ? "radio" : "paises",
   );
   const [nivelLugar, setNivelLugar] = useState<"region" | "city">("city");
 

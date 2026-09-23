@@ -352,6 +352,7 @@ export function AsistenteFlotante({
                         platforms: p.plataformas,
                         details: p.resumen,
                         targetCountries: p.paises,
+                        targetPlaces: p.targetPlaces.length > 0 ? p.targetPlaces : undefined,
                         landingUrl: p.landingUrl || undefined,
                         headlines: p.headlines.length > 0 ? p.headlines : undefined,
                         descriptions: p.descriptions.length > 0 ? p.descriptions : undefined,
@@ -515,6 +516,14 @@ function TarjetaDePropuesta({
               {paisesLabel}
             </span>
           )}
+          {propuesta.targetPlaces.map((lugar) => (
+            <span
+              key={lugar.id}
+              className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground"
+            >
+              {lugar.nombre}
+            </span>
+          ))}
         </p>
         <p className="mt-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
           {propuesta.resumen}
