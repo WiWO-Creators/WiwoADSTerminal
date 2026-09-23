@@ -675,11 +675,6 @@ export default function WiwoDashboard({
           setBuilderContexto({ modo: "nueva", portfolioId, semilla });
           setView("builder");
         }}
-        onAgregarConjunto={(attachTo) => {
-          setClienteSeleccionado(attachTo.portfolioId);
-          setBuilderContexto({ modo: "adjuntar", attachTo });
-          setView("builder");
-        }}
         onCambioAplicado={() => void refreshOperationalData()}
       />
       <Toaster position="bottom-right" richColors />

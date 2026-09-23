@@ -14,11 +14,11 @@ import { actualizarCatalogoDeCuentas, type WindsorProvider } from "@/lib/windsor
 /**
  * Ejecuta de verdad el plan del constructor: crea en Google y en Meta.
  *
- * Es la única ruta HTTP del sistema que cambia algo fuera de WiWO.ADS por
- * pedido directo de una persona (el bucle de escritura en sí vive en
- * `lib/constructor-ejecutar.ts`, compartido con la creación que el asistente
- * de IA puede hacer — ver `crear_campana_real` en `lib/asistente.ts`). Sus
- * guardarraíles:
+ * Es la única ruta HTTP del sistema que cambia algo fuera de WiWO.ADS, y
+ * siempre por pedido directo de una persona (el bucle de escritura en sí
+ * vive en `lib/constructor-ejecutar.ts`). El asistente de IA nunca llama
+ * esto: solo deja el Constructor precargado para que la persona revise y
+ * publique desde acá. Sus guardarraíles:
  *
  *  - **El plan se reconstruye acá.** No se aceptan los pasos que mande el
  *    navegador: se recibe el mismo borrador que alimenta la simulación y se

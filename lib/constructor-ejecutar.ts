@@ -9,13 +9,10 @@ import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib
 
 /**
  * El bucle real que ejecuta un plan del Constructor contra Windsor —
- * encadenando ids entre pasos, deteniéndose en el primer error — separado de
- * `app/api/constructor/ejecutar/route.ts` para que dos caminos puedan usarlo
- * sin duplicar la lógica de escritura real: la ruta HTTP (publicar desde la
- * pantalla del Constructor, con confirmación explícita de una persona) y el
- * asistente de IA (crear una campaña pausada — o solo su cascarón, en Meta —
- * a partir de una recomendación ya confirmada con la persona en el chat, ver
- * `crear_campana_real` en `lib/asistente.ts`).
+ * encadenando ids entre pasos, deteniéndose en el primer error. Solo lo llama
+ * `app/api/constructor/ejecutar/route.ts`, al publicar desde la pantalla del
+ * Constructor con confirmación explícita de una persona — el asistente de IA
+ * nunca escribe en una plataforma directamente.
  *
  * No valida el borrador ni resuelve permisos: eso es responsabilidad de quien
  * llama, antes de invocar esto. Lo único que hace es correr los pasos que se

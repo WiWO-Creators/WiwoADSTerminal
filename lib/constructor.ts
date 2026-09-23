@@ -1443,48 +1443,6 @@ export function buildPlan(
 }
 
 /**
- * Solo la campaña de Meta, sin conjunto ni anuncio — el cascarón vacío que el
- * asistente de IA puede crear de verdad (ver `crear_campana_real` en
- * `lib/asistente.ts`), a diferencia de la campaña + conjunto + anuncio
- * completos que sí puede armar para Google. Meta exige un presupuesto real (o
- * el de la campaña, con Advantage Campaign Budget) para crear un conjunto, y
- * un texto y una pieza real para el anuncio — nada de eso lo puede inventar
- * la IA, así que ninguna de las dos cosas se crea acá. Deliberadamente NO
- * reutiliza `buildPlan`: esa función valida también el anuncio (mensaje,
- * imagen/video), que no aplica a un cascarón sin conjunto ni anuncio, y
- * filtrar esos errores a mano tras el hecho es más fácil de romper por
- * accidente que tener esta versión mínima aparte. Si la forma real de
- * `create_campaign` para Meta cambia en `buildPlan`, hay que replicar el
- * cambio acá también.
- *
- * Nace sin presupuesto propio (`is_adset_budget_sharing_enabled: false`,
- * igual que cuando el borrador completo NO usa presupuesto de campaña): así
- * el "+ Conjunto" que se usa para completarla después no choca con un
- * presupuesto ya declarado en dos niveles a la vez.
- */
-export function buildBareMetaCampaignStep(
-  name: string,
-  objective: Objective,
-  cuenta: CuentaCliente | null,
-): PlanStep {
-  const objetivo = OBJECTIVES[objective];
-  return {
-    platform: "meta",
-    action: "create_campaign",
-    label: cuenta
-      ? `Crear campaña en ${cuenta.name} (pausada)`
-      : "Crear campaña (pausada)",
-    params: {
-      name: nombreCompuesto(objetivo.sigla, "meta", name),
-      objective: objetivo.meta,
-      special_ad_categories: [],
-      is_adset_budget_sharing_enabled: false,
-      status: "paused",
-    },
-  };
-}
-
-/**
  * Una palabra clave escrita con la sintaxis real de Google Ads:
  * `palabra` es concordancia amplia, `"palabra"` es de frase, `[palabra]` es
  * exacta. Es la misma convención del editor de palabras clave de Google, no
