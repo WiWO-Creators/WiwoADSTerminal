@@ -1,4 +1,6 @@
 import type { Decision } from "@/app/data";
+import { activa } from "@/lib/estado-campana";
+import { moneda } from "@/lib/monedas";
 import { platformLabel } from "@/lib/plataformas";
 import type { Portfolio } from "@/lib/portafolios-store";
 import type { WindsorCampaign } from "@/lib/windsor";
@@ -64,24 +66,6 @@ export function rangoL7DConRezago(ahora: Date): { desde: string; hasta: string }
 
 function iso(fecha: Date): string {
   return fecha.toISOString().slice(0, 10);
-}
-
-function activa(status: string | null): boolean {
-  const valor = (status ?? "").toUpperCase();
-  return valor === "ENABLED" || valor === "ACTIVE";
-}
-
-function moneda(valorMicros: number, currency: string | null): string {
-  try {
-    return new Intl.NumberFormat("es-CL", {
-      style: "currency",
-      currency: currency ?? "CLP",
-      maximumFractionDigits: 0,
-    }).format(valorMicros / 1_000_000);
-  } catch {
-    // Un código de moneda que Intl no reconoce no debe tumbar la evaluación.
-    return `${(valorMicros / 1_000_000).toLocaleString("es-CL")} ${currency ?? ""}`;
-  }
 }
 
 /**

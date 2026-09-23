@@ -13,16 +13,41 @@ import type { Portfolio } from "@/lib/portafolios-store";
  * pendiente: lo que se ve es lo que se puede hacer ahí mismo.
  *
  * Mismos umbrales que `lib/reglas.ts` (`UMBRAL_DESPERDICIO_X_CPA`,
- * `UMBRAL_DEGRADACION_X_CPA`, `CONVERSIONES_MINIMAS_DEGRADACION`), repetidos
- * acá en vez de importados: este módulo es puro a propósito —sin ninguna
- * dependencia de la plataforma— para poder probarlo con `node --test` sin
- * arrastrar el resto de imports de `reglas.ts`. Si cambia un umbral, cambia
- * en los dos archivos. No incluye la regla de presupuesto (escalar/reducir):
- * esa no tiene una acción de un solo clic segura desde acá todavía.
+ * `UMBRAL_DEGRADACION_X_CPA`, `CONVERSIONES_MINIMAS_DEGRADACION`) y las
+ * mismas `activa`/`moneda`, todos repetidos acá en vez de importados: este
+ * módulo se prueba con `node --test` corriendo el `.ts` crudo
+ * (`tests/alertas.test.mjs`), sin el paso de build que resuelve el alias
+ * `@/`. Un import de VALOR con ese alias (o incluso uno relativo sin
+ * extensión) revienta ahí en tiempo de ejecución — comprobado en vivo al
+ * intentar importar `activa`/`moneda` desde `lib/estado-campana.ts` y
+ * `lib/monedas.ts` (donde sí viven para que `lib/reglas.ts`, que no se
+ * prueba así, las importe de verdad). Los `import type` de arriba sí pueden
+ * usar el alias: se borran enteros al compilar y nunca llegan a necesitar
+ * resolverlo. Si cambia un umbral o una de estas dos funciones, cambia en
+ * los dos lados. No incluye la regla de presupuesto (escalar/reducir): esa
+ * no tiene una acción de un solo clic segura desde acá todavía.
  */
 const UMBRAL_DESPERDICIO_X_CPA = 2;
 const UMBRAL_DEGRADACION_X_CPA = 1.4;
 const CONVERSIONES_MINIMAS_DEGRADACION = 3;
+
+function activa(status: string | null): boolean {
+  const valor = (status ?? "").toUpperCase();
+  return valor === "ENABLED" || valor === "ACTIVE";
+}
+
+function moneda(valorMicros: number, currency: string | null): string {
+  try {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency: currency ?? "CLP",
+      maximumFractionDigits: 0,
+    }).format(valorMicros / 1_000_000);
+  } catch {
+    // Un código de moneda que Intl no reconoce no debe tumbar la evaluación.
+    return `${(valorMicros / 1_000_000).toLocaleString("es-CL")} ${currency ?? ""}`;
+  }
+}
 
 export type Severidad = "critica" | "alta" | "media";
 
@@ -38,22 +63,6 @@ export type Alerta = {
   accion: { tipo: "pausar"; cuentaId: string; campanaId: string } | null;
 };
 
-function activa(status: string | null): boolean {
-  const valor = (status ?? "").toUpperCase();
-  return valor === "ENABLED" || valor === "ACTIVE";
-}
-
-function moneda(valorMicros: number, currency: string | null): string {
-  try {
-    return new Intl.NumberFormat("es-CL", {
-      style: "currency",
-      currency: currency ?? "CLP",
-      maximumFractionDigits: 0,
-    }).format(valorMicros / 1_000_000);
-  } catch {
-    return `${(valorMicros / 1_000_000).toLocaleString("es-CL")} ${currency ?? ""}`;
-  }
-}
 
 function accionDePausar(
   c: CampaignSummary,
