@@ -1636,14 +1636,10 @@ function FaseConjunto({
         <Seccion titulo="Palabras clave">
           <Textarea
             value={draft.keywords.join("\n")}
-            onChange={(e) =>
-              onChange({
-                keywords: e.target.value.split("\n").filter((line) => line.trim()),
-              })
-            }
+            onChange={(e) => onChange({ keywords: e.target.value.split("\n") })}
             rows={4}
             placeholder={'zapatillas running\n"zapatillas running mujer"\n[comprar zapatillas running]'}
-            className="bg-field/60"
+            className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
           />
           <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
             Una por línea, con la sintaxis de Google Ads: <code>palabra</code>{" "}
@@ -1807,11 +1803,17 @@ function FaseAnuncio({
         <>
           <Seccion titulo="Identidad">
             {cuentaMeta ? (
-              <p className="text-sm text-foreground/75">
-                {cuentaMeta.pageId
-                  ? `Publica como la página ${cuentaMeta.pageId}.`
-                  : `Publica desde ${cuentaMeta.name}.`}
-              </p>
+              cuentaMeta.pageId ? (
+                <IdentidadMeta
+                  portfolioId={draft.portfolioId}
+                  accountId={cuentaMeta.externalId}
+                  pageId={cuentaMeta.pageId}
+                />
+              ) : (
+                <p className="text-sm text-foreground/75">
+                  Publica desde {cuentaMeta.name}.
+                </p>
+              )
             ) : (
               <SelectorCuenta
                 platform="meta"
@@ -2000,15 +2002,15 @@ function FaseAnuncio({
               <Textarea
                 value={draft.headlines.join("\n")}
                 onChange={(e) =>
-                  onChange({
-                    headlines: e.target.value
-                      .split("\n")
-                      .filter((line) => line.trim()),
-                  })
+                  // Sin filtrar acá: filtrar la línea vacía que deja un Enter
+                  // recién apretado hacía que ese salto de línea desapareciera
+                  // al instante, y tipear Enter dejaba de funcionar. Lo vacío
+                  // se descarta recién al usar la lista (Contador, buildPlan).
+                  onChange({ headlines: e.target.value.split("\n") })
                 }
                 rows={4}
                 placeholder={"Envío gratis en 24 horas\nCompra directa\nGarantía de un año"}
-                className="bg-field/60"
+                className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
               />
               <Contador lineas={draft.headlines} limite={30} minimo={3} maximo={15} />
             </Campo>
@@ -2016,14 +2018,10 @@ function FaseAnuncio({
               <Textarea
                 value={draft.descriptions.join("\n")}
                 onChange={(e) =>
-                  onChange({
-                    descriptions: e.target.value
-                      .split("\n")
-                      .filter((line) => line.trim()),
-                  })
+                  onChange({ descriptions: e.target.value.split("\n") })
                 }
                 rows={3}
-                className="bg-field/60"
+                className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
               />
               <Contador lineas={draft.descriptions} limite={90} minimo={2} maximo={4} />
             </Campo>
@@ -2080,6 +2078,60 @@ function FaseAnuncio({
  * Google o Meta si el sitio está publicado en un dominio real — en
  * `localhost` sirve para previsualizar, no para publicar de verdad.
  */
+/**
+ * El nombre real de la página de Facebook (y de la cuenta de Instagram, si
+ * el cliente tiene una) detrás del `pageId` numérico — en vez de mostrar
+ * solo el id crudo. Reutiliza `/api/creatividades`: ya resuelve pageId e
+ * instagramId del lado del servidor y ahora también trae el nombre
+ * (`fetchIdentidadMeta`, cacheado 7 días — un nombre de página no cambia
+ * casi nunca). Sin nombre encontrado (cuenta sin ninguna publicación
+ * orgánica todavía), se cae de vuelta al id crudo — nunca se inventa uno.
+ */
+function IdentidadMeta({
+  portfolioId,
+  accountId,
+  pageId,
+}: {
+  portfolioId: string;
+  accountId: string;
+  pageId: string;
+}) {
+  const [identidad, setIdentidad] = useState<{
+    pageName: string | null;
+    instagramName: string | null;
+    instagramUsername: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a resolver al cambiar de cuenta
+    setIdentidad(null);
+    const params = new URLSearchParams({ portfolioId, accountId });
+    fetch(`/api/creatividades?${params}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((body: { identidad?: typeof identidad }) => {
+        if (!cancelado) setIdentidad(body.identidad ?? null);
+      })
+      .catch(() => {
+        // Sin nombre, queda el id crudo — no es un dato crítico para publicar.
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [portfolioId, accountId]);
+
+  const partes: string[] = [];
+  if (identidad?.pageName) partes.push(`la página ${identidad.pageName}`);
+  else partes.push(`la página ${pageId}`);
+  if (identidad?.instagramUsername) partes.push(`@${identidad.instagramUsername} en Instagram`);
+
+  return (
+    <p className="text-sm text-foreground/75">
+      Publica como {partes.join(" y ")}.
+    </p>
+  );
+}
+
 function SubidaDeArchivo({
   portfolioId,
   onSubido,
