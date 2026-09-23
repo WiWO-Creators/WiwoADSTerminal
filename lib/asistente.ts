@@ -494,27 +494,39 @@ async function ejecutarHerramienta(
     // hace el selector del Constructor — y se descarta si no hay match; el
     // modelo nunca arma un id de región/ciudad por su cuenta.
     const lugaresPedidos = Array.isArray(entrada.lugares) ? entrada.lugares : [];
-    const targetPlaces: LugarSegmentable[] = [];
-    for (const pedido of lugaresPedidos.slice(0, 15)) {
-      if (typeof pedido !== "object" || pedido === null) continue;
-      const { nombre, tipo, pais } = pedido as Record<string, unknown>;
-      if (typeof nombre !== "string" || !nombre.trim()) continue;
-      if (tipo !== "region" && tipo !== "city") continue;
-      if (typeof pais !== "string" || !isosValidos.has(pais)) continue;
-      const encontrados = await buscarGeoTargets({ tier: tipo, query: nombre, countryCode: pais });
-      const mejor = encontrados[0];
-      if (mejor && !targetPlaces.some((l) => l.id === mejor.id)) {
+    const pedidosValidos = lugaresPedidos
+      .slice(0, 15)
+      .flatMap((pedido): Array<{ nombre: string; tipo: "region" | "city"; pais: string }> => {
+        if (typeof pedido !== "object" || pedido === null) return [];
+        const { nombre, tipo, pais } = pedido as Record<string, unknown>;
+        if (typeof nombre !== "string" || !nombre.trim()) return [];
+        if (tipo !== "region" && tipo !== "city") return [];
+        if (typeof pais !== "string" || !isosValidos.has(pais)) return [];
+        return [{ nombre, tipo, pais }];
+      });
+    // Cada lugar es independiente del resto — en serie, hasta 15 lugares
+    // significaban hasta 30 idas y vueltas de I/O (D1 + Nominatim) una
+    // detrás de otra antes de poder responder.
+    const resueltos = await Promise.all(
+      pedidosValidos.map(async ({ nombre, tipo, pais }) => {
+        const encontrados = await buscarGeoTargets({ tier: tipo, query: nombre, countryCode: pais });
+        const mejor = encontrados[0];
+        if (!mejor) return null;
         // Meta no tiene su propio id de región/ciudad vía Windsor: sin esto
         // el lugar solo segmentaría la campaña de Google, igual que antes.
         const coordenadas = await geocodificarLugar(mejor.nombreCanonico, mejor.countryCode);
-        targetPlaces.push({
+        return {
           id: mejor.id,
           nombre: mejor.nombre,
           countryCode: mejor.countryCode,
           tier: tipo,
           ...(coordenadas ?? {}),
-        });
-      }
+        } satisfies LugarSegmentable;
+      }),
+    );
+    const targetPlaces: LugarSegmentable[] = [];
+    for (const lugar of resueltos) {
+      if (lugar && !targetPlaces.some((l) => l.id === lugar.id)) targetPlaces.push(lugar);
     }
 
     const landingUrl = String(entrada.landing_url ?? "").trim();
