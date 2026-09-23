@@ -67,9 +67,9 @@ lateral tiene dos grupos:
 | Sección | Qué hace |
 |---|---|
 | **Cliente** | Cartera de clientes para elegir uno; adentro, ficha, cuentas conectadas y tabla de campañas/conjuntos/anuncios de ese cliente, con pausar/activar y gestión (ver abajo) |
-| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
-| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios) |
-| **Dashboard C-Level** | Lectura ejecutiva: inversión, resultados, estado de cartera y calidad del dato |
+| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, región/ciudad por búsqueda, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
+| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas —recordadas en el navegador—, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios ya leído) |
+| **Dashboard C-Level** | Lectura ejecutiva: inversión, clics, resultados **desglosados por objetivo real** (una cifra de "conversiones" mezclando ventas con awareness no dice nada — cada [AE]/[VTA]/[LDS]/[TRF]/[OCV] se mide con su propia métrica), estado de cartera y calidad del dato |
 
 **Gestión** (administración de cuenta, no campaña):
 | Sección | Qué hace |
@@ -162,6 +162,8 @@ lib/
   windsor.ts            TODA la lectura y escritura contra Windsor.ai
   constructor.ts        arma el plan de una campaña (buildPlan) sin ejecutarlo
   geo.ts                países segmentables + su id de Google verificado
+  geo-targets-store.ts  búsqueda de región/ciudad reales (tabla geo_targets)
+  objetivos.ts          taxonomía [AE]/[VTA]/[LDS]/[TRF]/[OCV] + resultado por objetivo
   permisos.ts           roles y capacidades
   reglas.ts             motor de recomendaciones (fase 1, sin autonomía)
   asistente.ts          agente de IA: herramientas de lectura y propuestas
@@ -193,10 +195,14 @@ no tener que redescubrirlos:
   (app propia en Meta for Developers, credenciales nuevas, revisión de
   permisos `ads_management`) — una decisión de infraestructura distinta a
   todo lo que corre hoy sobre Windsor.
-- **Segmentación por ciudad o región** (Google y Meta) no está disponible:
-  las dos exigen buscar un id mediante un endpoint de búsqueda geográfica
-  que Windsor no expone. Sí está disponible por **país** y por **radio**
-  (círculo en el mapa, con coordenadas crudas — eso no exige buscar nada).
+- **Segmentación por región/ciudad**: disponible para **Google** (tabla
+  `geo_targets` en D1, sembrada desde la misma fuente oficial de Google que
+  los 219 países — `drizzle/0014_geo_targets.sql` — buscable desde el
+  Constructor, pestaña "Región / Ciudad"). **No** para Meta: Windsor no
+  expone, para el conector `facebook`, una forma de buscar sus propios ids
+  de región/ciudad (son un sistema de ids distinto al de Google) — ahí sigue
+  valiendo solo país o radio (círculo en el mapa, con coordenadas crudas,
+  que no exige buscar ningún id).
 - **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
   las que ya existen (eso todavía se hace en Google Ads directamente).
 - **Borrar campañas**: no existe esa acción en Windsor; solo se pausan. El
