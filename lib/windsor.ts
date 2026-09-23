@@ -1333,6 +1333,7 @@ export async function fetchFacebookPosts(
         "facebook_organic",
         [
           "account_id",
+          "account_name",
           "post_id",
           "message",
           "created_time",
@@ -1348,6 +1349,11 @@ export async function fetchFacebookPosts(
         rangeEnd,
         { selectAccounts: pageId },
       );
+
+      // El nombre real de la página viaja gratis en esta misma consulta
+      // (`account_name`) — se guarda aparte para el paso de Identidad del
+      // Constructor sin pedirle a Windsor una consulta extra solo por eso.
+      void guardarNombreDeCuenta("facebook", pageId, text(raw[0]?.account_name));
 
       return raw
         .map((row): OrganicPost | null => {
@@ -1395,6 +1401,8 @@ export async function fetchInstagramMedia(
         "instagram",
         [
           "account_id",
+          "account_name",
+          "username",
           "media_id",
           "media_caption",
           "timestamp",
@@ -1420,6 +1428,13 @@ export async function fetchInstagramMedia(
         rangeStart,
         rangeEnd,
         { selectAccounts: accountId },
+      );
+
+      void guardarNombreDeCuenta(
+        "instagram",
+        accountId,
+        text(raw[0]?.account_name),
+        text(raw[0]?.username),
       );
 
       return raw
@@ -1467,6 +1482,93 @@ export async function fetchInstagramMedia(
         .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
     },
   );
+}
+
+const IDENTIDAD_CACHE_KEY = "windsor_identidad_v1";
+
+export type IdentidadMeta = {
+  pageName: string | null;
+  instagramName: string | null;
+  instagramUsername: string | null;
+};
+
+/**
+ * Guarda el nombre real de una página/cuenta detrás de un post o una
+ * publicación que de todos modos ya se estaba trayendo — nunca dispara una
+ * consulta propia a Windsor. Una primera versión de esto sí pedía su propia
+ * consulta (`facebook_organic`/`instagram`, dos años de rango) y duplicó el
+ * tiempo de `/api/creatividades` en frío: de ~93 s a más de 2 min, medido en
+ * vivo. Por eso ahora es un efecto secundario de `fetchFacebookPosts` /
+ * `fetchInstagramMedia` en vez de una función que se llama aparte.
+ */
+async function guardarNombreDeCuenta(
+  plataforma: "facebook" | "instagram",
+  accountId: string,
+  nombre: string | null,
+  usuario: string | null = null,
+): Promise<void> {
+  if (!nombre && !usuario) return;
+  try {
+    const db = getRawDb();
+    await db
+      .prepare(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        `${IDENTIDAD_CACHE_KEY}:${plataforma}:${accountId}`,
+        JSON.stringify({ nombre, usuario }),
+        Date.now(),
+      )
+      .run();
+  } catch (error) {
+    // Es un dato de cortesía para la pantalla de Identidad — perderlo no
+    // debe tumbar la lectura real de publicaciones que lo trajo de paso.
+    console.error("WiWO.ADS guardarNombreDeCuenta", error);
+  }
+}
+
+/**
+ * Nombre real de la Página de Facebook y de la cuenta de Instagram detrás de
+ * un `pageId`/`instagramId` — para mostrar "Colbún Energía" y
+ * "@energiacolbun" en vez del id numérico crudo en el paso de Identidad del
+ * Constructor. Nunca golpea Windsor: solo lee lo que
+ * `fetchFacebookPosts`/`fetchInstagramMedia` ya haya guardado de paso la
+ * última vez que alguien abrió el selector de publicaciones de esa cuenta.
+ * `null` si eso todavía no pasó — la pantalla se cae de vuelta al id crudo,
+ * nunca inventa un nombre.
+ */
+export async function fetchIdentidadMeta(
+  pageId: string | null,
+  instagramId: string | null,
+): Promise<IdentidadMeta> {
+  const vacio: IdentidadMeta = { pageName: null, instagramName: null, instagramUsername: null };
+  if (!pageId && !instagramId) return vacio;
+
+  const db = getRawDb();
+  const claves = [
+    pageId ? `${IDENTIDAD_CACHE_KEY}:facebook:${pageId}` : null,
+    instagramId ? `${IDENTIDAD_CACHE_KEY}:instagram:${instagramId}` : null,
+  ].filter((k): k is string => k !== null);
+  if (claves.length === 0) return vacio;
+
+  const { results } = await db
+    .prepare(
+      `SELECT key, value FROM app_meta WHERE key IN (${claves.map(() => "?").join(",")})`,
+    )
+    .bind(...claves)
+    .all<{ key: string; value: string }>();
+
+  const porClave = new Map((results ?? []).map((r) => [r.key, JSON.parse(r.value) as { nombre: string | null; usuario: string | null }]));
+  const pagina = pageId ? porClave.get(`${IDENTIDAD_CACHE_KEY}:facebook:${pageId}`) : null;
+  const instagram = instagramId ? porClave.get(`${IDENTIDAD_CACHE_KEY}:instagram:${instagramId}`) : null;
+
+  return {
+    pageName: pagina?.nombre ?? null,
+    instagramName: instagram?.nombre ?? null,
+    instagramUsername: instagram?.usuario ?? null,
+  };
 }
 
 /**
