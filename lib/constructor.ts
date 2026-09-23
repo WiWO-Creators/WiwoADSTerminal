@@ -573,6 +573,21 @@ export type CampaignDraft = {
    * interpreta al armar el plan, no acá.
    */
   keywords: string[];
+  /**
+   * Google: palabras clave negativas a nivel de campaña — misma sintaxis y
+   * mismo parser que `keywords` (`push_negative_keywords`, verificada en
+   * `list_actions` sobre `google_ads`). Evita que el anuncio aparezca en
+   * búsquedas de soporte, empleo o de la competencia que nadie pidió pautar.
+   */
+  negativeKeywords: string[];
+  /**
+   * Google: tope de CPC (moneda de la cuenta, no micros — se convierte al
+   * armar el plan). Solo tiene efecto real cuando la puja de la campaña es
+   * Maximizar clics (`target_spend`): la acción real `set_cpc_bid_ceiling`
+   * documenta que las demás estrategias tratan el tope como algo de cartera,
+   * no ajustable por campaña. `null` deja la puja sin techo, como hasta ahora.
+   */
+  cpcCeiling: number | null;
   /** Meta: texto principal del anuncio. */
   message: string;
   /**
@@ -1171,6 +1186,44 @@ export function buildPlan(
       });
     }
 
+    // Negativas: a nivel de campaña, no del grupo — mismo parser que las
+    // palabras clave positivas, misma sintaxis real de Google Ads.
+    const palabrasNegativas = draft.negativeKeywords
+      .map((linea) => linea.trim())
+      .filter(Boolean)
+      .map(parsearPalabraClave);
+    if (palabrasNegativas.length > 0) {
+      steps.push({
+        platform: "google",
+        action: "push_negative_keywords",
+        label: "Añadir palabras clave negativas",
+        params: {
+          level: "campaign",
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          keywords: palabrasNegativas,
+        },
+      });
+    }
+
+    // Tope de CPC: solo aplica de verdad con Maximizar clics — con otra
+    // estrategia la acción real lo trata como algo de cartera y no de
+    // campaña, así que ahí no se envía (ver doc de `cpcCeiling` más arriba).
+    if (
+      draft.cpcCeiling !== null &&
+      draft.cpcCeiling > 0 &&
+      objective.google !== "maximize_conversions"
+    ) {
+      steps.push({
+        platform: "google",
+        action: "set_cpc_bid_ceiling",
+        label: "Definir tope de CPC",
+        params: {
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          amount_micros: Math.round(draft.cpcCeiling * 1_000_000),
+        },
+      });
+    }
+
     // Ubicaciones: acción aparte de Google, no un campo de create_campaign.
     // Solo se define para una campaña nueva — una que ya existe puede tener
     // una segmentación deliberada, y este plan no la toca.
@@ -1628,6 +1681,13 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     pathDisplay1: String(body.pathDisplay1 ?? "").slice(0, 15),
     pathDisplay2: String(body.pathDisplay2 ?? "").slice(0, 15),
     keywords: (Array.isArray(body.keywords) ? body.keywords : []).map(String),
+    negativeKeywords: (Array.isArray(body.negativeKeywords) ? body.negativeKeywords : []).map(
+      String,
+    ),
+    cpcCeiling:
+      typeof body.cpcCeiling === "number" && Number.isFinite(body.cpcCeiling) && body.cpcCeiling > 0
+        ? body.cpcCeiling
+        : null,
     message: String(body.message ?? ""),
     metaHeadline: String(body.metaHeadline ?? ""),
     metaDescription: String(body.metaDescription ?? ""),

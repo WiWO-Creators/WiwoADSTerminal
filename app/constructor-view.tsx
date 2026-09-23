@@ -216,6 +216,8 @@ function borradorInicial(
     pathDisplay1: "",
     pathDisplay2: "",
     keywords: semilla?.keywords ?? [],
+    negativeKeywords: [],
+    cpcCeiling: null,
     message: semilla?.metaMessage ?? "",
     metaHeadline: semilla?.metaHeadline ?? "",
     metaDescription: semilla?.metaDescription ?? "",
@@ -1717,6 +1719,41 @@ function FaseConjunto({
             es concordancia amplia, <code>&quot;palabra&quot;</code> de frase,{" "}
             <code>[palabra]</code> exacta. Sin al menos una, el grupo de
             anuncios no tiene qué lo dispare.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && draft.googleChannel === "search" && (
+        <Seccion titulo="Palabras clave negativas">
+          <Textarea
+            value={draft.negativeKeywords.join("\n")}
+            onChange={(e) => onChange({ negativeKeywords: e.target.value.split("\n") })}
+            rows={3}
+            placeholder={"boleta\ntrabajo\nenel"}
+            className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
+          />
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Opcional, misma sintaxis que las palabras clave de arriba. Van a
+            nivel de campaña — evitan que el anuncio salga en búsquedas de
+            soporte, empleo o de la competencia que nadie pidió pautar.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && OBJECTIVES[draft.objective].google !== "maximize_conversions" && (
+        <Seccion titulo="Tope de CPC">
+          <Input
+            value={draft.cpcCeiling ?? ""}
+            onChange={(e) =>
+              onChange({ cpcCeiling: e.target.value ? Number(e.target.value) : null })
+            }
+            placeholder="Sin tope"
+            className="bg-field/60 sm:w-40"
+          />
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Opcional. Con Maximizar clics, Google puede pujar caro por pocos
+            clics y agotar el presupuesto del día — esto le pone un techo por
+            clic. Vacío deja la puja sin tope, como hasta ahora.
           </p>
         </Seccion>
       )}
