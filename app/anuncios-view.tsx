@@ -875,23 +875,31 @@ export function AnunciosView({
                       plataforma no reporta nada para algo que estuvo apagado.
                     */}
                     <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
-                      {fila.conActividad
-                        ? dinero(fila.spendMicros, fila.currency)
-                        : "—"}
+                      {fila.conActividad ? (
+                        dinero(fila.spendMicros, fila.currency)
+                      ) : (
+                        <SinDato />
+                      )}
                     </TableCell>
                     <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.conActividad ? entero(fila.impressions) : "—"}
+                      {fila.conActividad ? entero(fila.impressions) : <SinDato />}
                     </TableCell>
                     <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.conActividad ? entero(fila.clicks) : "—"}
+                      {fila.conActividad ? entero(fila.clicks) : <SinDato />}
                     </TableCell>
                     <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
-                      {!fila.conActividad || fila.resultado === null
-                        ? "—"
-                        : decimal(fila.resultado)}
+                      {!fila.conActividad || fila.resultado === null ? (
+                        <SinDato />
+                      ) : (
+                        decimal(fila.resultado)
+                      )}
                     </TableCell>
                     <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.costo === null ? "—" : dinero(Math.round(fila.costo * 1_000_000), fila.currency)}
+                      {fila.costo === null ? (
+                        <SinDato />
+                      ) : (
+                        dinero(Math.round(fila.costo * 1_000_000), fila.currency)
+                      )}
                     </TableCell>
                     <TableCell>
                       {fila.objetivo ? (
@@ -1183,4 +1191,16 @@ function decimal(valor: number): string {
   return new Intl.NumberFormat("es-CL", { maximumFractionDigits: 1 }).format(
     valor,
   );
+}
+
+/**
+ * "Sin actividad en el rango" — siempre "—", nunca 0 (ver la nota más
+ * arriba). Antes heredaba el mismo peso visual que un número real (negrita
+ * incluida en Invertido/Resultados), así que una fila sin actividad se leía
+ * casi igual que una con datos. Su propio tono apagado, sin negrita,
+ * distingue "no hay dato" de "el dato es esto" de un vistazo, sin dejar de
+ * mostrarlo.
+ */
+function SinDato() {
+  return <span className="font-normal text-foreground/25">—</span>;
 }
