@@ -193,7 +193,13 @@ function GeoMap({
         center={[-15, -68]}
         zoom={3}
         minZoom={2}
-        scrollWheelZoom
+        // false, no true: el mapa vive inline en un formulario largo (fase
+        // "Conjunto" del Constructor), no en un modal. Con la rueda del
+        // mouse activa por defecto, bajar la página pasando el cursor sobre
+        // el mapa hace zoom ahí en vez de scrollear la página — atrapa el
+        // scroll sin avisar por qué. Encontrado en una revisión de código:
+        // se había perdido en un refactor anterior de este archivo.
+        scrollWheelZoom={false}
         style={{ height: 320, width: "100%", background: "#20211f" }}
       >
         <TileLayer
@@ -509,14 +515,22 @@ function SelectorDeLugares({
         />
       </div>
 
-      {busqueda.trim().length >= 2 && (
+      {busqueda.trim().length >= 2 && (() => {
+        // Se filtra ANTES de decidir el mensaje: sin esto, un resultado que
+        // ya estaba elegido dejaba `resultados.length` en 1 (no en 0), así
+        // que ni se mostraba el resultado (el filtro de abajo lo saca) ni el
+        // aviso de "nada coincide" — el panel quedaba en blanco sin explicar
+        // por qué.
+        const porMostrar = resultados.filter((lugar) => !idsElegidos.has(lugar.id));
+        return (
         <div className="scrollbar-thin max-h-52 overflow-y-auto rounded-lg border border-foreground/10 bg-field/40">
           {buscando ? (
             <p className="px-3 py-2.5 text-xs text-foreground/40">Buscando…</p>
-          ) : resultados.length === 0 ? (
+          ) : porMostrar.length === 0 ? (
             <p className="px-3 py-2.5 text-xs text-foreground/40">
-              Nada coincide con la búsqueda — ni en la lista de Google ni en
-              el mapa.
+              {resultados.length === 0
+                ? "Nada coincide con la búsqueda — ni en la lista de Google ni en el mapa."
+                : "Ya lo elegiste — mirá los chips de arriba."}
             </p>
           ) : (
             <>
@@ -526,8 +540,7 @@ function SelectorDeLugares({
                   segmentar la campaña de Meta.
                 </p>
               )}
-              {resultados
-                .filter((lugar) => !idsElegidos.has(lugar.id))
+              {porMostrar
                 .map((lugar) => (
                   <button
                     key={lugar.id}
@@ -545,7 +558,8 @@ function SelectorDeLugares({
             </>
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
