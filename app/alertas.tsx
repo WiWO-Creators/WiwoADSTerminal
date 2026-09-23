@@ -121,14 +121,21 @@ export function BotonDeAlertas({
         type="button"
         onClick={() => setAbierto(true)}
         aria-label={total > 0 ? `Alertas, ${total} pendientes` : "Alertas"}
-        className="flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        title="Alertas"
+        className="relative flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:self-center group-data-[collapsible=icon]:p-0"
       >
-        <Bell className="size-4" />
-        <span className="flex-1 text-left">Alertas</span>
+        <Bell className="size-4 shrink-0" />
+        <span className="flex-1 text-left group-data-[collapsible=icon]:hidden">
+          Alertas
+        </span>
         {total > 0 && (
+          // Con el menú compacto el contador se va a la esquina del botón:
+          // esconderlo sería perder justo la señal de que hay algo pendiente,
+          // que es lo único que ese botón tiene para decir de un vistazo.
           <span
             className={cn(
               "grid size-5 place-items-center rounded-full text-[0.65rem] font-bold text-primary-foreground",
+              "group-data-[collapsible=icon]:absolute group-data-[collapsible=icon]:-top-1 group-data-[collapsible=icon]:-right-1 group-data-[collapsible=icon]:size-4 group-data-[collapsible=icon]:text-[0.55rem]",
               hayCritica ? "bg-danger" : "bg-primary",
             )}
           >

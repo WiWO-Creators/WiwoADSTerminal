@@ -5,9 +5,12 @@ import {
   Building2,
   Cog,
   History,
+  Home,
   LineChart,
   Megaphone,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plug,
   RefreshCw,
   Search,
@@ -38,6 +41,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import type {
@@ -86,7 +90,7 @@ type ItemDeMenu = {
 };
 
 const navItems: ItemDeMenu[] = [
-  { key: "control", label: "Inicio" },
+  { key: "control", label: "Inicio", icono: Home },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
     // trae su tabla de anuncios embebida, así que es una sola entrada.
@@ -724,6 +728,14 @@ function puedeVerItem(item: ItemDeMenu, role: string): boolean {
 }
 
 /**
+ * Nombre de la acción del interruptor de tema: describe a dónde va, no dónde
+ * está. Lo usan `aria-label` y `title` del botón compacto.
+ */
+function etiquetaCambioDeTema(theme: "dark" | "light") {
+  return theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
+}
+
+/**
  * Barra lateral al estilo MetriQ: logo, búsqueda, lista plana de secciones con
  * la activa marcada por una pastilla, y al pie la sesión y el tema.
  */
@@ -754,6 +766,14 @@ function AppSidebar({
   puedeAprobar: boolean;
   onCambioAplicado: () => void;
 }) {
+  // En pantalla chica la barra se abre como panel completo (`Sheet`), pero
+  // `state` sigue reflejando el ancho del escritorio: sin mirar `isMobile`
+  // el panel del celular mostraría el tema compactado aunque haya lugar de
+  // sobra. Es la misma condición que aplican las clases
+  // `group-data-[collapsible=icon]:` del resto del pie.
+  const { isMobile, state, toggleSidebar } = useSidebar();
+  const menuCompacto = !isMobile && state === "collapsed";
+
   function grupo(titulo: string | null, items: ItemDeMenu[]) {
     const visibles = items.filter((item) => puedeVerItem(item, currentUser.role));
     if (visibles.length === 0) return null;
@@ -773,18 +793,32 @@ function AppSidebar({
                   <SidebarMenuButton
                     isActive={activo}
                     onClick={() => onNavigate(item.key)}
+                    tooltip={item.label}
                     className={cn(
                       "h-11 gap-2.5 rounded-full px-4 text-[0.95rem] font-medium text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-bold data-[active=true]:text-foreground",
+                      "group-data-[collapsible=icon]:justify-center",
                     )}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        activo ? "bg-primary" : "bg-transparent",
-                      )}
-                    />
-                    <span>{item.label}</span>
+                    {item.icono ? (
+                      <item.icono
+                        aria-hidden="true"
+                        className={cn(
+                          "size-4 shrink-0",
+                          activo ? "text-primary" : "",
+                        )}
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          activo ? "bg-primary" : "bg-transparent",
+                        )}
+                      />
+                    )}
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      {item.label}
+                    </span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );
@@ -796,21 +830,54 @@ function AppSidebar({
   }
 
   return (
-    <Sidebar collapsible="offcanvas" className="border-sidebar-border">
-      <SidebarHeader className="gap-4 px-4 pt-5 pb-2">
-        {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
-        <img
-          src={theme === "light" ? "/wiwo-ads-electric.png" : "/wiwo-ads-lime.png"}
-          alt="WiWO.ADS"
-          className="h-9 w-auto max-w-full self-start object-contain object-left"
-        />
+    <Sidebar collapsible="icon" className="border-sidebar-border">
+      <SidebarHeader className="gap-4 px-4 pt-5 pb-2 group-data-[collapsible=icon]:px-2">
+        <div className="flex items-center gap-2 group-data-[collapsible=icon]:flex-col">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
+          <img
+            src={theme === "light" ? "/wiwo-ads-electric.png" : "/wiwo-ads-lime.png"}
+            alt="WiWO.ADS"
+            className="h-9 w-auto min-w-0 flex-1 object-contain object-left group-data-[collapsible=icon]:hidden"
+          />
+          {/* La marca cuando no hay ancho para el logotipo. `aria-hidden`
+              porque el nombre del producto ya lo dice el <title> de la
+              página: repetirlo acá solo agrega ruido al lector de pantalla. */}
+          <span
+            aria-hidden="true"
+            className="marca-w hidden text-[1.6rem] leading-none group-data-[collapsible=icon]:block"
+          >
+            W
+          </span>
+          {/* El botón de compactar vive adentro del menú, no en la barra de
+              arriba: es un control del menú y se busca donde está la cosa
+              que controla. No usa `SidebarTrigger` porque ese trae el panel
+              sin flecha, y acá la flecha de adentro tiene que apuntar a
+              donde se va a mover la barra. */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={menuCompacto ? "Expandir menú" : "Compactar menú"}
+            title={menuCompacto ? "Expandir menú" : "Compactar menú"}
+            aria-expanded={!menuCompacto}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {menuCompacto ? (
+              <PanelLeftOpen className="size-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
         <button
           type="button"
           onClick={onBuscar}
-          className="flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="Buscar"
+          className="flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:self-center group-data-[collapsible=icon]:p-0"
         >
-          <Search className="size-4" />
-          <span className="flex-1 text-left">Buscar…</span>
+          <Search className="size-4 shrink-0" />
+          <span className="flex-1 text-left group-data-[collapsible=icon]:hidden">
+            Buscar…
+          </span>
         </button>
         <BotonDeAlertas
           clienteId={clienteId}
@@ -826,36 +893,42 @@ function AppSidebar({
         {grupo("Gestión", navItemsGestion)}
       </SidebarContent>
 
-      <SidebarFooter className="gap-3 border-t border-sidebar-border px-4 py-4">
-        {puedeVerItem(itemEquipo, currentUser.role) && (
-          // Solo el engranaje. Sin texto visible, el nombre lo llevan
-          // `aria-label` (lectores de pantalla) y `title` (pista al pasar el
-          // mouse): un icono suelto sin ninguno de los dos es un botón que
-          // nadie sabe qué hace hasta que lo aprieta.
-          <button
-            type="button"
-            onClick={() => onNavigate(itemEquipo.key)}
-            aria-label={itemEquipo.label}
-            title={itemEquipo.label}
-            aria-current={view === itemEquipo.key ? "page" : undefined}
-            className={cn(
-              "flex size-10 shrink-0 items-center justify-center self-start rounded-full transition-colors",
-              view === itemEquipo.key
-                ? "bg-sidebar-accent text-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
-            )}
-          >
-            <Cog className="size-5" aria-hidden="true" />
-          </button>
-        )}
-        <div className="min-w-0">
-          <p className="truncate text-[0.95rem] font-bold text-foreground">
+      <SidebarFooter className="gap-3 border-t border-sidebar-border px-4 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
+        <div className="min-w-0 group-data-[collapsible=icon]:contents">
+          <p className="truncate text-[0.95rem] font-bold text-foreground group-data-[collapsible=icon]:hidden">
             {currentUser.displayName}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{currentUser.email}</p>
-          <span className="mt-2 inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase">
-            {roleLabels[currentUser.role] ?? currentUser.role}
-          </span>
+          <p className="truncate text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            {currentUser.email}
+          </p>
+          <div className="mt-2 flex items-center gap-2 group-data-[collapsible=icon]:mt-0">
+            <span className="inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase group-data-[collapsible=icon]:hidden">
+              {roleLabels[currentUser.role] ?? currentUser.role}
+            </span>
+            {puedeVerItem(itemEquipo, currentUser.role) && (
+              // Solo el engranaje, al lado del rol: las dos cosas hablan de
+              // permisos, y ahí es donde se las busca. Sin texto visible, el
+              // nombre lo llevan `aria-label` (lectores de pantalla) y
+              // `title` (pista al pasar el mouse): un icono suelto sin
+              // ninguno de los dos es un botón que nadie sabe qué hace hasta
+              // que lo aprieta.
+              <button
+                type="button"
+                onClick={() => onNavigate(itemEquipo.key)}
+                aria-label={itemEquipo.label}
+                title={itemEquipo.label}
+                aria-current={view === itemEquipo.key ? "page" : undefined}
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                  view === itemEquipo.key
+                    ? "bg-sidebar-accent text-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                )}
+              >
+                <Cog className="size-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
         <a
           href={signOutPath}
@@ -865,38 +938,60 @@ function AppSidebar({
             // vez de heredar en silencio la marca de que "ya se eligió".
             window.sessionStorage.removeItem(PUERTA_CLIENTE_STORAGE_KEY);
           }}
-          className="w-fit rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-danger"
+          title="Cerrar sesión"
+          className="w-fit rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-danger group-data-[collapsible=icon]:hidden"
         >
           Cerrar sesion
         </a>
-        <div
-          role="group"
-          aria-label="Tema de la interfaz"
-          className="flex w-fit items-center gap-0.5 rounded-full border border-border bg-field p-1"
-        >
-          {(
-            [
-              { id: "light" as const, label: "Light", Icono: Sun },
-              { id: "dark" as const, label: "Dark", Icono: Moon },
-            ]
-          ).map(({ id, label, Icono }) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={theme === id}
-              onClick={() => onThemeChange(id === "light")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-                theme === id
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icono className="size-3.5" aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-        </div>
+        {menuCompacto ? (
+          // Compactado no entran las dos opciones con su texto, así que el
+          // par pasa a ser un interruptor: muestra el tema puesto y al
+          // apretarlo salta al otro. Qué hace el botón lo dicen `aria-label`
+          // y `title`, porque el icono solo cuenta dónde estás parado, no
+          // qué pasa si lo tocas.
+          <button
+            type="button"
+            onClick={() => onThemeChange(theme === "dark")}
+            aria-label={etiquetaCambioDeTema(theme)}
+            title={etiquetaCambioDeTema(theme)}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-field text-[var(--acento-tema)] transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {theme === "dark" ? (
+              <Moon className="size-4" aria-hidden="true" />
+            ) : (
+              <Sun className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        ) : (
+          <div
+            role="group"
+            aria-label="Tema de la interfaz"
+            className="flex w-fit items-center gap-0.5 rounded-full border border-border bg-field p-1"
+          >
+            {(
+              [
+                { id: "light" as const, label: "Light", Icono: Sun },
+                { id: "dark" as const, label: "Dark", Icono: Moon },
+              ]
+            ).map(({ id, label, Icono }) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={theme === id}
+                onClick={() => onThemeChange(id === "light")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                  theme === id
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icono className="size-3.5" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );
@@ -945,7 +1040,7 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-3 bg-canvas/90 px-4 backdrop-blur-xl md:px-6">
       <div className="flex min-w-0 items-center gap-3">
-        <SidebarTrigger className="size-9 rounded-full text-muted-foreground hover:bg-sidebar-accent" />
+        <SidebarTrigger className="size-9 rounded-full text-muted-foreground hover:bg-sidebar-accent md:hidden" />
         {clientesDeclarados.length > 0 && (
           <Select
             value={clienteSeleccionado ?? TODOS_LOS_CLIENTES}
