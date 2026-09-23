@@ -157,7 +157,7 @@ function TarjetaDeModulo({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex h-full w-full flex-col items-start rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-all duration-150 hover:-translate-y-0.5 hover:border-foreground/25 hover:bg-foreground/[0.04] hover:shadow-[var(--shadow-2)] focus-visible:ring-2 focus-visible:ring-[#4242FF] focus-visible:outline-none active:translate-y-0 active:scale-[0.99]"
+      className="group flex h-full w-full flex-col items-start rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--realce-hover)] hover:bg-foreground/[0.04] hover:shadow-[0_0_0_1px_var(--realce-hover),var(--shadow-2)] focus-visible:ring-2 focus-visible:ring-[var(--realce-hover)] focus-visible:outline-none active:translate-y-0 active:scale-[0.99]"
     >
       <span
         aria-hidden="true"
@@ -166,7 +166,7 @@ function TarjetaDeModulo({
       <span className="flex w-full min-w-0 flex-1 items-start gap-4">
         <span
           aria-hidden="true"
-          className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-brand transition-colors group-hover:bg-brand/15"
+          className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-foreground transition-colors group-hover:bg-[var(--realce-hover)] group-hover:text-[var(--realce-hover-contenido)]"
         >
           <Icono className="size-5" />
         </span>

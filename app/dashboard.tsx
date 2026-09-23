@@ -799,9 +799,6 @@ function AppSidebar({
         >
           <Search className="size-4" />
           <span className="flex-1 text-left">Buscar…</span>
-          <kbd className="rounded-md bg-sidebar-accent px-1.5 py-0.5 text-[0.65rem] font-semibold text-muted-foreground">
-            ⌘K
-          </kbd>
         </button>
         <BotonDeAlertas
           clienteId={clienteId}
