@@ -221,11 +221,14 @@ function builderConstructorKey(
   clienteGlobal: string | null,
 ): string {
   if (!contexto) return `nuevo:${clienteGlobal ?? ""}`;
-  // Con el nombre de la semilla en la llave: dos propuestas seguidas del
-  // asistente para el mismo cliente igual fuerzan un Constructor nuevo, en
-  // vez de reusar uno que ya tenía otro borrador a medio escribir.
+  // El id de la propuesta manda cuando existe: dos propuestas seguidas del
+  // asistente para el mismo cliente pueden llegar con el mismo nombre (o sin
+  // nombre todavía), y ahí el nombre solo no alcanza para forzar un
+  // Constructor nuevo — se seguía editando el borrador de la propuesta
+  // anterior sin darse cuenta. Sin propuesta (desde "Clientes"), el nombre
+  // sigue siendo la única pista real.
   if (contexto.modo === "nueva") {
-    return `${contexto.portfolioId}:${contexto.semilla?.name ?? ""}`;
+    return `${contexto.portfolioId}:${contexto.semilla?.propuestaId ?? contexto.semilla?.name ?? ""}`;
   }
   const attachTo = contexto.attachTo;
   const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";

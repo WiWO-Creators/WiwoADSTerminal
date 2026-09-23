@@ -466,6 +466,12 @@ export const RADIO_MAXIMO_KM = 80;
  * Valparaíso" no se queda solo en el texto del resumen.
  */
 export type SemillaDeCampana = {
+  /** Id de la propuesta del asistente que originó esta semilla (`Propuesta.id`
+   * en `lib/asistente.ts`) — no el nombre de la campaña. Dos propuestas
+   * seguidas pueden compartir nombre (o llegar sin nombre todavía) y
+   * confundir a `builderConstructorKey`, que usa esto para decidir si debe
+   * reiniciar el Constructor; el id de la propuesta nunca se repite. */
+  propuestaId?: string;
   name: string;
   objective: Objective;
   platforms: Platform[];

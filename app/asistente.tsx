@@ -347,6 +347,7 @@ export function AsistenteFlotante({
                       if (p.tipo !== "constructor") return;
                       setAbierto(false);
                       onAbrirConstructor(p.clienteId, {
+                        propuestaId: p.id,
                         name: p.nombreSugerido,
                         objective: p.objetivo,
                         platforms: p.plataformas,
