@@ -49,17 +49,18 @@
   --field: #292929;
   /* Verde de marca para texto/íconos: neón en oscuro, verde legible en claro. */
   --brand: #3bff00;
-  /* Color con el que se resalta la tarjeta bajo el cursor en Inicio.
+  /* El acento del tema: azul en claro, verde en oscuro. Lo usan el realce
+     de la tarjeta bajo el cursor y la "W" del menú compacto.
      Va contra la intuición de usar --brand: en claro el verde de marca
      (#2a7500, ya oscurecido para que se lea sobre el beige) queda apagado
-     como realce, así que ahí manda el azul. Un token propio deja esa
+     como acento, así que ahí manda el azul. Un token propio deja esa
      decisión en un solo lugar en vez de repartirla por las vistas. */
-  --realce-hover: #3bff00;
+  --acento-tema: #3bff00;
   /* Lo que va *encima* del acento cuando la tarjeta está resaltada: el
      ícono se invierte para no perderse contra el verde. Coincide con el
      `--foreground` del tema opuesto, que es justo el contraste que hace
      falta. */
-  --realce-hover-contenido: #292929;
+  --acento-tema-contenido: #292929;
   --chart-1: #4242ff;
   --chart-2: #3bff00;
   --chart-3: #3bff00;
@@ -179,8 +180,8 @@ body {
   --input: #dcdebd;
   --field: #f8f9f2;
   --brand: #2a7500;
-  --realce-hover: #4242ff;
-  --realce-hover-contenido: #f8fad7;
+  --acento-tema: #4242ff;
+  --acento-tema-contenido: #f8fad7;
   --sidebar: #edefdd;
   --sidebar-foreground: #292929;
   --sidebar-accent: #dddfcf;
@@ -383,6 +384,20 @@ body {
 [data-slot="select-trigger"],
 [data-slot="input"] {
   border-radius: var(--radius-control);
+}
+
+/* La "W" que reemplaza al logotipo con el menú compacto.
+
+   No es un recorte del logo: es la letra dibujada con la fuente de marca.
+   Recortar el logotipo a 3 rem dejaría medio trazo cortado y se leería como
+   un error de maquetación. Toma el acento del tema —azul en claro, verde en
+   oscuro—, liso: a este tamaño un degradado se lee como suciedad en el
+   trazo, no como degradado. */
+.marca-w {
+  font-family: "Outfit", "Plus Jakarta Sans", Arial, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--acento-tema);
 }
 
 /* El logotipo usa la fuente de marca. */
