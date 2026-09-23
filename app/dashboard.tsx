@@ -160,9 +160,14 @@ const itemEquipo: ItemDeMenu = {
  * las entradas sin icono, que son las que todavía no se pensaron para acá.
  */
 function modulosDeInicio(role: string): ModuloInicio[] {
-  return [...navItems, ...navItemsGestion, itemEquipo]
-    .filter((item) => item.key !== "control" && puedeVerItem(item, role))
-    .flatMap((item) =>
+  const conGrupo = [
+    ...navItems.map((item) => ({ item, grupo: "principal" as const })),
+    ...navItemsGestion.map((item) => ({ item, grupo: "gestion" as const })),
+    { item: itemEquipo, grupo: "gestion" as const },
+  ];
+  return conGrupo
+    .filter(({ item }) => item.key !== "control" && puedeVerItem(item, role))
+    .flatMap(({ item, grupo }) =>
       item.icono && item.resumen
         ? [
             {
@@ -170,6 +175,7 @@ function modulosDeInicio(role: string): ModuloInicio[] {
               label: item.label,
               icono: item.icono,
               resumen: item.resumen,
+              grupo,
             },
           ]
         : [],

@@ -42,6 +42,10 @@ export type ModuloInicio = {
   label: string;
   icono: LucideIcon;
   resumen: string;
+  /** Misma agrupación que el menú lateral: "gestion" es administración de
+   * cuenta, no el trabajo de campaña del día a día. Separarlas acá también
+   * evita que las dos se lean como una sola lista pareja de siete opciones. */
+  grupo: "principal" | "gestion";
 };
 
 /**
@@ -91,22 +95,48 @@ export function ControlRoomView({
         )}
       </div>
 
-      <nav aria-label="Módulos">
-        {/* auto-rows-fr iguala el alto de TODAS las filas, no solo el de las
-              tarjetas de una misma fila: así el bloque se lee como una
-              grilla pareja aunque los resúmenes tengan largos distintos. */}
-          <ul className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {modulos.map((modulo) => (
-            <li key={modulo.key}>
-              <TarjetaDeModulo
-                modulo={modulo}
-                onOpen={() => onNavigate(modulo.key)}
-              />
-            </li>
-          ))}
-        </ul>
+      <nav aria-label="Módulos" className="space-y-7">
+        <GrupoDeModulos
+          modulos={modulos.filter((m) => m.grupo === "principal")}
+          onNavigate={onNavigate}
+        />
+        {modulos.some((m) => m.grupo === "gestion") && (
+          <div>
+            <p className="font-micro mb-3 text-[0.68rem] text-foreground/40">
+              GESTIÓN
+            </p>
+            <GrupoDeModulos
+              modulos={modulos.filter((m) => m.grupo === "gestion")}
+              onNavigate={onNavigate}
+            />
+          </div>
+        )}
       </nav>
     </div>
+  );
+}
+
+/* auto-rows-fr iguala el alto de TODAS las filas, no solo el de las tarjetas
+   de una misma fila: así el bloque se lee como una grilla pareja aunque los
+   resúmenes tengan largos distintos. */
+function GrupoDeModulos({
+  modulos,
+  onNavigate,
+}: {
+  modulos: ModuloInicio[];
+  onNavigate: (key: ViewKey) => void;
+}) {
+  return (
+    <ul className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {modulos.map((modulo) => (
+        <li key={modulo.key}>
+          <TarjetaDeModulo
+            modulo={modulo}
+            onOpen={() => onNavigate(modulo.key)}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -127,26 +157,32 @@ function TarjetaDeModulo({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex h-full w-full items-start gap-4 rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-colors hover:border-foreground/25 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-[#4242FF] focus-visible:outline-none"
+      className="group flex h-full w-full flex-col items-start rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-all duration-150 hover:-translate-y-0.5 hover:border-foreground/25 hover:bg-foreground/[0.04] hover:shadow-[var(--shadow-2)] focus-visible:ring-2 focus-visible:ring-[#4242FF] focus-visible:outline-none active:translate-y-0 active:scale-[0.99]"
     >
       <span
         aria-hidden="true"
-        className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-brand"
-      >
-        <Icono className="size-5" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="text-[1.02rem] font-bold text-foreground">
-            {modulo.label}
-          </span>
-          <ArrowRight
-            aria-hidden="true"
-            className="size-4 shrink-0 text-foreground/35 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70"
-          />
+        className="mb-4 block h-1 w-8 rounded-full bg-gradient-to-r from-[#3bff00] to-[#4242ff] opacity-70 transition-opacity group-hover:opacity-100"
+      />
+      <span className="flex w-full min-w-0 flex-1 items-start gap-4">
+        <span
+          aria-hidden="true"
+          className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-brand transition-colors group-hover:bg-brand/15"
+        >
+          <Icono className="size-5" />
         </span>
-        <span className="mt-1.5 block text-sm leading-6 text-foreground/58">
-          {modulo.resumen}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="text-[1.02rem] font-bold text-foreground">
+              {modulo.label}
+            </span>
+            <ArrowRight
+              aria-hidden="true"
+              className="size-4 shrink-0 text-foreground/35 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70"
+            />
+          </span>
+          <span className="mt-1.5 block text-sm leading-6 text-foreground/58">
+            {modulo.resumen}
+          </span>
         </span>
       </span>
     </button>
