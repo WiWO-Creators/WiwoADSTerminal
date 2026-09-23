@@ -134,6 +134,11 @@ type Resultado = {
     error: string | null;
   }>;
   ids: Record<string, string>;
+  /** Campañas que Windsor confirmó como creadas, pero que al releer la
+   * cuenta real (justo después, en el mismo pedido) no aparecieron —
+   * ver la nota en `app/api/constructor/ejecutar/route.ts`. Vacío en el
+   * caso normal. */
+  campanasSinConfirmar?: Array<{ platform: string; id: string }>;
   error?: string;
   /** "duplicado": ya se publicó algo igual hace poco (respuesta 409). */
   codigo?: string;
@@ -687,23 +692,31 @@ export function ConstructorView({
                 )}
               </Surface>
 
-              {resultado && (
+              {resultado && (() => {
+                const sinConfirmar = Boolean(
+                  resultado.ok && resultado.campanasSinConfirmar?.length,
+                );
+                return (
                 <Surface
                   className={cn(
                     "overflow-hidden",
-                    resultado.ok
-                      ? "border-[#3BFF00]/25 bg-[#3BFF00]/[0.05]"
-                      : "border-danger-deep/25 bg-danger-deep/[0.06]",
+                    !resultado.ok
+                      ? "border-danger-deep/25 bg-danger-deep/[0.06]"
+                      : sinConfirmar
+                        ? "border-warn-deep/30 bg-warn-deep/[0.06]"
+                        : "border-[#3BFF00]/25 bg-[#3BFF00]/[0.05]",
                   )}
                 >
                   <div className="border-b border-foreground/10 px-4 py-3">
                     <h3 className="flex items-center gap-2 font-bold text-foreground">
-                      {resultado.ok ? (
-                        <Check className="size-4 text-brand" />
-                      ) : (
+                      {!resultado.ok ? (
                         <AlertCircle className="size-4 text-danger" />
+                      ) : sinConfirmar ? (
+                        <AlertCircle className="size-4 text-warn" />
+                      ) : (
+                        <Check className="size-4 text-brand" />
                       )}
-                      {resultado.ok ? "Creado" : "Se detuvo"}
+                      {resultado.ok ? (sinConfirmar ? "Creado — sin confirmar" : "Creado") : "Se detuvo"}
                     </h3>
                     <p className="mt-1 text-xs leading-5 text-foreground/62">
                       {resultado.error ?? resultado.aviso}
@@ -745,7 +758,8 @@ export function ConstructorView({
                     </div>
                   )}
                 </Surface>
-              )}
+                );
+              })()}
             </>
           )}
         </div>

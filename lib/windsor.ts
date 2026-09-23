@@ -511,11 +511,22 @@ function claveDeAnuncio(a: WindsorAd): string {
  *
  * No toca `construidoEn`: sigue siendo la fecha del último barrido completo,
  * que es la que decide cuándo toca el siguiente.
+ *
+ * `campaignIdsVistos` devuelve, sin filtrar por lo ya guardado, cada id de
+ * campaña que Windsor realmente entregó en esta lectura — es lo que permite
+ * a quien llama comprobar si una campaña recién creada existe de verdad en la
+ * cuenta real, en vez de confiar a ciegas en que `execute_action` haya
+ * respondido `ok`. Se verificó contra un caso real (2026-09-22): Windsor
+ * confirmó como creada una campaña de Meta que nunca llegó a existir en la
+ * cuenta — ni acá, ni en el historial de cambios de la cuenta real.
  */
 export async function actualizarCatalogoDeCuentas(
   cuentas: Array<{ provider: WindsorProvider; accountId: string }>,
-): Promise<{ agregadas: number; fallos: string[] }> {
-  if (!windsorConfigured() || cuentas.length === 0) return { agregadas: 0, fallos: [] };
+): Promise<{ agregadas: number; fallos: string[]; campaignIdsVistos: Set<string> }> {
+  const campaignIdsVistos = new Set<string>();
+  if (!windsorConfigured() || cuentas.length === 0) {
+    return { agregadas: 0, fallos: [], campaignIdsVistos };
+  }
 
   const hoy = new Date();
   const rango = rangoCatalogo(hoy.toISOString().slice(0, 10));
@@ -525,10 +536,13 @@ export async function actualizarCatalogoDeCuentas(
     .prepare("SELECT value, updated_at FROM app_meta WHERE key = ? LIMIT 1")
     .bind(cacheId)
     .first<{ value: string; updated_at: number }>();
-  // Sin un catálogo base no hay a qué fundir: el barrido completo lo arma.
-  if (!cached) return { agregadas: 0, fallos: [] };
-
-  const catalogo = JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">;
+  // Sin un catálogo base no hay a qué fundir —el barrido completo lo arma—,
+  // pero igual se sigue: la consulta a Windsor de acá abajo es la única
+  // forma de llenar `campaignIdsVistos`, y quien llama la necesita aunque
+  // todavía no exista un catálogo guardado.
+  const catalogo: Omit<Catalogo, "construidoEn"> = cached
+    ? (JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">)
+    : { campanas: [], anuncios: [], rango, fallos: [] };
   const desde = iso(new Date(hoy.getTime() - CATALOGO_PARCIAL_DIAS * 86_400_000));
   const hasta = iso(hoy);
   const fallos: string[] = [];
@@ -551,6 +565,9 @@ export async function actualizarCatalogoDeCuentas(
         ]);
         const campanas = sinActividad(toCampaigns(filasCampanas, provider));
         const anuncios = sinActividad(toAds(filasAnuncios, provider));
+        for (const c of campanas) {
+          if (c.campaignId) campaignIdsVistos.add(c.campaignId);
+        }
 
         const porCampana = new Map(catalogo.campanas.map((c) => [claveDeCampana(c), c]));
         for (const c of campanas) {
@@ -571,7 +588,7 @@ export async function actualizarCatalogoDeCuentas(
     }),
   );
 
-  if (agregadas > 0 || fallos.length < unicas.size) {
+  if (cached && (agregadas > 0 || fallos.length < unicas.size)) {
     await db
       .prepare(
         `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -582,7 +599,7 @@ export async function actualizarCatalogoDeCuentas(
       .bind(cacheId, JSON.stringify(catalogo), Number(cached.updated_at))
       .run();
   }
-  return { agregadas, fallos };
+  return { agregadas, fallos, campaignIdsVistos };
 }
 
 /**

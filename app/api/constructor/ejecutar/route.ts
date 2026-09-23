@@ -4,6 +4,7 @@ import { buildPlan, normalizeDraft, type CampaignDraft, type CuentaCliente } fro
 import {
   cuentaDe,
   ejecutarPasosDelPlan,
+  idDeCreacion,
   publicacionReciente,
   registrarEjecucion,
 } from "@/lib/constructor-ejecutar";
@@ -146,11 +147,13 @@ export async function POST(request: Request) {
     }
   }
   let catalogoActualizado = false;
+  let campaignIdsVistos: Set<string> = new Set();
   if (cuentasTocadas.size > 0) {
     try {
       await Promise.race([
-        actualizarCatalogoDeCuentas([...cuentasTocadas.values()]).then(() => {
+        actualizarCatalogoDeCuentas([...cuentasTocadas.values()]).then((resultado) => {
           catalogoActualizado = true;
+          campaignIdsVistos = resultado.campaignIdsVistos;
         }),
         new Promise((resolve) => setTimeout(resolve, 25_000)),
       ]);
@@ -159,16 +162,41 @@ export async function POST(request: Request) {
     }
   }
 
+  // Windsor puede responder "ok" a una creación de campaña que después no
+  // aparece de verdad en la cuenta — pasó con una campaña de Meta el
+  // 2026-09-22, confirmada como creada acá y nunca creada ahí. Releer el
+  // catálogo recién actualizado (arriba) es lo único que puede detectarlo,
+  // así que cada campaña creada en este plan se compara contra lo que
+  // Windsor acaba de confirmar que existe de verdad.
+  const campanasSinConfirmar = realizados
+    .filter((paso) => paso.action === "create_campaign" && paso.ok)
+    .map((paso) => ({ platform: paso.platform, id: idDeCreacion(paso) }))
+    .filter(
+      (item): item is { platform: string; id: string } =>
+        item.id !== null && catalogoActualizado && !campaignIdsVistos.has(item.id),
+    );
+
+  let aviso: string;
+  if (!todoBien) {
+    aviso = "Se detuvo en el primer error. Los pasos marcados como correctos sí se crearon.";
+  } else if (campanasSinConfirmar.length > 0) {
+    aviso = `Windsor confirmó la creación, pero al releer la cuenta real no encontramos ${
+      campanasSinConfirmar.length === 1 ? "esta campaña" : "estas campañas"
+    } todavía: ${campanasSinConfirmar
+      .map((c) => `${c.platform === "google" ? "Google" : "Meta"} (id ${c.id})`)
+      .join(", ")}. Puede ser solo demora en reflejarse — revisa directamente en la plataforma antes de darla por creada.`;
+  } else {
+    aviso = "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar.";
+  }
+
   return Response.json(
     {
       ok: todoBien,
       steps: realizados,
       ids,
       catalogoActualizado,
-      // Lo creado nace pausado: hay que activarlo en la plataforma.
-      aviso: todoBien
-        ? "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar."
-        : "Se detuvo en el primer error. Los pasos marcados como correctos sí se crearon.",
+      campanasSinConfirmar,
+      aviso,
     },
     { status: todoBien ? 200 : 502, headers: NO_STORE },
   );

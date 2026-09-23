@@ -188,6 +188,21 @@ export async function ejecutarPasosDelPlan(
 }
 
 /**
+ * El id nativo que dejó un paso de creación ya ejecutado, releído de su
+ * propia respuesta cruda — no de `ids` (que solo guarda uno por tipo, así
+ * que una campaña de Google y otra de Meta creadas en el mismo plan se
+ * pisan entre sí ahí). Sirve para verificar, por plataforma, que lo que
+ * Windsor dijo que creó existe de verdad — ver `actualizarCatalogoDeCuentas`
+ * en `lib/windsor.ts`.
+ */
+export function idDeCreacion(paso: PasoEjecutado): string | null {
+  if (!paso.ok) return null;
+  const salida = CLAVES_DE_ID[paso.action];
+  if (!salida) return null;
+  return idDeResultado(paso.raw, salida.claves);
+}
+
+/**
  * Última revisión de duplicado antes de ejecutar: si en las últimas 6 horas
  * ya se publicó (o se intentó publicar y algo quedó creado) una campaña con
  * este nombre para este cliente, hay que confirmar antes de repetirla —
