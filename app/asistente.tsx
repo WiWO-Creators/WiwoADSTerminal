@@ -352,6 +352,13 @@ export function AsistenteFlotante({
                         platforms: p.plataformas,
                         details: p.resumen,
                         targetCountries: p.paises,
+                        landingUrl: p.landingUrl || undefined,
+                        headlines: p.headlines.length > 0 ? p.headlines : undefined,
+                        descriptions: p.descriptions.length > 0 ? p.descriptions : undefined,
+                        keywords: p.keywords.length > 0 ? p.keywords : undefined,
+                        metaMessage: p.metaMessage || undefined,
+                        metaHeadline: p.metaHeadline || undefined,
+                        metaDescription: p.metaDescription || undefined,
                       });
                     }}
                   />
@@ -512,6 +519,24 @@ function TarjetaDePropuesta({
         <p className="mt-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
           {propuesta.resumen}
         </p>
+        {propuesta.headlines.length > 0 && (
+          <p className="mt-2 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Títulos sugeridos: </span>
+            {propuesta.headlines.join(" · ")}
+          </p>
+        )}
+        {propuesta.keywords.length > 0 && (
+          <p className="mt-1 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Palabras clave: </span>
+            {propuesta.keywords.join(", ")}
+          </p>
+        )}
+        {propuesta.metaMessage && (
+          <p className="mt-1 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Texto de Meta: </span>
+            {propuesta.metaMessage}
+          </p>
+        )}
         <button
           type="button"
           onClick={onAbrirConstructor}

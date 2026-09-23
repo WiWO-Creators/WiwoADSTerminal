@@ -117,6 +117,32 @@ export const SPECIAL_AD_CATEGORIES: Record<
   },
 };
 
+/**
+ * Objetivo real de Meta (ODAX), para cuando el objetivo de negocio elegido
+ * arriba (tráfico/leads/ventas/alcance → `OBJECTIVES[x].meta`) no es lo
+ * bastante preciso y se quiere el objetivo real de Meta tal cual.
+ *
+ * Los 5 valores están verificados contra campañas reales de clientes ya
+ * corriendo en Meta (`campaign_objective`, vía Windsor) — no es una lista
+ * copiada de la documentación de Meta sin confirmar contra datos reales.
+ * Deliberadamente no incluye `OUTCOME_APP_PROMOTION`: ningún cliente lo usa
+ * hoy, así que no hay con qué confirmarlo contra un dato real.
+ */
+export type MetaObjectiveOverride =
+  | "OUTCOME_AWARENESS"
+  | "OUTCOME_TRAFFIC"
+  | "OUTCOME_ENGAGEMENT"
+  | "OUTCOME_LEADS"
+  | "OUTCOME_SALES";
+
+export const META_OBJECTIVE_LABELS: Record<MetaObjectiveOverride, string> = {
+  OUTCOME_AWARENESS: "Reconocimiento (Awareness)",
+  OUTCOME_TRAFFIC: "Tráfico",
+  OUTCOME_ENGAGEMENT: "Interacción (Engagement)",
+  OUTCOME_LEADS: "Leads",
+  OUTCOME_SALES: "Ventas",
+};
+
 export type Gender = "todos" | "hombres" | "mujeres";
 
 /**
@@ -443,6 +469,21 @@ export type SemillaDeCampana = {
   /** Nota interna visible en "Detalles" — nunca se envía a ninguna plataforma. */
   details: string;
   targetCountries: string[];
+  /**
+   * Contenido sugerido para el anuncio — el asistente de IA lo escribe
+   * cuando ya sabe qué se promociona, con la sintaxis real de cada campo
+   * (palabras clave con `""`/`[]` cuando corresponde, sin repetir el
+   * objetivo en el texto). Todo opcional y editable: llega como borrador
+   * dentro del Constructor, nunca se publica solo. `landingUrl` puede venir
+   * vacío — nunca inventado — y queda para que la persona lo complete.
+   */
+  landingUrl?: string;
+  headlines?: string[];
+  descriptions?: string[];
+  keywords?: string[];
+  metaMessage?: string;
+  metaHeadline?: string;
+  metaDescription?: string;
 };
 
 /** Una región/estado/provincia o ciudad/comuna real, tal como la devuelve
@@ -470,6 +511,14 @@ export type CampaignDraft = {
   /** Nota interna del equipo. No se envía a ninguna plataforma. */
   details: string;
   objective: Objective;
+  /**
+   * Objetivo real de Meta, cuando se quiere ser más preciso que el objetivo
+   * de negocio de arriba (que ya trae uno mapeado por defecto en
+   * `OBJECTIVES[x].meta`). `null` usa ese default — nunca hace falta
+   * tocar esto para publicar. Solo aplica a Meta; Google no tiene este
+   * concepto de todos modos, ver `googleChannel`.
+   */
+  metaObjective: MetaObjectiveOverride | null;
   /** Solo aplica a Meta; Google no tiene este concepto. */
   specialAdCategory: SpecialAdCategory;
   /**
@@ -1200,10 +1249,12 @@ export function buildPlan(
           : "Crear campaña (pausada)",
         params: {
           name: nombreCompuesto(objective.sigla, "meta", draft.name),
-          // Boostear exige una campaña de interacción — el objetivo elegido
-          // en el paso de Campaña no aplica acá, igual que en Meta Ads
+          // Boostear exige una campaña de interacción — ni el objetivo de
+          // negocio ni el override de acá aplican, igual que en Meta Ads
           // Manager al usar "Impulsar publicación".
-          objective: boosteando ? "OUTCOME_ENGAGEMENT" : objective.meta,
+          objective: boosteando
+            ? "OUTCOME_ENGAGEMENT"
+            : (draft.metaObjective ?? objective.meta),
           special_ad_categories: categoria ? [categoria] : [],
           // Meta trabaja en la unidad menor: 5000 = 50,00.
           ...(conCBO
@@ -1510,6 +1561,12 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     ? (body.specialAdCategory as CampaignDraft["specialAdCategory"])
     : "ninguna";
 
+  const metaObjective = (
+    ["OUTCOME_AWARENESS", "OUTCOME_TRAFFIC", "OUTCOME_ENGAGEMENT", "OUTCOME_LEADS", "OUTCOME_SALES"] as const
+  ).includes(body.metaObjective as MetaObjectiveOverride)
+    ? (body.metaObjective as MetaObjectiveOverride)
+    : null;
+
   const callToAction = (
     [
       "LEARN_MORE",
@@ -1543,6 +1600,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     name: String(body.name ?? ""),
     details: String(body.details ?? ""),
     objective,
+    metaObjective,
     specialAdCategory,
     conversionLocation: body.conversionLocation === "mensajes" ? "mensajes" : "sitio_web",
     dailyBudget:

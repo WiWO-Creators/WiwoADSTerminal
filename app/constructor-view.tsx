@@ -50,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { nombreCompuesto } from "@/lib/nomenclatura";
 import {
   CALL_TO_ACTIONS,
+  META_OBJECTIVE_LABELS,
   META_PLACEMENTS,
   META_SURFACES,
   OBJECTIVES,
@@ -58,6 +59,7 @@ import {
   type CampaignDraft,
   type Gender,
   type GoogleChannel,
+  type MetaObjectiveOverride,
   type Objective,
   type SemillaDeCampana,
   type SpecialAdCategory,
@@ -201,21 +203,22 @@ function borradorInicial(
     name: semilla?.name ?? "",
     details: semilla?.details ?? "",
     objective: semilla?.objective ?? "trafico",
+    metaObjective: null,
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
     dailyBudget: null,
     budgetByPlatform: {},
     budgetMode: "diaria",
     endDate: null,
-    landingUrl: "",
-    headlines: [],
-    descriptions: [],
+    landingUrl: semilla?.landingUrl ?? "",
+    headlines: semilla?.headlines ?? [],
+    descriptions: semilla?.descriptions ?? [],
     pathDisplay1: "",
     pathDisplay2: "",
-    keywords: [],
-    message: "",
-    metaHeadline: "",
-    metaDescription: "",
+    keywords: semilla?.keywords ?? [],
+    message: semilla?.metaMessage ?? "",
+    metaHeadline: semilla?.metaHeadline ?? "",
+    metaDescription: semilla?.metaDescription ?? "",
     metaBudgetLevel: "campana",
     mediaUrl: "",
     mediaType: "none",
@@ -1281,6 +1284,38 @@ function FaseCampana({
         <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
           Vivienda, empleo, crédito y temas sociales tienen reglas de
           segmentación distintas en Meta. Google no tiene este concepto.
+        </p>
+      </Seccion>
+
+      <Seccion titulo="Objetivo de Meta" soloPlataforma="meta">
+        <Select
+          value={draft.metaObjective ?? "default"}
+          onValueChange={(value) =>
+            onChange({
+              metaObjective: value === "default" ? null : (value as MetaObjectiveOverride),
+            })
+          }
+        >
+          <SelectTrigger className="w-full bg-field/60 sm:w-72">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">
+              El de arriba ({OBJECTIVES[draft.objective].label})
+            </SelectItem>
+            {(Object.keys(META_OBJECTIVE_LABELS) as MetaObjectiveOverride[]).map((key) => (
+              <SelectItem key={key} value={key}>
+                {META_OBJECTIVE_LABELS[key]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+          El objetivo de arriba ya elige uno de estos cinco por defecto — acá
+          solo hace falta tocarlo si el que corresponde de verdad no es el
+          que ese mapeo asume (por ejemplo, una campaña de &quot;Tráfico&quot;
+          pensada en realidad para Interacción). No cambia nada en Google:
+          ese concepto no existe ahí, es puramente de Meta.
         </p>
       </Seccion>
     </>

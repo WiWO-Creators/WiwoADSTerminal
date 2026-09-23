@@ -213,6 +213,14 @@ no tener que redescubrirlos:
 - **Edición de creativo de un anuncio ya publicado**: no implementada
   todavía, aunque Windsor sí expone la acción (`update_ad_creative` en
   Meta) — quedó fuera por alcance, no por imposibilidad.
+- **Tipos de campaña de Google**: solo Búsqueda y Display. La acción real
+  de Windsor (`create_campaign`) solo acepta esos dos valores de
+  `channel_type` — no existe una acción para crear Performance Max,
+  Shopping, Video ni Demand Gen. No es una limitación de la interfaz: es
+  que Windsor no tiene la acción, así que no hay nada real que ofrecer ahí
+  sin inventarlo. En Meta sí se puede elegir el objetivo real (ODAX)
+  aparte del objetivo de negocio — ver "Objetivo de Meta" en el paso de
+  Campaña del Constructor.
 
 ## Seguir leyendo
 
