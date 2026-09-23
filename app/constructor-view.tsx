@@ -175,6 +175,20 @@ export type ConstructorAttachTo = {
   adsetName?: string;
 };
 
+/**
+ * Convierte lo que se tipeó en un campo numérico opcional, sin dejar pasar
+ * `NaN` al estado. `Number(e.target.value)` a secas (el patrón que ya usaban
+ * presupuesto diario y tope de CPC) deja `NaN` en el draft si se tipea algo
+ * no numérico — y como `NaN ?? ""` no cae en el `??` (`NaN` no es nullish),
+ * el campo controlado queda mostrando literalmente "NaN" en pantalla, sin
+ * forma de corregirlo tecleando encima.
+ */
+function numeroOVacio(texto: string): number | null {
+  if (!texto.trim()) return null;
+  const valor = Number(texto);
+  return Number.isFinite(valor) ? valor : null;
+}
+
 function borradorInicial(
   attachTo?: ConstructorAttachTo,
   clienteGlobal?: string | null,
@@ -1744,10 +1758,10 @@ function FaseConjunto({
       {conGoogle && OBJECTIVES[draft.objective].google !== "maximize_conversions" && (
         <Seccion titulo="Tope de CPC">
           <Input
+            type="number"
+            inputMode="decimal"
             value={draft.cpcCeiling ?? ""}
-            onChange={(e) =>
-              onChange({ cpcCeiling: e.target.value ? Number(e.target.value) : null })
-            }
+            onChange={(e) => onChange({ cpcCeiling: numeroOVacio(e.target.value) })}
             placeholder="Sin tope"
             className="bg-field/60 sm:w-40"
           />
@@ -1816,10 +1830,9 @@ function PresupuestoPorPlataforma({
     return (
       <Campo etiqueta="PRESUPUESTO DIARIO" className="sm:w-60">
         <Input
+          type="number"
           value={draft.dailyBudget ?? ""}
-          onChange={(e) =>
-            onChange({ dailyBudget: e.target.value ? Number(e.target.value) : null })
-          }
+          onChange={(e) => onChange({ dailyBudget: numeroOVacio(e.target.value) })}
           inputMode="numeric"
           placeholder="0"
           className="bg-field/60"
@@ -1833,10 +1846,9 @@ function PresupuestoPorPlataforma({
       {!distinto ? (
         <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
           <Input
+            type="number"
             value={draft.dailyBudget ?? ""}
-            onChange={(e) =>
-              onChange({ dailyBudget: e.target.value ? Number(e.target.value) : null })
-            }
+            onChange={(e) => onChange({ dailyBudget: numeroOVacio(e.target.value) })}
             inputMode="numeric"
             placeholder="0"
             className="bg-field/60"
@@ -1847,12 +1859,13 @@ function PresupuestoPorPlataforma({
           {draft.platforms.map((platform) => (
             <Campo key={platform} etiqueta={`PRESUPUESTO DIARIO · ${platformLabel(platform).toUpperCase()}`}>
               <Input
+                type="number"
                 value={draft.budgetByPlatform[platform] ?? ""}
                 onChange={(e) =>
                   onChange({
                     budgetByPlatform: {
                       ...draft.budgetByPlatform,
-                      [platform]: e.target.value ? Number(e.target.value) : undefined,
+                      [platform]: numeroOVacio(e.target.value) ?? undefined,
                     },
                   })
                 }
