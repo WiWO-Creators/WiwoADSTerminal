@@ -186,6 +186,10 @@ export function AnunciosView({
 }) {
   const [nivel, setNivel] = useState<Nivel>("campana");
   const [enVuelo, setEnVuelo] = useState<Set<string>>(new Set());
+  // Ids (campaña o anuncio) marcados "no la sigas mostrando como pendiente"
+  // — ver `descartarPendiente` en lib/publicaciones-pendientes.ts. Reflejo
+  // local inmediato, igual que `estadosLocales`: el snapshot no se relee solo.
+  const [descartadas, setDescartadas] = useState<Set<string>>(new Set());
   const [estadosLocales, setEstadosLocales] = useState<Record<string, string>>({});
   // Sin setter: esta vista siempre vive dentro de Clientes, que ya resuelve
   // qué cliente mirar (su propia lista) y remonta este componente por `key`
@@ -253,6 +257,8 @@ export function AnunciosView({
   const ads = useMemo(
     () =>
       performance.ads.filter((ad) => {
+        if (ad.campaignId && descartadas.has(ad.campaignId)) return false;
+        if (ad.adId && descartadas.has(ad.adId)) return false;
         if (permitidas && !permitidas.has(ad.accountKey)) return false;
         if (providerEfectivo !== "all" && ad.provider !== providerEfectivo) {
           return false;
@@ -270,7 +276,7 @@ export function AnunciosView({
         }
         return true;
       }),
-    [performance.ads, permitidas, providerEfectivo, accountKey, seleccion],
+    [performance.ads, permitidas, providerEfectivo, accountKey, seleccion, descartadas],
   );
 
   const filas = useMemo(() => {
@@ -411,6 +417,41 @@ export function AnunciosView({
     }
   }
 
+  /**
+   * "Ya la borré, dejá de mostrarla" — el escape manual para una fila
+   * "pendiente de sincronizar" que en realidad se borró en la plataforma
+   * real. Esta app no tiene su propia acción para borrar campañas, así que
+   * no hay forma de saberlo sola (ver `lib/publicaciones-pendientes.ts`).
+   * No toca ninguna plataforma: solo dos ids sintéticos dejan de ofrecerse.
+   */
+  async function descartarFila(fila: Fila) {
+    const ids = [fila.campaignId, fila.adId].filter((id): id is string => Boolean(id));
+    if (ids.length === 0) return;
+    setEnVuelo((actual) => new Set(actual).add(fila.clave));
+    try {
+      const response = await fetch("/api/publicaciones-pendientes/descartar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const body = (await response.json()) as { ok: boolean; error?: string };
+      if (!response.ok || !body.ok) {
+        throw new Error(body.error ?? "No se pudo descartar");
+      }
+      setDescartadas((actual) => new Set([...actual, ...ids]));
+    } catch (issue) {
+      toast.error(
+        issue instanceof Error ? issue.message : "No se pudo contactar al servidor",
+      );
+    } finally {
+      setEnVuelo((actual) => {
+        const siguiente = new Set(actual);
+        siguiente.delete(fila.clave);
+        return siguiente;
+      });
+    }
+  }
+
   const mostrarColumnaAgregar =
     (nivel === "campana" && Boolean(onAgregarConjunto)) ||
     (nivel === "conjunto" && Boolean(onAgregarAnuncio));
@@ -459,6 +500,26 @@ export function AnunciosView({
         ) : (
           "Activar"
         )}
+      </button>
+    );
+  }
+
+  /** Solo aparece en una fila "pendiente de sincronizar" — ver `descartarFila`. */
+  function botonDescartar(fila: Fila) {
+    if (!fila.pendienteSincronizacion) return null;
+    const cargando = enVuelo.has(fila.clave);
+    return (
+      <button
+        type="button"
+        disabled={cargando}
+        title="Marcala así si ya la borraste en la plataforma real — deja de mostrarse acá, no toca nada más."
+        onClick={(e) => {
+          e.stopPropagation();
+          void descartarFila(fila);
+        }}
+        className="rounded-full border border-foreground/15 px-2.5 py-1 text-[0.62rem] font-bold text-foreground/50 transition-colors hover:bg-foreground/8 disabled:opacity-40"
+      >
+        {cargando ? <OrbeDeBoton className="mx-3" /> : "Descartar"}
       </button>
     );
   }
@@ -942,6 +1003,7 @@ export function AnunciosView({
                     {puedeAprobar && (
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {botonDescartar(fila)}
                           {botonGestionar(fila)}
                           {botonEstado(fila)}
                         </div>

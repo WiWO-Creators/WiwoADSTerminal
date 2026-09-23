@@ -22,6 +22,37 @@ const VENTANA_MS = 12 * 60 * 60 * 1000;
 
 type CuentaConocida = { provider: WindsorProvider; accountId: string; accountName: string };
 
+const PREFIJO_DESCARTADA = "pendiente_descartada:";
+
+/**
+ * Marca un id de campaña "pendiente" para que deje de ofrecerse como tal —
+ * el escape manual para cuando de verdad se borró en la plataforma (esta app
+ * no tiene su propia acción para borrar, así que no hay forma de saberlo
+ * sola; ver el porqué completo en `publicacionesPendientes`). No borra nada
+ * real: solo deja de mostrar esta fila sintética.
+ */
+export async function descartarPendiente(campaignId: string): Promise<void> {
+  await getRawDb()
+    .prepare(
+      `INSERT INTO app_meta (key, value, updated_at) VALUES (?, '1', ?)
+       ON CONFLICT(key) DO NOTHING`,
+    )
+    .bind(`${PREFIJO_DESCARTADA}${campaignId}`, Date.now())
+    .run();
+}
+
+async function idsDescartados(candidatos: string[]): Promise<Set<string>> {
+  if (candidatos.length === 0) return new Set();
+  const claves = candidatos.map((id) => `${PREFIJO_DESCARTADA}${id}`);
+  const { results } = await getRawDb()
+    .prepare(`SELECT key FROM app_meta WHERE key IN (${claves.map(() => "?").join(",")})`)
+    .bind(...claves)
+    .all<{ key: string }>();
+  return new Set(
+    (results ?? []).map((fila) => fila.key.slice(PREFIJO_DESCARTADA.length)),
+  );
+}
+
 export type PublicacionesPendientes = {
   campanas: WindsorCampaign[];
   anuncios: WindsorAd[];
@@ -178,5 +209,13 @@ export async function publicacionesPendientes(
     }
   }
 
-  return { campanas, anuncios };
+  const descartados = await idsDescartados([
+    ...campanas.map((c) => c.campaignId).filter((id): id is string => id !== null),
+    ...anuncios.map((a) => a.adId).filter((id): id is string => id !== null),
+  ]);
+
+  return {
+    campanas: campanas.filter((c) => !c.campaignId || !descartados.has(c.campaignId)),
+    anuncios: anuncios.filter((a) => !a.adId || !descartados.has(a.adId)),
+  };
 }
