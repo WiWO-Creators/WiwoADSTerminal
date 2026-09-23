@@ -267,7 +267,7 @@ export function AsistenteFlotante({
         >
           <header className="flex items-center gap-3 border-b border-border px-4 py-3">
             <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-bold text-foreground">Asistente</h2>
+              <h2 className="text-sm font-bold text-foreground">Thinking Orb</h2>
               <p className="truncate text-xs text-muted-foreground">
                 {clienteNombre ? `Cliente: ${clienteNombre}` : "Todos los clientes"}
               </p>
