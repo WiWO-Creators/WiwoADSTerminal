@@ -148,7 +148,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
         nombre_sugerido: {
           type: "string",
           description:
-            "Nombre corto y descriptivo para la campaña, sin sigla de objetivo (esa la agrega el sistema solo).",
+            "Nombre corto y descriptivo para la campaña — qué se promociona o a quién apunta (ej. \"Plan de Energía Santiago-Concepción\"). No menciones el objetivo, ni la sigla ([TRF], [VTA]...) ni la palabra (tráfico, ventas...): el sistema ya antepone esa sigla sola, y repetirla en el nombre queda redundante.",
         },
         objetivo: { type: "string", enum: ["trafico", "leads", "ventas", "alcance"] },
         plataformas: {
