@@ -40,6 +40,102 @@ function distanciaKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+export type LugarEncontradoPorMapa = {
+  /** Sintético (`osm:<place_id>`), nunca un id real de Google — Google Ads
+   * solo puede segmentar por un lugar de su propia lista curada de destinos
+   * geográficos, y estos vienen de una fuente completamente distinta
+   * (Nominatim/OpenStreetMap). Quien arma el plan filtra por esto para no
+   * mandarle a Google un id que no le pertenece. */
+  id: string;
+  nombre: string;
+  nombreCanonico: string;
+  countryCode: string;
+  tier: NivelGeoAproximado;
+  lat: number;
+  lng: number;
+  radiusKm: number;
+  aproximado: boolean;
+};
+
+export type NivelGeoAproximado = "region" | "city";
+
+// Solo la división administrativa más alta cuenta como "región" acá —
+// county/municipality (como "Tabasco, Zacatecas", que Nominatim clasifica
+// como county pero tanto Meta como el habla común llaman "ciudad") caen en
+// "city" más abajo, no en este set.
+const TIPOS_DE_REGION = new Set(["state", "province", "region"]);
+
+/**
+ * Busca lugares reales por texto contra Nominatim/OpenStreetMap — pensada
+ * como respaldo cuando `buscarGeoTargets` (la lista curada de Google) no
+ * encuentra nada, para que la búsqueda de todos modos recomiende algo, igual
+ * que hace el buscador de ubicaciones de Meta Ads Manager (que no está
+ * limitado a la lista de Google). Nunca aporta un id real de Google: lo que
+ * encuentra acá solo puede segmentar a Meta, con el mismo círculo
+ * lat/lng/radio que ya arma `geocodificarLugar`.
+ */
+export async function buscarLugaresPorMapa(
+  query: string,
+  tier: NivelGeoAproximado,
+): Promise<LugarEncontradoPorMapa[]> {
+  const texto = query.trim();
+  if (texto.length < 2) return [];
+
+  try {
+    const params = new URLSearchParams({
+      format: "jsonv2",
+      q: texto,
+      addressdetails: "1",
+      limit: "8",
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+      headers: { "User-Agent": USER_AGENT },
+    });
+    if (!response.ok) return [];
+    const resultados = (await response.json()) as Array<{
+      place_id: number;
+      lat: string;
+      lon: string;
+      display_name: string;
+      addresstype?: string;
+      boundingbox: [string, string, string, string];
+      address?: { country_code?: string };
+    }>;
+
+    const salida: LugarEncontradoPorMapa[] = [];
+    for (const item of resultados) {
+      const countryCode = item.address?.country_code?.toUpperCase();
+      if (!countryCode) continue;
+      const tierReal: NivelGeoAproximado = TIPOS_DE_REGION.has(item.addresstype ?? "")
+        ? "region"
+        : "city";
+      // Se respeta la pestaña que la persona ya eligió (región o ciudad) en
+      // vez de reclasificar sola: evita mezclar un estado en una búsqueda de
+      // "Ciudad / Comuna" solo porque Nominatim lo etiquetó distinto.
+      if (tierReal !== tier) continue;
+
+      const [sur, norte, oeste, este] = item.boundingbox.map(Number);
+      const radioReal = distanciaKm(sur, oeste, norte, este) / 2;
+      const nombreCorto = item.display_name.split(",")[0]?.trim() || item.display_name;
+      salida.push({
+        id: `osm:${item.place_id}`,
+        nombre: nombreCorto,
+        nombreCanonico: item.display_name,
+        countryCode,
+        tier: tierReal,
+        lat: Number(item.lat),
+        lng: Number(item.lon),
+        radiusKm: Math.min(Math.max(radioReal, RADIO_MINIMO_KM), RADIO_MAXIMO_KM),
+        aproximado: radioReal > RADIO_MAXIMO_KM,
+      });
+    }
+    return salida;
+  } catch (error) {
+    console.error("WiWO.ADS buscarLugaresPorMapa", error);
+    return [];
+  }
+}
+
 /**
  * Coordenadas y radio reales de una región/ciudad, con caché en `app_meta`
  * (los lugares se repiten entre campañas: sin caché, cada selección volvería

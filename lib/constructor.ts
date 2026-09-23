@@ -1028,6 +1028,16 @@ export function validateDraft(
     if (draft.pathDisplay2.trim() && !draft.pathDisplay1.trim()) {
       add("pathDisplay1", "La segunda ruta de la URL exige la primera");
     }
+    // Lugares del respaldo por mapa (`osm:...`) no tienen id real de Google
+    // — el filtro real vive en el paso de ubicaciones, esto solo avisa.
+    const soloMetaEnGoogle = draft.targetPlaces.filter((lugar) => !/^\d+$/.test(lugar.id));
+    if (soloMetaEnGoogle.length > 0) {
+      add(
+        "targetPlaces",
+        `${soloMetaEnGoogle.map((l) => l.nombre).join(", ")} no está en la lista de Google: solo segmenta la campaña de Meta.`,
+        false,
+      );
+    }
     if (draft.pathDisplay1.length > 15 || draft.pathDisplay2.length > 15) {
       add("pathDisplay1", "Cada ruta de la URL visible admite hasta 15 caracteres");
     }
@@ -1287,10 +1297,14 @@ export function buildPlan(
           .map((p) => ({ geo_target_constant_id: GOOGLE_GEO_TARGET_IDS[p] })),
         // Regiones y ciudades elegidas por búsqueda: mismo campo que país,
         // solo que el id ya viene resuelto desde `geo_targets` en vez de la
-        // tabla estática de 219 países.
-        ...draft.targetPlaces.map((lugar) => ({
-          geo_target_constant_id: lugar.id,
-        })),
+        // tabla estática de 219 países. Los que vienen del respaldo por mapa
+        // (`osm:...`, ver `lib/geocoding.ts`) no tienen id real de Google —
+        // se filtran acá para no mandarle a Google un id que no es suyo.
+        ...draft.targetPlaces
+          .filter((lugar) => /^\d+$/.test(lugar.id))
+          .map((lugar) => ({
+            geo_target_constant_id: lugar.id,
+          })),
         // Exclusiones: mismo campo, con `negative: true` — el flag real que
         // expone la acción para dejar un país fuera a propósito.
         ...draft.excludedCountries
