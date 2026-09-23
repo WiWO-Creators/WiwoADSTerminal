@@ -117,9 +117,10 @@ type PlanStep = {
   params: Record<string, unknown>;
   informativo?: boolean;
 };
+type BudgetAdvice = { suggested: number | null; currency: string | null; basis: string };
 type Plan = {
   issues: Issue[];
-  budget: { suggested: number | null; currency: string | null; basis: string };
+  budgets: Partial<Record<Platform, BudgetAdvice>>;
   steps: PlanStep[];
   simulation: true;
 };
@@ -187,6 +188,45 @@ function numeroOVacio(texto: string): number | null {
   if (!texto.trim()) return null;
   const valor = Number(texto);
   return Number.isFinite(valor) ? valor : null;
+}
+
+/**
+ * Campo de dinero: `type="number"` traía las flechas nativas del navegador
+ * para subir o bajar de a uno —inútiles en montos de miles de pesos— y
+ * mostraba el número pelado, sin puntos de miles, hasta que se hacía la
+ * cuenta a mano. Este es `type="text"` por dentro (sin flechas posible) y
+ * formatea con puntos de miles y el signo "$" en cada tecleo, guardando en
+ * el draft solo el número.
+ */
+function CampoDinero({
+  value,
+  onChange,
+  placeholder = "0",
+  className,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative", className)}>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground/40">
+        $
+      </span>
+      <Input
+        type="text"
+        inputMode="numeric"
+        value={value === null ? "" : value.toLocaleString("es-CL")}
+        onChange={(e) => {
+          const digitos = e.target.value.replace(/[^\d]/g, "");
+          onChange(digitos === "" ? null : Number(digitos));
+        }}
+        placeholder={placeholder}
+        className="bg-field/60 pl-6"
+      />
+    </div>
+  );
 }
 
 function borradorInicial(
@@ -379,6 +419,20 @@ export function ConstructorView({
     setDraft((actual) => ({ ...actual, ...cambios }));
   }
 
+  /**
+   * Aplica la sugerencia de una plataforma puntual, nunca el total: dos
+   * plataformas casi nunca gastan lo mismo, así que un botón que rellenara un
+   * único presupuesto compartido terminaría siendo tan engañoso como el
+   * número general que reemplaza.
+   */
+  function usarPresupuestoSugerido(platform: Platform, monto: number) {
+    if (draft.platforms.length > 1) {
+      actualizar({ budgetByPlatform: { ...draft.budgetByPlatform, [platform]: monto } });
+    } else {
+      actualizar({ dailyBudget: monto });
+    }
+  }
+
   function alternarPlataforma(value: Platform) {
     setDraft((actual) => ({
       ...actual,
@@ -401,16 +455,8 @@ export function ConstructorView({
       });
       const body = (await response.json()) as Plan & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "No se pudo armar");
-      const autocompletaPresupuesto = body.budget.suggested !== null && draft.dailyBudget === null;
       setPlan(body);
-      setPlanDraftJson(
-        JSON.stringify(
-          autocompletaPresupuesto ? { ...draft, dailyBudget: body.budget.suggested } : draft,
-        ),
-      );
-      if (autocompletaPresupuesto) {
-        actualizar({ dailyBudget: body.budget.suggested });
-      }
+      setPlanDraftJson(JSON.stringify(draft));
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "No se pudo armar");
     } finally {
@@ -622,19 +668,46 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              {planVigente && plan.budget.basis && (
-                <Surface className="p-4">
-                  <p className="font-micro text-[0.6rem] text-foreground/45">
+              {planVigente && Object.keys(plan.budgets).length > 0 && (
+                <Surface className="divide-y divide-foreground/8 p-0">
+                  <p className="font-micro px-4 pt-3.5 text-[0.6rem] text-foreground/45">
                     PRESUPUESTO SUGERIDO
                   </p>
-                  <p className="metric-number mt-1 text-2xl font-bold text-foreground">
-                    {plan.budget.suggested === null
-                      ? "Sin dato"
-                      : `${plan.budget.currency ?? ""} ${plan.budget.suggested.toLocaleString("es-CL")}`}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-foreground/50">
-                    {plan.budget.basis}
-                  </p>
+                  {draft.platforms.map((platform) => {
+                    const advice = plan.budgets[platform];
+                    if (!advice) return null;
+                    return (
+                      <div
+                        key={platform}
+                        className="flex items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-micro text-[0.6rem] text-foreground/45">
+                            {platformLabel(platform).toUpperCase()}
+                          </p>
+                          <p className="metric-number mt-0.5 text-xl font-bold text-foreground">
+                            {advice.suggested === null
+                              ? "Sin dato"
+                              : `${advice.currency ?? ""} ${advice.suggested.toLocaleString("es-CL")}`}
+                          </p>
+                          <p className="mt-0.5 text-[0.68rem] leading-4 text-foreground/50">
+                            {advice.basis}
+                          </p>
+                        </div>
+                        {advice.suggested !== null && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => usarPresupuestoSugerido(platform, advice.suggested as number)}
+                            className="shrink-0"
+                          >
+                            Usar
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </Surface>
               )}
 
@@ -1829,13 +1902,9 @@ function PresupuestoPorPlataforma({
   if (!varias) {
     return (
       <Campo etiqueta="PRESUPUESTO DIARIO" className="sm:w-60">
-        <Input
-          type="number"
-          value={draft.dailyBudget ?? ""}
-          onChange={(e) => onChange({ dailyBudget: numeroOVacio(e.target.value) })}
-          inputMode="numeric"
-          placeholder="0"
-          className="bg-field/60"
+        <CampoDinero
+          value={draft.dailyBudget}
+          onChange={(valor) => onChange({ dailyBudget: valor })}
         />
       </Campo>
     );
@@ -1845,33 +1914,25 @@ function PresupuestoPorPlataforma({
     <div>
       {!distinto ? (
         <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
-          <Input
-            type="number"
-            value={draft.dailyBudget ?? ""}
-            onChange={(e) => onChange({ dailyBudget: numeroOVacio(e.target.value) })}
-            inputMode="numeric"
-            placeholder="0"
-            className="bg-field/60"
+          <CampoDinero
+            value={draft.dailyBudget}
+            onChange={(valor) => onChange({ dailyBudget: valor })}
           />
         </Campo>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {draft.platforms.map((platform) => (
             <Campo key={platform} etiqueta={`PRESUPUESTO DIARIO · ${platformLabel(platform).toUpperCase()}`}>
-              <Input
-                type="number"
-                value={draft.budgetByPlatform[platform] ?? ""}
-                onChange={(e) =>
+              <CampoDinero
+                value={draft.budgetByPlatform[platform] ?? null}
+                onChange={(valor) =>
                   onChange({
                     budgetByPlatform: {
                       ...draft.budgetByPlatform,
-                      [platform]: numeroOVacio(e.target.value) ?? undefined,
+                      [platform]: valor ?? undefined,
                     },
                   })
                 }
-                inputMode="numeric"
-                placeholder="0"
-                className="bg-field/60"
               />
             </Campo>
           ))}

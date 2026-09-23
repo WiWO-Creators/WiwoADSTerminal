@@ -376,7 +376,7 @@ export function SelectorDePublicaciones({
                 </div>
                 {demorando && (
                   <p className="text-xs text-foreground/40">
-                    La primera vez que se lee esta cuenta puede tardar hasta
+                    La primera vez que se lee esta cuenta puede tardar más de
                     un minuto — las siguientes son casi al instante.
                   </p>
                 )}

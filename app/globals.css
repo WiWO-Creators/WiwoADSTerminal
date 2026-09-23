@@ -22,6 +22,21 @@
   scrollbar-gutter: stable;
 }
 
+/* Ningún campo numérico usa las flechas nativas para subir o bajar de a uno
+   —en montos de miles de pesos o topes de puja son inútiles y solo ensucian
+   el campo—, así que se ocultan para todo `<input type="number">` del sitio,
+   no solo en el Constructor. */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
 :root {
   color-scheme: dark;
   /* Paleta de MetriQ (medida de sus capturas): lienzo #292929, barra lateral

@@ -769,7 +769,15 @@ export type PlanStep = {
 
 export type BuildResult = {
   issues: Issue[];
-  budget: BudgetAdvice;
+  /**
+   * Una sugerencia por cada plataforma elegida, no un solo número general.
+   * Antes era un `BudgetAdvice` único calculado sobre "la plataforma
+   * principal" (Google si estaba, si no Meta) y se mostraba como si fuera el
+   * total de la campaña — con dos plataformas elegidas, el número sugerido
+   * correspondía a una sola y el bloqueante de "falta presupuesto" seguía
+   * listando la otra sin dar pista de cuánto ponerle.
+   */
+  budgets: Partial<Record<Platform, BudgetAdvice>>;
   steps: PlanStep[];
   /** Siempre true en esta fase: nada de esto se ejecuta todavía. */
   simulation: true;
@@ -1021,6 +1029,22 @@ export function validateDraft(
         "mediaUrl",
         "Google Ads no crea anuncios con imagen por esta vía: la pieza solo se usará en Meta",
         false,
+      );
+    }
+    // Verificado contra `list_actions` real de Windsor para `google_ads`
+    // (2026-09-23): la única acción que crea un anuncio es
+    // `create_responsive_search_ad` — texto puro, para un grupo de anuncios
+    // de Búsqueda. No existe ninguna acción de escritura para un anuncio de
+    // Display con imagen (`create_ad_asset` solo crea extensiones: sitelink,
+    // callout, snippet estructurado, llamada — no una pieza creativa). Elegir
+    // "Red de Display" igual crearía la campaña, pero el anuncio de texto que
+    // este sistema arma después fallaría contra la API real de Google (un RSA
+    // no es válido en un grupo de Display). Se bloquea acá, antes de publicar
+    // algo que se rompe a mitad de camino.
+    if (draft.googleChannel === "display") {
+      add(
+        "googleChannel",
+        "Google Ads en Red de Display no se puede publicar por esta vía: Windsor no tiene ninguna acción para crear un anuncio de Display con imagen. Usa Red de búsqueda, o crea la campaña de Display directo en Google Ads.",
       );
     }
     // Solo en Búsqueda: en Display las palabras clave no son la segmentación
@@ -1627,13 +1651,14 @@ export function buildPlan(
     });
   }
 
-  const principal: Platform = draft.platforms.includes("google")
-    ? "google"
-    : "meta";
+  const budgets: Partial<Record<Platform, BudgetAdvice>> = {};
+  for (const plataforma of draft.platforms) {
+    budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot);
+  }
 
   return {
     issues,
-    budget: recommendBudget(portfolio, principal, snapshot),
+    budgets,
     steps,
     simulation: true,
   };

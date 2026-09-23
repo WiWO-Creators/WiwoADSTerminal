@@ -46,6 +46,14 @@ const CATALOG_MESES = 36;
 const TIMEOUT_MS = 60_000;
 /** El catálogo barre años: con 60 s se cortaba antes de responder. */
 const CATALOG_TIMEOUT_MS = 280_000;
+/**
+ * `facebook_organic`/`instagram` cuando es la primera vez que se lee esa
+ * cuenta (verificado en vivo: 1:30 min). Con el timeout general de 60 s, esa
+ * primera lectura se cortaba a los 60 s —sin haber fallado de verdad, solo
+ * lenta— y el reintento volvía a empezar de cero: el doble de espera real
+ * para terminar sirviendo lo mismo que habría llegado solo, sin cortar nada.
+ */
+const TIMEOUT_ORGANICO_MS = 110_000;
 const REINTENTOS = 3;
 
 /**
@@ -1400,7 +1408,7 @@ export async function fetchFacebookPosts(
         ],
         rangeStart,
         rangeEnd,
-        { selectAccounts: pageId },
+        { selectAccounts: pageId, timeoutMs: TIMEOUT_ORGANICO_MS },
       );
 
       // El nombre real de la página viaja gratis en esta misma consulta
@@ -1480,7 +1488,7 @@ export async function fetchInstagramMedia(
         ],
         rangeStart,
         rangeEnd,
-        { selectAccounts: accountId },
+        { selectAccounts: accountId, timeoutMs: TIMEOUT_ORGANICO_MS },
       );
 
       void guardarNombreDeCuenta(
