@@ -529,20 +529,30 @@ function claveDeAnuncio(a: WindsorAd): string {
  * No toca `construidoEn`: sigue siendo la fecha del último barrido completo,
  * que es la que decide cuándo toca el siguiente.
  *
- * `campaignIdsVistos` devuelve, sin filtrar por lo ya guardado, cada id de
- * campaña que Windsor realmente entregó en esta lectura — es lo que permite
- * a quien llama comprobar si una campaña recién creada existe de verdad en la
- * cuenta real, en vez de confiar a ciegas en que `execute_action` haya
- * respondido `ok`. Se verificó contra un caso real (2026-09-22): Windsor
- * confirmó como creada una campaña de Meta que nunca llegó a existir en la
- * cuenta — ni acá, ni en el historial de cambios de la cuenta real.
+ * `campaignIdsVistos` (y, con la misma lógica, `adsetIdsVistos`/
+ * `adIdsVistos`) devuelve, sin filtrar por lo ya guardado, cada id que
+ * Windsor realmente entregó en esta lectura — es lo que permite a quien
+ * llama comprobar si una campaña, conjunto o anuncio recién creado existe de
+ * verdad en la cuenta real, en vez de confiar a ciegas en que
+ * `execute_action` haya respondido `ok`. Se verificó contra un caso real
+ * (2026-09-22): Windsor confirmó como creada una campaña de Meta que nunca
+ * llegó a existir en la cuenta — ni acá, ni en el historial de cambios de la
+ * cuenta real.
  */
 export async function actualizarCatalogoDeCuentas(
   cuentas: Array<{ provider: WindsorProvider; accountId: string }>,
-): Promise<{ agregadas: number; fallos: string[]; campaignIdsVistos: Set<string> }> {
+): Promise<{
+  agregadas: number;
+  fallos: string[];
+  campaignIdsVistos: Set<string>;
+  adsetIdsVistos: Set<string>;
+  adIdsVistos: Set<string>;
+}> {
   const campaignIdsVistos = new Set<string>();
+  const adsetIdsVistos = new Set<string>();
+  const adIdsVistos = new Set<string>();
   if (!windsorConfigured() || cuentas.length === 0) {
-    return { agregadas: 0, fallos: [], campaignIdsVistos };
+    return { agregadas: 0, fallos: [], campaignIdsVistos, adsetIdsVistos, adIdsVistos };
   }
 
   const hoy = new Date();
@@ -585,6 +595,10 @@ export async function actualizarCatalogoDeCuentas(
         for (const c of campanas) {
           if (c.campaignId) campaignIdsVistos.add(c.campaignId);
         }
+        for (const a of anuncios) {
+          if (a.adsetId) adsetIdsVistos.add(a.adsetId);
+          if (a.adId) adIdsVistos.add(a.adId);
+        }
 
         // Ojo: esta lectura parcial solo cubre los últimos
         // CATALOGO_PARCIAL_DIAS (45) días, a propósito, para que sea rápida —
@@ -625,7 +639,7 @@ export async function actualizarCatalogoDeCuentas(
       .bind(cacheId, await comprimirTexto(JSON.stringify(catalogo)), Number(cached.updated_at))
       .run();
   }
-  return { agregadas, fallos, campaignIdsVistos };
+  return { agregadas, fallos, campaignIdsVistos, adsetIdsVistos, adIdsVistos };
 }
 
 /**

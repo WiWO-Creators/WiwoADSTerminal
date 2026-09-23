@@ -137,11 +137,19 @@ type Resultado = {
     error: string | null;
   }>;
   ids: Record<string, string>;
-  /** Campañas que Windsor confirmó como creadas, pero que al releer la
-   * cuenta real (justo después, en el mismo pedido) no aparecieron —
-   * ver la nota en `app/api/constructor/ejecutar/route.ts`. Vacío en el
-   * caso normal. */
-  campanasSinConfirmar?: Array<{ platform: string; id: string }>;
+  /** Campañas, conjuntos o anuncios que Windsor confirmó como creados, pero
+   * que al releer la cuenta real (justo después, en el mismo pedido) no
+   * aparecieron — ver la nota en `app/api/constructor/ejecutar/route.ts`.
+   * Vacío en el caso normal; ya viene descrito en `aviso`. */
+  campanasSinConfirmar?: Array<{ platform: string; nivel: string; id: string }>;
+  /** Si un paso hijo falló después de crear la campaña: qué quedó huérfano y
+   * si se pudo marcar en la plataforma real. Ya viene descrito en `aviso`. */
+  campanaIncompleta?: {
+    platform: string;
+    campaignId: string;
+    nombreOriginal: string;
+    marcada: boolean;
+  } | null;
   error?: string;
   /** "duplicado": ya se publicó algo igual hace poco (respuesta 409). */
   codigo?: string;
@@ -272,7 +280,7 @@ function borradorInicial(
     keywords: semilla?.keywords ?? [],
     negativeKeywords: [],
     cpcCeiling: null,
-    targetLanguages: [],
+    targetLanguages: semilla?.targetLanguages ?? [],
     message: semilla?.metaMessage ?? "",
     metaHeadline: semilla?.metaHeadline ?? "",
     metaDescription: semilla?.metaDescription ?? "",

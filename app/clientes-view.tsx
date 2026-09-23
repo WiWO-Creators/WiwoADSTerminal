@@ -40,6 +40,12 @@ type CuentaVinculada = {
    */
   pageId: string | null;
   /**
+   * Píxel de Meta de esta cuenta puntual, para que el conjunto de anuncios
+   * pueda optimizar a leads o ventas en vez de solo a clics — Meta lo exige
+   * (`promoted_object.pixel_id`) y sin él rechaza la creación del conjunto.
+   */
+  pixelId: string | null;
+  /**
    * Países de segmentación de esta cuenta puntual, no del cliente entero.
    *
    * ALO Group lo exige: seis cuentas de Google, una por país. Un solo campo
@@ -51,6 +57,7 @@ type CuentaVinculada = {
 /** Lo que puede guardarse desde la ficha de un cliente. */
 type CambiosPortfolio = Partial<Portfolio> & {
   accountPageId?: { externalId: string; pageId: string | null };
+  accountPixelId?: { externalId: string; pixelId: string | null };
   accountCountries?: { externalId: string; countries: string[] };
 };
 
@@ -647,6 +654,20 @@ function Ficha({
                       }
                     />
                   )}
+                  {cuenta.provider === "meta" && (
+                    <PixelDeCuenta
+                      cuenta={cuenta}
+                      editable={editable}
+                      onGuardar={(pixelId) =>
+                        onGuardar({
+                          accountPixelId: {
+                            externalId: cuenta.externalId,
+                            pixelId,
+                          },
+                        })
+                      }
+                    />
+                  )}
                   {necesitaDesglosePorPais && cuenta.provider && (
                     <PaisesDeCuenta
                       cuenta={cuenta}
@@ -838,6 +859,51 @@ function PaginaDeCuenta({
         disabled={!editable}
         onChange={(e) => setValor(e.target.value)}
         placeholder="Sin página"
+        className="h-7 bg-field/60 text-[0.68rem]"
+      />
+      {editable && cambiado && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => onGuardar(valor.trim() || null)}
+          className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
+        >
+          Guardar
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Píxel de Meta de una cuenta puntual, con su propio guardado.
+ *
+ * A diferencia de la página, no tiene un campo de respaldo a nivel cliente
+ * —nunca existió uno— así que se muestra siempre para cada cuenta de Meta,
+ * no solo cuando el cliente tiene más de una.
+ */
+function PixelDeCuenta({
+  cuenta,
+  editable,
+  onGuardar,
+}: {
+  cuenta: CuentaVinculada;
+  editable: boolean;
+  onGuardar: (pixelId: string | null) => void;
+}) {
+  const [valor, setValor] = useState(cuenta.pixelId ?? "");
+  const cambiado = valor.trim() !== (cuenta.pixelId ?? "");
+
+  return (
+    <div className="mt-2 flex items-center gap-2 pl-1">
+      <span className="font-micro shrink-0 text-[0.55rem] text-foreground/40">
+        PÍXEL
+      </span>
+      <Input
+        value={valor}
+        disabled={!editable}
+        onChange={(e) => setValor(e.target.value)}
+        placeholder="Sin píxel: no se puede publicar leads/ventas en esta cuenta"
         className="h-7 bg-field/60 text-[0.68rem]"
       />
       {editable && cambiado && (

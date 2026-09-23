@@ -5,12 +5,26 @@ import {
   cuentaDe,
   ejecutarPasosDelPlan,
   idDeCreacion,
+  PREFIJO_INCOMPLETA,
   publicacionReciente,
   registrarEjecucion,
 } from "@/lib/constructor-ejecutar";
+import { idDeResultado } from "@/lib/ids-de-resultado";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { can, enAlcance } from "@/lib/permisos";
 import { actualizarCatalogoDeCuentas, type WindsorProvider } from "@/lib/windsor";
+
+/**
+ * Nombres de campo de id que un anuncio recién creado puede devolver.
+ * `create_adset` ya tiene su propia entrada en `CLAVES_DE_ID`
+ * (`constructor-ejecutar.ts`) y `idDeCreacion` la cubre; estas dos son las
+ * que faltaban, porque nada más adelante en la cadena de pasos necesita el id
+ * del anuncio para seguir, así que nunca se guardaron en `ids`.
+ */
+const CAMPOS_DE_ID_ANUNCIO: Record<string, string[]> = {
+  create_ad: ["ad_id", "adId", "id"],
+  create_responsive_search_ad: ["ad_id", "adId", "id"],
+};
 
 /**
  * Ejecuta de verdad el plan del constructor: crea en Google y en Meta.
@@ -121,7 +135,7 @@ export async function POST(request: Request) {
     return fail("El plan no tiene ningún paso que ejecutar", 422);
   }
 
-  const { ok: todoBien, pasos: realizados, ids } = await ejecutarPasosDelPlan(
+  const { ok: todoBien, pasos: realizados, ids, campanaIncompleta } = await ejecutarPasosDelPlan(
     plan.steps,
     draft,
     cuentas,
@@ -148,12 +162,16 @@ export async function POST(request: Request) {
   }
   let catalogoActualizado = false;
   let campaignIdsVistos: Set<string> = new Set();
+  let adsetIdsVistos: Set<string> = new Set();
+  let adIdsVistos: Set<string> = new Set();
   if (cuentasTocadas.size > 0) {
     try {
       await Promise.race([
         actualizarCatalogoDeCuentas([...cuentasTocadas.values()]).then((resultado) => {
           catalogoActualizado = true;
           campaignIdsVistos = resultado.campaignIdsVistos;
+          adsetIdsVistos = resultado.adsetIdsVistos;
+          adIdsVistos = resultado.adIdsVistos;
         }),
         new Promise((resolve) => setTimeout(resolve, 25_000)),
       ]);
@@ -162,29 +180,51 @@ export async function POST(request: Request) {
     }
   }
 
-  // Windsor puede responder "ok" a una creación de campaña que después no
-  // aparece de verdad en la cuenta — pasó con una campaña de Meta el
-  // 2026-09-22, confirmada como creada acá y nunca creada ahí. Releer el
-  // catálogo recién actualizado (arriba) es lo único que puede detectarlo,
-  // así que cada campaña creada en este plan se compara contra lo que
-  // Windsor acaba de confirmar que existe de verdad.
+  // Windsor puede responder "ok" a una creación que después no aparece de
+  // verdad en la cuenta — pasó con una campaña de Meta el 2026-09-22,
+  // confirmada como creada acá y nunca creada ahí. Releer el catálogo recién
+  // actualizado (arriba) es lo único que puede detectarlo, así que cada
+  // campaña, conjunto y anuncio creado en este plan se compara contra lo que
+  // Windsor acaba de confirmar que existe de verdad — no solo la campaña.
   const campanasSinConfirmar = realizados
     .filter((paso) => paso.action === "create_campaign" && paso.ok)
-    .map((paso) => ({ platform: paso.platform, id: idDeCreacion(paso) }))
+    .map((paso) => ({ platform: paso.platform, nivel: "campaña", id: idDeCreacion(paso) }))
     .filter(
-      (item): item is { platform: string; id: string } =>
+      (item): item is { platform: string; nivel: string; id: string } =>
         item.id !== null && catalogoActualizado && !campaignIdsVistos.has(item.id),
     );
+  const conjuntosSinConfirmar = realizados
+    .filter((paso) => paso.action === "create_adset" && paso.ok)
+    .map((paso) => ({ platform: paso.platform, nivel: "conjunto", id: idDeCreacion(paso) }))
+    .filter(
+      (item): item is { platform: string; nivel: string; id: string } =>
+        item.id !== null && catalogoActualizado && !adsetIdsVistos.has(item.id),
+    );
+  const anunciosSinConfirmar = realizados
+    .filter((paso) => CAMPOS_DE_ID_ANUNCIO[paso.action] && paso.ok)
+    .map((paso) => ({
+      platform: paso.platform,
+      nivel: "anuncio",
+      id: idDeResultado(paso.raw, CAMPOS_DE_ID_ANUNCIO[paso.action]),
+    }))
+    .filter(
+      (item): item is { platform: string; nivel: string; id: string } =>
+        item.id !== null && catalogoActualizado && !adIdsVistos.has(item.id),
+    );
+  const sinConfirmar = [...campanasSinConfirmar, ...conjuntosSinConfirmar, ...anunciosSinConfirmar];
 
   let aviso: string;
   if (!todoBien) {
     aviso = "Se detuvo en el primer error. Los pasos marcados como correctos sí se crearon.";
-  } else if (campanasSinConfirmar.length > 0) {
-    aviso = `Windsor confirmó la creación, pero al releer la cuenta real no encontramos ${
-      campanasSinConfirmar.length === 1 ? "esta campaña" : "estas campañas"
-    } todavía: ${campanasSinConfirmar
-      .map((c) => `${c.platform === "google" ? "Google" : "Meta"} (id ${c.id})`)
-      .join(", ")}. Puede ser solo demora en reflejarse — revisa directamente en la plataforma antes de darla por creada.`;
+    if (campanaIncompleta) {
+      aviso += campanaIncompleta.marcada
+        ? ` La campaña de ${campanaIncompleta.platform === "google" ? "Google" : "Meta"} que alcanzó a crearse quedó renombrada como "${PREFIJO_INCOMPLETA}${campanaIncompleta.nombreOriginal}" en la cuenta real, para que no se confunda con una intencional.`
+        : ` La campaña de ${campanaIncompleta.platform === "google" ? "Google" : "Meta"} que alcanzó a crearse (id ${campanaIncompleta.campaignId}) quedó huérfana y no se pudo renombrar para marcarla — revísala a mano en la cuenta.`;
+    }
+  } else if (sinConfirmar.length > 0) {
+    aviso = `Windsor confirmó la creación, pero al releer la cuenta real todavía no encontramos: ${sinConfirmar
+      .map((c) => `${c.platform === "google" ? "Google" : "Meta"} ${c.nivel} (id ${c.id})`)
+      .join(", ")}. Puede ser solo demora en reflejarse — revisa directamente en la plataforma antes de darlo por creado.`;
   } else {
     aviso = "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar.";
   }
@@ -195,7 +235,8 @@ export async function POST(request: Request) {
       steps: realizados,
       ids,
       catalogoActualizado,
-      campanasSinConfirmar,
+      campanasSinConfirmar: sinConfirmar,
+      campanaIncompleta,
       aviso,
     },
     { status: todoBien ? 200 : 502, headers: NO_STORE },

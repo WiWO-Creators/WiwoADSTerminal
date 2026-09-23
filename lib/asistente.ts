@@ -64,6 +64,10 @@ export type Propuesta =
       /** Regiones/ciudades ya resueltas a un id real de Google vía
        * `buscarGeoTargets` — nunca un id inventado por el modelo. */
       targetPlaces: LugarSegmentable[];
+      /** Solo cuando la persona pidió explícitamente restringir el idioma.
+       * Vacío es el default real de Google (todos) — se aplica ahí; Meta no
+       * tiene una acción de escritura para esto por Windsor. */
+      targetLanguages: Array<"es" | "en" | "pt">;
       /** Presupuesto y público quedan acá como nota, no como número: sin
        * conocer la cuenta real (se elige recién dentro del Constructor) no
        * hay cómo saber la moneda con certeza, y un monto mal puesto en el
@@ -236,6 +240,17 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
         meta_descripcion: {
           type: "string",
           description: "Meta: la línea chica bajo el título (opcional).",
+        },
+        idiomas: {
+          type: "array",
+          items: { type: "string", enum: ["es", "en", "pt"] },
+          description:
+            "Solo si la persona pidió explícitamente restringir el idioma (ej. \"en español\"). Se aplica en Google (set_campaign_language_targeting); Meta no tiene una acción de escritura para esto todavía, así que ahí no tiene efecto. Vacío es el default real de Google (todos los idiomas) — no lo agregues solo porque el anuncio está en español, eso no restringe a quién se lo muestra.",
+        },
+        duracion_dias: {
+          type: "integer",
+          description:
+            "Solo si la persona dio una duración de flight explícita (ej. \"durante 30 días\"). No se aplica solo: Google no tiene forma de fijar una fecha de término por esta vía, y en Meta requiere cambiar a presupuesto total (vitalicio) en vez de diario, una decisión que le corresponde a la persona, no a vos. Menciónalo igual en resumen para que lo vea y decida si activar \"Total (vitalicio)\" y la fecha en Calendario.",
         },
       },
       required: ["cliente_id", "nombre_sugerido", "objetivo", "plataformas", "resumen"],
@@ -542,6 +557,21 @@ async function ejecutarHerramienta(
       .map((k) => String(k).trim())
       .filter(Boolean)
       .slice(0, 20);
+    const idiomasValidos = new Set(["es", "en", "pt"]);
+    const targetLanguages = (Array.isArray(entrada.idiomas) ? entrada.idiomas : [])
+      .filter((i): i is "es" | "en" | "pt" => typeof i === "string" && idiomasValidos.has(i));
+
+    // La duración no se puede aplicar sola (ver la descripción de
+    // `duracion_dias`: Google no tiene fecha de término por esta vía, y en
+    // Meta exige presupuesto total en vez de diario, una decisión que le
+    // corresponde a la persona) — se agrega como nota visible en vez de
+    // quedar descartada en silencio, para que quien revisa sepa que el brief
+    // pedía un plazo y decida si activarlo en Calendario.
+    const duracionDias = Number(entrada.duracion_dias);
+    const notaDuracion =
+      Number.isFinite(duracionDias) && duracionDias > 0
+        ? ` Duración pedida: ${duracionDias} días — no se aplica sola; para que la campaña de Meta corte sola a los ${duracionDias} días, cambia a presupuesto "Total (vitalicio)" en Calendario y pon la fecha de término ahí (Google no admite fecha de término por esta vía, hay que pausarla a mano).`
+        : "";
 
     const propuesta: Propuesta = {
       id: crypto.randomUUID(),
@@ -553,7 +583,8 @@ async function ejecutarHerramienta(
       plataformas: plataformas.length > 0 ? plataformas : ["google"],
       paises,
       targetPlaces,
-      resumen: String(entrada.resumen ?? "").slice(0, 800),
+      targetLanguages,
+      resumen: (String(entrada.resumen ?? "") + notaDuracion).slice(0, 800),
       landingUrl: /^https?:\/\//i.test(landingUrl) ? landingUrl : "",
       headlines,
       descriptions,

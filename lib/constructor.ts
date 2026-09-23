@@ -482,6 +482,9 @@ export type SemillaDeCampana = {
    * más abajo) — el asistente las busca con `buscarGeoTargets` antes de proponer,
    * nunca inventa un id. */
   targetPlaces?: LugarSegmentable[];
+  /** Solo cuando la persona pidió explícitamente restringir el idioma. Ver
+   * `Propuesta["targetLanguages"]` en `lib/asistente.ts`. */
+  targetLanguages?: Array<"es" | "en" | "pt">;
   /**
    * Contenido sugerido para el anuncio — el asistente de IA lo escribe
    * cuando ya sabe qué se promociona, con la sintaxis real de cada campo
@@ -746,6 +749,8 @@ export type CuentaCliente = {
   provider: string;
   currency: string | null;
   pageId: string | null;
+  /** Píxel de Meta de esta cuenta. Ver el porqué en `portafolios-store.ts`. */
+  pixelId: string | null;
   countries: string[];
 };
 
@@ -1531,25 +1536,28 @@ export function buildPlan(
     }
 
     const aMensajes = draft.conversionLocation === "mensajes";
-    // OFFSITE_CONVERSIONS —el objetivo real para leads y ventas con destino
-    // sitio web— exige `promoted_object` (pixel_id + custom_event_type):
-    // verificado contra `list_actions` real de `create_adset` en Windsor
-    // ("some optimization goals require promoted_object ... for conversions").
-    // WiWO.ADS todavía no tiene dónde guardar el pixel de un cliente, así que
-    // mandarlo igual crea el conjunto de anuncios roto — confirmado en vivo
-    // contra Colbún (2026-09-23, "Plan Hogar"): Meta rechazó la creación y el
-    // Constructor nunca se enteró ni avisó, dejando la campaña sin conjunto
-    // ni anuncio. Mientras no haya soporte de pixel, se optimiza a clics
-    // (funciona sin `promoted_object`) y se avisa del porqué en vez de
-    // publicar algo que la API real rechaza.
-    const sinPixelParaConversiones =
-      !enConjuntoMetaExistente && !boosteando && !aMensajes && draft.objective !== "trafico";
-    if (sinPixelParaConversiones) {
+    // Meta exige un `custom_event_type` por objetivo, no un "conversión"
+    // genérico: LEAD para pedir datos de contacto, PURCHASE para venta.
+    // "Alcance" (OUTCOME_AWARENESS) nunca fue una conversión — optimizaba mal
+    // desde antes de esta corrección, cayendo en el mismo OFFSITE_CONVERSIONS
+    // que leads y ventas — así que pasa a REACH, que no exige píxel.
+    const eventoDeConversion: "LEAD" | "PURCHASE" | null =
+      draft.objective === "leads" ? "LEAD" : draft.objective === "ventas" ? "PURCHASE" : null;
+    // OFFSITE_CONVERSIONS exige `promoted_object` (pixel_id +
+    // custom_event_type): verificado contra `create_adset` real en Windsor
+    // ("some optimization goals require promoted_object ... for
+    // conversions"). Sin píxel configurado en la cuenta, Meta rechaza el
+    // conjunto de anuncios — confirmado en vivo contra Colbún (2026-09-23,
+    // "Plan Hogar"): 0 conjuntos, 0 anuncios, sin ningún aviso. Ahora se
+    // bloquea antes de publicar algo condenado a fallar, en vez de dejarlo
+    // pasar y enterarse por la cuenta real.
+    const faltaPixel =
+      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes && !cuenta?.pixelId;
+    if (faltaPixel) {
       issues.push({
-        field: "objective",
-        message:
-          "Meta: sin un píxel configurado para este cliente, el conjunto de anuncios no puede optimizar a conversiones (Meta lo rechazaría). Se crea optimizando a clics en el enlace en su lugar.",
-        blocking: false,
+        field: "accountByPlatform",
+        message: `Meta: para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"} hace falta el píxel de esta cuenta de Meta (configúralo en la ficha del cliente), o cambia el destino de conversión a Mensajes.`,
+        blocking: true,
       });
     }
     if (!enConjuntoMetaExistente) {
@@ -1564,14 +1572,23 @@ export function buildPlan(
           ...(enCampanaMetaExistente
             ? { campaign_id: enCampanaMetaExistente.campaignId }
             : {}),
-          // "trafico" siempre fue LINK_CLICKS; ahora lo es también leads,
-          // ventas y alcance, mientras no haya pixel — ver
-          // `sinPixelParaConversiones` arriba.
           optimization_goal: boosteando
             ? "POST_ENGAGEMENT"
             : aMensajes
               ? "CONVERSATIONS"
-              : "LINK_CLICKS",
+              : draft.objective === "trafico"
+                ? "LINK_CLICKS"
+                : draft.objective === "alcance"
+                  ? "REACH"
+                  : "OFFSITE_CONVERSIONS",
+          ...(eventoDeConversion !== null && !boosteando && !aMensajes && cuenta?.pixelId
+            ? {
+                promoted_object: {
+                  pixel_id: cuenta.pixelId,
+                  custom_event_type: eventoDeConversion,
+                },
+              }
+            : {}),
           billing_event: "IMPRESSIONS",
           status: "paused",
           // Con presupuesto de campaña se omiten los dos: Windsor lo pide

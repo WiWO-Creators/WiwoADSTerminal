@@ -6,6 +6,7 @@ import {
   PortafolioError,
   setAccountCountries,
   setAccountPageId,
+  setAccountPixelId,
   updatePortfolio,
 } from "@/lib/portafolios-store";
 
@@ -63,13 +64,14 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       id?: string;
       accountPageId?: { externalId?: string; pageId?: string | null };
+      accountPixelId?: { externalId?: string; pixelId?: string | null };
       accountCountries?: { externalId?: string; countries?: string[] };
     } & Record<string, unknown>;
     if (!body.id) throw new PortafolioError("Falta identificar al cliente");
-    const { id, accountPageId, accountCountries, ...cambios } = body;
+    const { id, accountPageId, accountPixelId, accountCountries, ...cambios } = body;
 
-    // Rutas aparte: la página y los países viven por cuenta, no en las
-    // columnas sueltas de `portfolios` que actualiza updatePortfolio.
+    // Rutas aparte: la página, el píxel y los países viven por cuenta, no en
+    // las columnas sueltas de `portfolios` que actualiza updatePortfolio.
     if (accountPageId) {
       if (!accountPageId.externalId) {
         throw new PortafolioError("Falta identificar la cuenta");
@@ -79,6 +81,17 @@ export async function PATCH(request: Request) {
         id,
         accountPageId.externalId,
         accountPageId.pageId ?? null,
+      );
+    }
+    if (accountPixelId) {
+      if (!accountPixelId.externalId) {
+        throw new PortafolioError("Falta identificar la cuenta");
+      }
+      await setAccountPixelId(
+        session.actor,
+        id,
+        accountPixelId.externalId,
+        accountPixelId.pixelId ?? null,
       );
     }
     if (accountCountries) {

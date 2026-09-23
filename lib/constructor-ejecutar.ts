@@ -55,6 +55,25 @@ const CLAVES_DE_ID: Record<string, { guarda: ClaveId; claves: string[] }> = {
   create_ad_video: { guarda: "video", claves: ["video_id", "videoId", "id"] },
 };
 
+/**
+ * Acción de cada plataforma que sirve para renombrar una campaña ya creada —
+ * verificado contra `list_actions` real: `rename_campaign` en `google_ads`,
+ * `update_campaign` (que sí admite `name`) en `facebook`, ninguna de las dos
+ * llamada "delete": Windsor no puede borrar una campaña, solo pausarla o
+ * renombrarla.
+ */
+const ACCION_DE_RENOMBRE: Partial<Record<WindsorProvider, string>> = {
+  google: "rename_campaign",
+  meta: "update_campaign",
+};
+
+/**
+ * Prefijo que deja una campaña orfanada visible de un vistazo en la propia
+ * plataforma — no solo en el chat de WiWO.ADS — cuando un paso hijo (conjunto,
+ * grupo o anuncio) falla después de que la campaña sí se creó.
+ */
+export const PREFIJO_INCOMPLETA = "[INCOMPLETA — revisar] ";
+
 export type ClaveId = "campaign" | "adGroup" | "adset" | "video";
 
 export type PasoEjecutado = {
@@ -71,6 +90,19 @@ export type ResultadoEjecucion = {
   ok: boolean;
   pasos: PasoEjecutado[];
   ids: Partial<Record<ClaveId, string>>;
+  /**
+   * Cuando un paso hijo falla después de que la campaña ya se creó de
+   * verdad: qué campaña quedó así y si se pudo marcar en la plataforma real
+   * (renombrándola con `PREFIJO_INCOMPLETA`) para que no pase inadvertida.
+   * Windsor no tiene forma de borrar una campaña — pausarla no evita
+   * confundirla con una intencional, así que el aviso queda en el nombre.
+   */
+  campanaIncompleta: {
+    platform: string;
+    campaignId: string;
+    nombreOriginal: string;
+    marcada: boolean;
+  } | null;
 };
 
 /** Si un valor de parámetro todavía necesita el id de un paso anterior. */
@@ -109,6 +141,12 @@ export async function ejecutarPasosDelPlan(
   const ids: Partial<Record<ClaveId, string>> = {};
   const realizados: PasoEjecutado[] = [];
   let todoBien = true;
+  // Campaña ya creada de verdad para cada plataforma en este plan — para
+  // poder marcarla si un paso hijo (conjunto, grupo o anuncio) falla después.
+  const campanaPorPlataforma: Partial<
+    Record<WindsorProvider, { id: string; nombre: string; accountId: string }>
+  > = {};
+  let pasoFallido: PlanStep | null = null;
 
   for (const step of ejecutables) {
     const cuenta = cuentaDe(step, draft, cuentas);
@@ -121,6 +159,7 @@ export async function ejecutarPasosDelPlan(
         raw: null,
       });
       todoBien = false;
+      pasoFallido = step;
       break;
     }
 
@@ -138,6 +177,7 @@ export async function ejecutarPasosDelPlan(
           raw: null,
         });
         todoBien = false;
+        pasoFallido = step;
         break;
       }
       params[padre.campo] = valor;
@@ -152,6 +192,7 @@ export async function ejecutarPasosDelPlan(
           raw: null,
         });
         todoBien = false;
+        pasoFallido = step;
         break;
       }
       params.video_id = ids.video;
@@ -173,6 +214,7 @@ export async function ejecutarPasosDelPlan(
 
     if (!resultado.ok) {
       todoBien = false;
+      pasoFallido = step;
       break;
     }
 
@@ -189,13 +231,60 @@ export async function ejecutarPasosDelPlan(
           raw: resultado.raw,
         };
         todoBien = false;
+        pasoFallido = step;
         break;
       }
       ids[salida.guarda] = id;
+      if (step.action === "create_campaign") {
+        campanaPorPlataforma[step.platform as WindsorProvider] = {
+          id,
+          nombre: typeof params.name === "string" ? params.name : "",
+          accountId: cuenta.externalId,
+        };
+      }
     }
   }
 
-  return { ok: todoBien, pasos: realizados, ids };
+  // Un paso hijo (conjunto, grupo o anuncio) falló después de que la campaña
+  // de esa misma plataforma sí se creó: queda huérfana, pausada (nunca gasta
+  // sola) pero indistinguible de una campaña real a simple vista. Windsor no
+  // puede borrarla — solo renombrarla o pausarla, y ya nace pausada — así que
+  // se marca en su nombre real, en la plataforma, no solo en este reporte.
+  let campanaIncompleta: ResultadoEjecucion["campanaIncompleta"] = null;
+  if (!todoBien && pasoFallido && pasoFallido.action !== "create_campaign") {
+    const huerfana = campanaPorPlataforma[pasoFallido.platform as WindsorProvider];
+    if (huerfana) {
+      const accion = ACCION_DE_RENOMBRE[pasoFallido.platform as WindsorProvider];
+      let marcada = false;
+      if (accion) {
+        const nombreMarcado = `${PREFIJO_INCOMPLETA}${huerfana.nombre}`.slice(0, 255);
+        const renombre = await executeWindsorAction(
+          pasoFallido.platform as WindsorProvider,
+          huerfana.accountId,
+          accion,
+          { campaign_id: huerfana.id, name: nombreMarcado },
+        );
+        marcada = renombre.ok;
+        realizados.push({
+          platform: pasoFallido.platform,
+          action: accion,
+          label: `Marcar la campaña como incompleta (falló ${pasoFallido.label.toLowerCase()})`,
+          params: { campaign_id: huerfana.id, name: nombreMarcado },
+          ok: renombre.ok,
+          error: renombre.error,
+          raw: renombre.raw,
+        });
+      }
+      campanaIncompleta = {
+        platform: pasoFallido.platform,
+        campaignId: huerfana.id,
+        nombreOriginal: huerfana.nombre,
+        marcada,
+      };
+    }
+  }
+
+  return { ok: todoBien, pasos: realizados, ids, campanaIncompleta };
 }
 
 /**
