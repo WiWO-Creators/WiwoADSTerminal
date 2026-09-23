@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { OBJECTIVES, type Objective, type LugarSegmentable } from "@/lib/constructor";
 import { PAISES_SEGMENTABLES } from "@/lib/geo";
 import { buscarGeoTargets } from "@/lib/geo-targets-store";
+import { geocodificarLugar } from "@/lib/geocoding";
 import { can, type Actor } from "@/lib/permisos";
 import {
   getPerformanceSnapshot,
@@ -195,7 +196,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
             additionalProperties: false,
           },
           description:
-            "Regiones/estados/provincias o ciudades/comunas/pueblos reales a segmentar, cuando conviene ser más preciso que el país entero (por ejemplo, 'Santiago, Viña del Mar y Valparaíso'). El sistema busca el id real de destino geográfico de Google para cada uno — los que no se encuentren se descartan solos, no hace falta verificarlos tú. Solo afecta a Google: Meta sigue segmentándose por país o por radio, no tiene este tipo de id.",
+            "Regiones/estados/provincias o ciudades/comunas/pueblos reales a segmentar, cuando conviene ser más preciso que el país entero (por ejemplo, 'Santiago, Viña del Mar y Valparaíso'). El sistema busca el id real de destino geográfico de Google para cada uno y, para Meta (que no tiene ese id), ubica el lugar en el mapa y arma un círculo real a su alrededor — los que no se encuentren se descartan solos, no hace falta verificarlos tú.",
         },
         resumen: {
           type: "string",
@@ -503,7 +504,16 @@ async function ejecutarHerramienta(
       const encontrados = await buscarGeoTargets({ tier: tipo, query: nombre, countryCode: pais });
       const mejor = encontrados[0];
       if (mejor && !targetPlaces.some((l) => l.id === mejor.id)) {
-        targetPlaces.push({ id: mejor.id, nombre: mejor.nombre, countryCode: mejor.countryCode, tier: tipo });
+        // Meta no tiene su propio id de región/ciudad vía Windsor: sin esto
+        // el lugar solo segmentaría la campaña de Google, igual que antes.
+        const coordenadas = await geocodificarLugar(mejor.nombreCanonico, mejor.countryCode);
+        targetPlaces.push({
+          id: mejor.id,
+          nombre: mejor.nombre,
+          countryCode: mejor.countryCode,
+          tier: tipo,
+          ...(coordenadas ?? {}),
+        });
       }
     }
 

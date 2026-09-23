@@ -218,6 +218,7 @@ function borradorInicial(
     keywords: semilla?.keywords ?? [],
     negativeKeywords: [],
     cpcCeiling: null,
+    targetLanguages: [],
     message: semilla?.metaMessage ?? "",
     metaHeadline: semilla?.metaHeadline ?? "",
     metaDescription: semilla?.metaDescription ?? "",
@@ -1754,6 +1755,40 @@ function FaseConjunto({
             Opcional. Con Maximizar clics, Google puede pujar caro por pocos
             clics y agotar el presupuesto del día — esto le pone un techo por
             clic. Vacío deja la puja sin tope, como hasta ahora.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && (
+        <Seccion titulo="Idiomas">
+          <div className="flex flex-wrap gap-4">
+            {(
+              [
+                ["es", "Español"],
+                ["en", "Inglés"],
+                ["pt", "Portugués"],
+              ] as const
+            ).map(([codigo, etiqueta]) => (
+              <label key={codigo} className="flex items-center gap-2 text-sm text-foreground/80">
+                <Checkbox
+                  checked={draft.targetLanguages.includes(codigo)}
+                  onCheckedChange={(checked) =>
+                    onChange({
+                      targetLanguages: checked
+                        ? [...draft.targetLanguages, codigo]
+                        : draft.targetLanguages.filter((l) => l !== codigo),
+                    })
+                  }
+                  className="border-foreground/30"
+                />
+                {etiqueta}
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Vacío es el default real de Google: todos los idiomas. Marcar
+            uno o más restringe a esos — útil en Chile porque hay
+            navegadores configurados en inglés que igual buscan en español.
           </p>
         </Seccion>
       )}

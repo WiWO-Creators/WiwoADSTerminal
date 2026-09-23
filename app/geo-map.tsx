@@ -333,7 +333,45 @@ function SelectorDeLugares({
     Array<{ id: string; nombre: string; nombreCanonico: string; countryCode: string }>
   >([]);
   const [buscando, setBuscando] = useState(false);
+  const [ubicando, setUbicando] = useState<string | null>(null);
   const idsElegidos = new Set(seleccionados.map((l) => l.id));
+
+  async function elegir(lugar: {
+    id: string;
+    nombre: string;
+    nombreCanonico: string;
+    countryCode: string;
+  }) {
+    setUbicando(lugar.id);
+    // Meta no tiene su propio id de región/ciudad vía Windsor: sin esto, el
+    // lugar solo segmentaría la campaña de Google. Se busca por el nombre
+    // canónico (el oficial, sin alias en español) para que Nominatim
+    // encuentre el lugar real y no un homónimo.
+    let coordenadas: { lat: number; lng: number; radiusKm: number; aproximado: boolean } | null =
+      null;
+    try {
+      const params = new URLSearchParams({
+        nombre: lugar.nombreCanonico,
+        countryCode: lugar.countryCode,
+      });
+      const response = await fetch(`/api/geo-targets/geocode?${params}`);
+      const body = (await response.json()) as { coordenadas?: typeof coordenadas };
+      coordenadas = body.coordenadas ?? null;
+    } catch {
+      // Sigue sin coordenadas: el lugar igual segmenta a Google, y el
+      // Constructor avisa aparte que a Meta no le llegó.
+    } finally {
+      setUbicando(null);
+    }
+    onAgregar({
+      id: lugar.id,
+      nombre: lugar.nombre,
+      countryCode: lugar.countryCode,
+      tier,
+      ...(coordenadas ?? {}),
+    });
+    setBusqueda("");
+  }
 
   useEffect(() => {
     const texto = busqueda.trim();
@@ -392,20 +430,13 @@ function SelectorDeLugares({
                 <button
                   key={lugar.id}
                   type="button"
-                  onClick={() => {
-                    onAgregar({
-                      id: lugar.id,
-                      nombre: lugar.nombre,
-                      countryCode: lugar.countryCode,
-                      tier,
-                    });
-                    setBusqueda("");
-                  }}
-                  className="block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-foreground/[0.06]"
+                  disabled={ubicando === lugar.id}
+                  onClick={() => void elegir(lugar)}
+                  className="block w-full px-3 py-2 text-left text-xs transition-colors hover:bg-foreground/[0.06] disabled:opacity-50"
                 >
                   <span className="block text-foreground/80">{lugar.nombre}</span>
                   <span className="block text-[0.65rem] text-foreground/40">
-                    {lugar.nombreCanonico}
+                    {ubicando === lugar.id ? "Ubicando para Meta…" : lugar.nombreCanonico}
                   </span>
                 </button>
               ))
@@ -518,7 +549,9 @@ function ResumenDeSegmentacion({
       {targetPlaces.map((lugar) => (
         <ChipDeSegmentacion
           key={lugar.id}
-          label={`${lugar.nombre} · ${lugar.tier === "region" ? "Región" : "Ciudad"}`}
+          label={`${lugar.nombre} · ${lugar.tier === "region" ? "Región" : "Ciudad"}${
+            lugar.radiusKm === undefined ? " · solo Google" : lugar.aproximado ? " · aprox. en Meta" : ""
+          }`}
           tipo={lugar.tier === "region" ? "region" : "ciudad"}
           onQuitar={() => onQuitarLugar(lugar.id)}
         />
@@ -705,9 +738,13 @@ export function SegmentacionGeografica({
             }
           />
           <p className="flex items-start gap-1.5 text-[0.65rem] leading-5 text-foreground/35">
-            Solo afecta a Google: Meta no expone una forma de buscar sus
-            propios ids de región o ciudad —son un sistema de ids distinto—,
-            así que la campaña de Meta sigue segmentada por país o por radio.
+            Google usa el id real del lugar. Meta no tiene ese id —es un
+            sistema de ids aparte, y Windsor no expone una forma de
+            buscarlo—, así que para Meta se ubica el lugar en el mapa y se
+            segmenta con un círculo a su alrededor (máx. 80 km; para una
+            región más grande que eso, el círculo cubre el centro, no el
+            área completa). Si no se lo pudo ubicar, queda marcado como
+            &quot;solo Google&quot; en el chip de arriba.
           </p>
         </>
       )}

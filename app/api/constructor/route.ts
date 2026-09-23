@@ -14,6 +14,40 @@ export const dynamic = "force-dynamic";
 const NO_STORE = { "cache-control": "no-store" };
 
 /**
+ * Chequea que la landing de verdad responda — un caso real (campaña de
+ * Colbún de prueba) llegó al Constructor con la landing en 404 y nadie lo
+ * notó hasta publicar. No bloquea: una landing caída ahora mismo puede
+ * volver antes de publicar, y quien revisa el plan decide si espera o
+ * corrige la URL. `null` cuando no hay nada que avisar.
+ */
+async function avisoDeLandingCaida(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const corte = setTimeout(() => controller.abort(), 6000);
+  try {
+    let response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    // Algunos sitios no responden HEAD (405/501): un GET real confirma.
+    if (response.status === 405 || response.status === 501) {
+      response = await fetch(url, { method: "GET", redirect: "follow", signal: controller.signal });
+    }
+    if (response.status === 404) {
+      return `La landing (${url}) responde 404 — revisa que la URL sea la correcta`;
+    }
+    if (response.status >= 400) {
+      return `La landing (${url}) responde error ${response.status} — revisa que esté publicada`;
+    }
+    return null;
+  } catch {
+    return `No se pudo comprobar que la landing (${url}) responda — revisa que esté publicada y accesible`;
+  } finally {
+    clearTimeout(corte);
+  }
+}
+
+/**
  * Simula la creación de una campaña.
  *
  * Esta ruta NO escribe en Google ni en Meta. Devuelve el plan: los pasos
@@ -61,7 +95,14 @@ export async function POST(request: Request) {
     const portfolio =
       snapshot.portfolios.find((item) => item.id === draft.portfolioId) ?? null;
 
-    return Response.json(buildPlan(draft, portfolio, cuentas, snapshot), {
+    const plan = buildPlan(draft, portfolio, cuentas, snapshot);
+    const landing = draft.landingUrl.trim();
+    if (landing) {
+      const aviso = await avisoDeLandingCaida(landing);
+      if (aviso) plan.issues.push({ field: "landingUrl", message: aviso, blocking: false });
+    }
+
+    return Response.json(plan, {
       headers: NO_STORE,
     });
   } catch (error) {

@@ -195,14 +195,19 @@ no tener que redescubrirlos:
   (app propia en Meta for Developers, credenciales nuevas, revisión de
   permisos `ads_management`) — una decisión de infraestructura distinta a
   todo lo que corre hoy sobre Windsor.
-- **Segmentación por región/ciudad**: disponible para **Google** (tabla
-  `geo_targets` en D1, sembrada desde la misma fuente oficial de Google que
-  los 219 países — `drizzle/0014_geo_targets.sql` — buscable desde el
-  Constructor, pestaña "Región / Ciudad"). **No** para Meta: Windsor no
-  expone, para el conector `facebook`, una forma de buscar sus propios ids
-  de región/ciudad (son un sistema de ids distinto al de Google) — ahí sigue
-  valiendo solo país o radio (círculo en el mapa, con coordenadas crudas,
-  que no exige buscar ningún id).
+- **Segmentación por región/ciudad**: para **Google** usa el id real del
+  lugar (tabla `geo_targets` en D1, sembrada desde la misma fuente oficial
+  que los 219 países — `drizzle/0014_geo_targets.sql` — buscable desde el
+  Constructor, pestaña "Región / Ciudad"). Windsor no expone, para el
+  conector `facebook`, una forma de buscar el id de región/ciudad propio de
+  Meta (es un sistema de ids distinto al de Google) — para **Meta**, el
+  lugar se geocodifica contra Nominatim/OpenStreetMap (`lib/geocoding.ts`,
+  con caché en D1) y se segmenta con un círculo real alrededor de su centro
+  (`geo_locations.custom_locations`), acotado a 1-80 km. Dos límites reales,
+  no de la interfaz: si Nominatim no ubica el lugar, ese lugar solo
+  segmenta a Google (se avisa en el Constructor); y una región más grande
+  que 80 km de radio queda cubierta solo alrededor del centro, no en toda
+  su área.
 - **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
   las que ya existen (eso todavía se hace en Google Ads directamente).
 - **Borrar campañas**: no existe esa acción en Windsor; solo se pausan. El

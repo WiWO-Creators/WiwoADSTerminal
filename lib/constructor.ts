@@ -494,12 +494,25 @@ export type SemillaDeCampana = {
 };
 
 /** Una región/estado/provincia o ciudad/comuna real, tal como la devuelve
- * `/api/geo-targets` — `id` es el geo_target_constant_id real de Google. */
+ * `/api/geo-targets` — `id` es el geo_target_constant_id real de Google.
+ *
+ * `lat`/`lng`/`radiusKm` son la resolución de ese mismo lugar contra
+ * Nominatim (`lib/geocoding.ts`), para que Meta —que no tiene su propio id de
+ * región/ciudad vía Windsor— lo pueda segmentar igual, con un círculo real en
+ * vez de quedarse en todo el país. `undefined` si la geocodificación falló o
+ * todavía no se intentó: ahí el lugar sigue segmentando a Google como
+ * siempre, pero no aporta nada a Meta. `aproximado` avisa cuando el lugar
+ * real es más grande que el radio máximo que Meta acepta (80 km) — el
+ * círculo cubre el centro, no todo el área. */
 export type LugarSegmentable = {
   id: string;
   nombre: string;
   countryCode: string;
   tier: "region" | "city";
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  aproximado?: boolean;
 };
 
 export type CampaignDraft = {
@@ -588,6 +601,14 @@ export type CampaignDraft = {
    * no ajustable por campaña. `null` deja la puja sin techo, como hasta ahora.
    */
   cpcCeiling: number | null;
+  /**
+   * Google: idiomas a segmentar (`set_campaign_language_targeting`, acción
+   * real verificada en `list_actions`). Vacío es el default real de
+   * Google: todos los idiomas — así queda hoy sin tocar este campo. Solo
+   * los tres que de verdad usa la agencia hoy: no hace falta el selector de
+   * 51 idiomas que expone Google Ads para tener esto operativo.
+   */
+  targetLanguages: Array<"es" | "en" | "pt">;
   /** Meta: texto principal del anuncio. */
   message: string;
   /**
@@ -1026,10 +1047,27 @@ export function validateDraft(
 
   if (draft.platforms.includes("meta")) {
     const cuentaMeta = cuentaElegida(draft, cuentas, "meta");
-    if (draft.targetPlaces.length > 0) {
+    // Meta no tiene su propio id de región/ciudad vía Windsor: un lugar solo
+    // segmenta la campaña de Meta si ya se resolvió a un círculo real
+    // (lat/lng/radio, ver `lib/geocoding.ts`) — si eso falló, avisa en vez de
+    // dejar que la persona crea que quedó cubierto y no.
+    const sinGeocodificar = draft.targetPlaces.filter(
+      (lugar) => lugar.lat === undefined || lugar.lng === undefined || !lugar.radiusKm,
+    );
+    if (sinGeocodificar.length > 0) {
       add(
         "targetPlaces",
-        "Meta no segmenta por región o ciudad elegida acá: solo Google la usa. La campaña de Meta sigue por país o por radio.",
+        `Meta no pudo ubicar ${sinGeocodificar.map((l) => l.nombre).join(", ")} en el mapa: esos lugares solo segmentan la campaña de Google, la de Meta sigue por país o por radio.`,
+        false,
+      );
+    }
+    const aproximados = draft.targetPlaces.filter(
+      (lugar) => lugar.aproximado && lugar.lat !== undefined,
+    );
+    if (aproximados.length > 0) {
+      add(
+        "targetPlaces",
+        `${aproximados.map((l) => l.nombre).join(", ")} es más grande que el radio máximo que Meta acepta (80 km): la campaña de Meta cubre un círculo alrededor del centro, no el área completa.`,
         false,
       );
     }
@@ -1224,6 +1262,20 @@ export function buildPlan(
       });
     }
 
+    // Idiomas: vacío es el default real de Google (todos), así que solo se
+    // envía el paso cuando de verdad se restringió a algo.
+    if (draft.targetLanguages.length > 0) {
+      steps.push({
+        platform: "google",
+        action: "set_campaign_language_targeting",
+        label: "Definir idiomas",
+        params: {
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          languages: draft.targetLanguages,
+        },
+      });
+    }
+
     // Ubicaciones: acción aparte de Google, no un campo de create_campaign.
     // Solo se define para una campaña nueva — una que ya existe puede tener
     // una segmentación deliberada, y este plan no la toca.
@@ -1343,19 +1395,33 @@ export function buildPlan(
     const paisesMetaPlan = paisesEfectivos(draft, cuenta);
     const geoLocations: Record<string, unknown> = {};
     if (paisesMetaPlan.length > 0) geoLocations.countries = paisesMetaPlan;
-    if (draft.geoRadius) {
-      // Círculo del mapa: campo real y documentado de la Marketing API de
-      // Meta (`geo_locations.custom_locations`), no una acción aparte — no
-      // exige buscar ningún id, a diferencia de región o ciudad.
-      geoLocations.custom_locations = [
-        {
-          latitude: draft.geoRadius.lat,
-          longitude: draft.geoRadius.lng,
-          radius: draft.geoRadius.radiusKm,
-          distance_unit: "kilometer",
-        },
-      ];
-    }
+    // Círculo del mapa y regiones/ciudades geocodificadas van al mismo campo
+    // real de la Marketing API de Meta (`geo_locations.custom_locations`):
+    // Meta no tiene su propio id de región/ciudad vía Windsor, así que un
+    // lugar elegido en "Región / Ciudad" solo llega acá si ya se resolvió a
+    // lat/lng/radio real contra Nominatim (`lib/geocoding.ts`) — nunca con un
+    // centro o un radio inventado.
+    const circulos = [
+      ...(draft.geoRadius
+        ? [
+            {
+              latitude: draft.geoRadius.lat,
+              longitude: draft.geoRadius.lng,
+              radius: draft.geoRadius.radiusKm,
+              distance_unit: "kilometer" as const,
+            },
+          ]
+        : []),
+      ...draft.targetPlaces
+        .filter((lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm)
+        .map((lugar) => ({
+          latitude: lugar.lat!,
+          longitude: lugar.lng!,
+          radius: lugar.radiusKm!,
+          distance_unit: "kilometer" as const,
+        })),
+    ];
+    if (circulos.length > 0) geoLocations.custom_locations = circulos;
     const targeting: Record<string, unknown> = {
       geo_locations: geoLocations,
       age_min: draft.ageMin,
@@ -1688,6 +1754,9 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
       typeof body.cpcCeiling === "number" && Number.isFinite(body.cpcCeiling) && body.cpcCeiling > 0
         ? body.cpcCeiling
         : null,
+    targetLanguages: (Array.isArray(body.targetLanguages) ? body.targetLanguages : []).filter(
+      (l): l is "es" | "en" | "pt" => l === "es" || l === "en" || l === "pt",
+    ),
     message: String(body.message ?? ""),
     metaHeadline: String(body.metaHeadline ?? ""),
     metaDescription: String(body.metaDescription ?? ""),
@@ -1764,12 +1833,29 @@ function normalizeTargetPlaces(value: unknown): LugarSegmentable[] {
   const salida: LugarSegmentable[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, nombre, countryCode, tier } = item as Record<string, unknown>;
+    const { id, nombre, countryCode, tier, lat, lng, radiusKm, aproximado } =
+      item as Record<string, unknown>;
     if (typeof id !== "string" || !id.trim()) continue;
     if (typeof nombre !== "string" || !nombre.trim()) continue;
     if (typeof countryCode !== "string" || !countryCode.trim()) continue;
     if (tier !== "region" && tier !== "city") continue;
-    salida.push({ id: id.trim(), nombre: nombre.trim(), countryCode: countryCode.trim().toUpperCase(), tier });
+    const tieneCoordenadas =
+      typeof lat === "number" &&
+      Number.isFinite(lat) &&
+      typeof lng === "number" &&
+      Number.isFinite(lng) &&
+      typeof radiusKm === "number" &&
+      Number.isFinite(radiusKm) &&
+      radiusKm > 0;
+    salida.push({
+      id: id.trim(),
+      nombre: nombre.trim(),
+      countryCode: countryCode.trim().toUpperCase(),
+      tier,
+      ...(tieneCoordenadas
+        ? { lat, lng, radiusKm, aproximado: aproximado === true }
+        : {}),
+    });
   }
   return salida;
 }
