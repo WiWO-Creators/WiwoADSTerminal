@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChevronRight,
+  Columns3,
   Pencil,
   Search,
   Settings2,
@@ -23,7 +24,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -40,7 +50,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { OBJETIVO_CORTO } from "@/lib/objetivos";
+import { OBJETIVO_CORTO, OBJETIVOS } from "@/lib/objetivos";
 import type { AdSummary, PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
@@ -58,22 +68,177 @@ const NIVELES: Array<{ id: Nivel; label: string }> = [
 
 type EstadoFiltro = "todos" | "activo" | "pausado" | "sin_actividad";
 
-type ColumnaOrden =
-  | "nombre"
+/**
+ * Columnas de métrica, personalizables — la persona elige cuáles ver y en
+ * qué orden se ofrecen (siempre en el orden de este arreglo). "Nombre" no
+ * entra acá: es estructural (miniatura, ruta, cuenta), no una métrica, y
+ * siempre se muestra.
+ *
+ * Solo se ofrecen métricas que Windsor ya trae de verdad en esta tabla (ver
+ * `camposAnuncio` en `lib/plataformas.ts`) — Meta y Google Ads exponen
+ * decenas de métricas más (ROAS, video, visibilidad, atribución…) que esta
+ * tabla todavía no pide, no porque no importen sino porque agregarlas exige
+ * primero verificar cada nombre de campo contra Windsor antes de pedirlo.
+ * `null` es "esta plataforma no la trae" (por ejemplo, Alcance en Google) —
+ * se muestra "—", nunca se ordena como si fuera cero.
+ */
+type ColumnaMetricaId =
   | "invertido"
   | "impresiones"
   | "clics"
+  | "ctr"
+  | "cpc"
+  | "cpm"
   | "resultados"
-  | "costo";
+  | "costo"
+  | "alcance"
+  | "clicsEnlace"
+  | "interacciones"
+  | "leads"
+  | "compras"
+  | "conversiones";
 
-const COLUMNAS_ORDENABLES: Array<{ id: ColumnaOrden; label: string; align: "left" | "right" }> = [
-  { id: "nombre", label: "Nombre", align: "left" },
-  { id: "invertido", label: "Invertido", align: "right" },
-  { id: "impresiones", label: "Impresiones", align: "right" },
-  { id: "clics", label: "Clics", align: "right" },
-  { id: "resultados", label: "Resultados", align: "right" },
-  { id: "costo", label: "Costo/resultado", align: "right" },
+type ColumnaOrden = "nombre" | ColumnaMetricaId;
+
+type DefinicionColumnaMetrica = {
+  id: ColumnaMetricaId;
+  label: string;
+  /** Visible la primera vez que alguien abre esta pantalla. */
+  porDefecto: boolean;
+  /** Invertido y Resultados llevan más peso visual: son las dos cifras que definen si algo va bien. */
+  destacada?: boolean;
+  valor: (fila: Fila) => number | null;
+  formato: (valor: number, fila: Fila) => string;
+};
+
+const COLUMNAS_METRICA: DefinicionColumnaMetrica[] = [
+  {
+    id: "invertido",
+    label: "Invertido",
+    porDefecto: true,
+    destacada: true,
+    valor: (f) => f.spendMicros,
+    formato: (v, f) => dinero(v, f.currency),
+  },
+  {
+    id: "impresiones",
+    label: "Impresiones",
+    porDefecto: true,
+    valor: (f) => f.impressions,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "clics",
+    label: "Clics",
+    porDefecto: true,
+    valor: (f) => f.clicks,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "ctr",
+    label: "CTR",
+    porDefecto: false,
+    valor: (f) => (f.impressions > 0 ? (f.clicks / f.impressions) * 100 : null),
+    formato: (v) => `${decimal(v)}%`,
+  },
+  {
+    id: "cpc",
+    label: "CPC",
+    porDefecto: false,
+    valor: (f) => (f.clicks > 0 ? f.spendMicros / 1_000_000 / f.clicks : null),
+    formato: (v, f) => dinero(Math.round(v * 1_000_000), f.currency),
+  },
+  {
+    id: "cpm",
+    label: "CPM",
+    porDefecto: false,
+    valor: (f) =>
+      f.impressions > 0 ? (f.spendMicros / 1_000_000 / f.impressions) * 1000 : null,
+    formato: (v, f) => dinero(Math.round(v * 1_000_000), f.currency),
+  },
+  {
+    id: "resultados",
+    label: "Resultados",
+    porDefecto: true,
+    destacada: true,
+    valor: (f) => f.resultado,
+    formato: (v) => decimal(v),
+  },
+  {
+    id: "costo",
+    label: "Costo/resultado",
+    porDefecto: true,
+    valor: (f) => f.costo,
+    formato: (v, f) => dinero(Math.round(v * 1_000_000), f.currency),
+  },
+  {
+    id: "alcance",
+    label: "Alcance",
+    porDefecto: false,
+    valor: (f) => f.reach,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "clicsEnlace",
+    label: "Clics al enlace",
+    porDefecto: false,
+    valor: (f) => f.linkClicks,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "interacciones",
+    label: "Interacciones",
+    porDefecto: false,
+    valor: (f) => f.engagement,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "leads",
+    label: "Leads",
+    porDefecto: false,
+    valor: (f) => f.leads,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "compras",
+    label: "Compras",
+    porDefecto: false,
+    valor: (f) => f.purchases,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "conversiones",
+    label: "Conversiones",
+    porDefecto: false,
+    valor: (f) => f.conversions,
+    formato: (v) => decimal(v),
+  },
 ];
+
+/** Recordado por navegador, no por cuenta: es una preferencia de vista, no un dato del cliente. */
+const CLAVE_COLUMNAS = "wiwo_anuncios_columnas_v1";
+
+function columnasPorDefecto(): Set<ColumnaMetricaId> {
+  return new Set(COLUMNAS_METRICA.filter((c) => c.porDefecto).map((c) => c.id));
+}
+
+function columnasIniciales(): Set<ColumnaMetricaId> {
+  // Se renderiza también en el servidor (vinext): `window` no existe ahí.
+  if (typeof window === "undefined") return columnasPorDefecto();
+  try {
+    const guardado = window.localStorage.getItem(CLAVE_COLUMNAS);
+    if (!guardado) return columnasPorDefecto();
+    const ids: unknown = JSON.parse(guardado);
+    if (!Array.isArray(ids)) return columnasPorDefecto();
+    const validos = ids.filter((id): id is ColumnaMetricaId =>
+      COLUMNAS_METRICA.some((c) => c.id === id),
+    );
+    return validos.length > 0 ? new Set(validos) : columnasPorDefecto();
+  } catch {
+    // Privado/bloqueado/corrupto: se cae de vuelta al set por defecto, nunca rompe la pantalla.
+    return columnasPorDefecto();
+  }
+}
 
 const ESTADOS: Array<{ id: EstadoFiltro; label: string }> = [
   { id: "todos", label: "Todo estado" },
@@ -112,6 +277,20 @@ type Fila = {
   resultado: number | null;
   /** Invertido / resultado, en la moneda de la cuenta. Sin resultado, no hay costo que mostrar. */
   costo: number | null;
+  /**
+   * Métricas crudas de Meta, además del "resultado" ya elegido según el
+   * objetivo — para quien quiera ver el desglose real (por ejemplo, los
+   * clics al enlace de una campaña de leads) en vez de solo la que cuenta
+   * como resultado. `null` cuando la plataforma no la trae (Google no tiene
+   * alcance ni clics al enlace por esta vía).
+   */
+  reach: number | null;
+  linkClicks: number | null;
+  engagement: number | null;
+  leads: number | null;
+  purchases: number | null;
+  /** Conversiones de Google. `null` en Meta — ahí el desglose real es leads/compras/interacciones de arriba. */
+  conversions: number | null;
   /** Miniatura real de la pieza (solo Meta, ver `WindsorAd.thumbnailUrl`).
    * A nivel de campaña o conjunto es la del primer anuncio del grupo — una
    * referencia visual, no "la" pieza del conjunto entero. */
@@ -200,7 +379,9 @@ export function AnunciosView({
   const [provider, setProvider] = useState("all");
   const [accountKey, setAccountKey] = useState("all");
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
+  const [objetivoFiltro, setObjetivoFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
+  const [columnasVisibles, setColumnasVisibles] = useState<Set<ColumnaMetricaId>>(columnasIniciales);
   const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
   const [confirmando, setConfirmando] = useState<{
     fila: Fila;
@@ -219,6 +400,31 @@ export function AnunciosView({
     setMarcadas(new Set());
     setSoloMarcadas(false);
   }, [nivel, seleccion?.campana, seleccion?.conjunto]);
+
+  // Preferencia de vista, no dato del cliente: por eso vive en el navegador,
+  // no en el servidor. Si falla (privado, bloqueado), la tabla sigue andando
+  // con las columnas por defecto — nunca rompe la pantalla por esto.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CLAVE_COLUMNAS, JSON.stringify([...columnasVisibles]));
+    } catch {
+      // No es crítico: la próxima carga vuelve a las columnas por defecto.
+    }
+  }, [columnasVisibles]);
+
+  function alternarColumna(id: ColumnaMetricaId) {
+    setColumnasVisibles((actual) => {
+      const siguiente = new Set(actual);
+      if (siguiente.has(id)) siguiente.delete(id);
+      else siguiente.add(id);
+      return siguiente;
+    });
+  }
+
+  const columnasEnOrden = useMemo(
+    () => COLUMNAS_METRICA.filter((columna) => columnasVisibles.has(columna.id)),
+    [columnasVisibles],
+  );
 
   const permitidas = useMemo(
     () =>
@@ -288,31 +494,22 @@ export function AnunciosView({
       if (estadoFiltro === "activo" && !activo(fila.status)) return false;
       if (estadoFiltro === "pausado" && !pausado(fila.status)) return false;
       if (estadoFiltro === "sin_actividad" && fila.conActividad) return false;
+      if (objetivoFiltro !== "todos" && fila.objetivo !== objetivoFiltro) return false;
       if (soloMarcadas && !marcadas.has(fila.clave)) return false;
       if (!texto) return true;
       return `${fila.nombre} ${fila.contexto}`.toLowerCase().includes(texto);
     });
     if (!orden) return base;
     const factor = orden.asc ? 1 : -1;
-    return [...base].sort((a, b) => {
-      switch (orden.columna) {
-        case "nombre":
-          return factor * a.nombre.localeCompare(b.nombre, "es");
-        case "invertido":
-          return factor * (a.spendMicros - b.spendMicros);
-        case "impresiones":
-          return factor * (a.impressions - b.impressions);
-        case "clics":
-          return factor * (a.clicks - b.clicks);
-        case "resultados":
-          return factor * ((a.resultado ?? -1) - (b.resultado ?? -1));
-        case "costo":
-          return factor * ((a.costo ?? Infinity) - (b.costo ?? Infinity));
-        default:
-          return 0;
-      }
-    });
-  }, [ads, nivel, estadoFiltro, busqueda, soloMarcadas, marcadas, orden]);
+    if (orden.columna === "nombre") {
+      return [...base].sort((a, b) => factor * a.nombre.localeCompare(b.nombre, "es"));
+    }
+    const columna = COLUMNAS_METRICA.find((c) => c.id === orden.columna);
+    if (!columna) return base;
+    return [...base].sort(
+      (a, b) => factor * ((columna.valor(a) ?? -Infinity) - (columna.valor(b) ?? -Infinity)),
+    );
+  }, [ads, nivel, estadoFiltro, objetivoFiltro, busqueda, soloMarcadas, marcadas, orden]);
 
   const sinActividad = filas.filter((fila) => !fila.conActividad).length;
 
@@ -749,6 +946,20 @@ export function AnunciosView({
             </SelectContent>
           </Select>
         )}
+
+        <Select value={objetivoFiltro} onValueChange={setObjetivoFiltro}>
+          <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todo objetivo</SelectItem>
+            {OBJETIVOS.map((id) => (
+              <SelectItem key={id} value={id}>
+                {OBJETIVO_CORTO[id]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Surface>
 
       {seleccion ? (
@@ -836,6 +1047,34 @@ export function AnunciosView({
                 ? ` · ${sinActividad} SIN ACTIVIDAD EN EL RANGO`
                 : ""}
             </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/60"
+                >
+                  <Columns3 className="size-3.5" />
+                  Columnas
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-[0.62rem] text-foreground/50">
+                  Métricas visibles
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {COLUMNAS_METRICA.map((columna) => (
+                  <DropdownMenuCheckboxItem
+                    key={columna.id}
+                    checked={columnasVisibles.has(columna.id)}
+                    onCheckedChange={() => alternarColumna(columna.id)}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    {columna.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -861,20 +1100,34 @@ export function AnunciosView({
                       aria-label="Marcar todas las filas visibles"
                     />
                   </TableHead>
-                  {COLUMNAS_ORDENABLES.map((columna) => (
-                    <TableHead
-                      key={columna.id}
+                  <TableHead className="text-xs text-foreground/58">
+                    <button
+                      type="button"
+                      onClick={() => alternarOrden("nombre")}
                       className={cn(
-                        "text-xs text-foreground/58",
-                        columna.align === "right" ? "text-right" : "",
+                        "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+                        orden?.columna === "nombre" && "text-foreground",
                       )}
                     >
+                      Nombre
+                      {orden?.columna === "nombre" ? (
+                        orden.asc ? (
+                          <ArrowUp className="size-3" />
+                        ) : (
+                          <ArrowDown className="size-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="size-3 opacity-30" />
+                      )}
+                    </button>
+                  </TableHead>
+                  {columnasEnOrden.map((columna) => (
+                    <TableHead key={columna.id} className="text-right text-xs text-foreground/58">
                       <button
                         type="button"
                         onClick={() => alternarOrden(columna.id)}
                         className={cn(
-                          "inline-flex items-center gap-1 transition-colors hover:text-foreground",
-                          columna.align === "right" && "flex-row-reverse",
+                          "inline-flex flex-row-reverse items-center gap-1 transition-colors hover:text-foreground",
                           orden?.columna === columna.id && "text-foreground",
                         )}
                       >
@@ -966,34 +1219,23 @@ export function AnunciosView({
                       Sin actividad en el rango se escribe "—", nunca 0: un cero
                       se lee como "no rindió", y lo que ocurre es que la
                       plataforma no reporta nada para algo que estuvo apagado.
+                      Columnas dinámicas: mismo arreglo que arma el encabezado,
+                      así que nunca pueden desalinearse entre sí.
                     */}
-                    <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
-                      {fila.conActividad ? (
-                        dinero(fila.spendMicros, fila.currency)
-                      ) : (
-                        <SinDato />
-                      )}
-                    </TableCell>
-                    <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.conActividad ? entero(fila.impressions) : <SinDato />}
-                    </TableCell>
-                    <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.conActividad ? entero(fila.clicks) : <SinDato />}
-                    </TableCell>
-                    <TableCell className="metric-number text-right text-sm font-bold text-foreground/82">
-                      {!fila.conActividad || fila.resultado === null ? (
-                        <SinDato />
-                      ) : (
-                        decimal(fila.resultado)
-                      )}
-                    </TableCell>
-                    <TableCell className="metric-number text-right text-sm text-foreground/66">
-                      {fila.costo === null ? (
-                        <SinDato />
-                      ) : (
-                        dinero(Math.round(fila.costo * 1_000_000), fila.currency)
-                      )}
-                    </TableCell>
+                    {columnasEnOrden.map((columna) => {
+                      const valor = fila.conActividad ? columna.valor(fila) : null;
+                      return (
+                        <TableCell
+                          key={columna.id}
+                          className={cn(
+                            "metric-number text-right text-sm",
+                            columna.destacada ? "font-bold text-foreground/82" : "text-foreground/66",
+                          )}
+                        >
+                          {valor === null ? <SinDato /> : columna.formato(valor, fila)}
+                        </TableCell>
+                      );
+                    })}
                     <TableCell>
                       {fila.objetivo ? (
                         <span className="inline-flex rounded-full bg-brand/12 px-2 py-0.5 text-[0.62rem] font-bold text-brand">
@@ -1165,6 +1407,12 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         clicks: ad.clicks,
         resultado,
         costo: null,
+        reach: ad.reach,
+        linkClicks: ad.linkClicks,
+        engagement: ad.engagement,
+        leads: ad.leads,
+        purchases: ad.purchases,
+        conversions: ad.conversions,
         thumbnailUrl: ad.thumbnailUrl ?? null,
       });
       continue;
@@ -1177,6 +1425,12 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
       actual.resultado === null || resultado === null
         ? (actual.resultado ?? resultado)
         : actual.resultado + resultado;
+    actual.reach = sumarNullable(actual.reach, ad.reach);
+    actual.linkClicks = sumarNullable(actual.linkClicks, ad.linkClicks);
+    actual.engagement = sumarNullable(actual.engagement, ad.engagement);
+    actual.leads = sumarNullable(actual.leads, ad.leads);
+    actual.purchases = sumarNullable(actual.purchases, ad.purchases);
+    actual.conversions = sumarNullable(actual.conversions, ad.conversions);
     // Basta un elemento con actividad para que el grupo tenga cifras reales.
     if (ad.conActividad) actual.conActividad = true;
     if (ad.pendienteSincronizacion) actual.pendienteSincronizacion = true;
@@ -1200,6 +1454,12 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
     if (a.conActividad !== b.conActividad) return a.conActividad ? -1 : 1;
     return b.spendMicros - a.spendMicros;
   });
+}
+
+/** Suma dos métricas que pueden no aplicar: null solo si ninguna de las dos aplicó nunca. */
+function sumarNullable(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
 }
 
 /** El resultado según el objetivo, igual que en la vista de inversión. */
