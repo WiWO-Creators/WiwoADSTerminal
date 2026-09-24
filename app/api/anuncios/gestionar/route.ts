@@ -48,7 +48,14 @@ const ACCIONES_PERMITIDAS: Record<WindsorProvider, string[]> = {
     "rename_customer_match_list",
     "delete_customer_match_list",
   ],
-  meta: ["set_campaign_budget", "set_adset_budget", "update_campaign", "update_adset"],
+  meta: [
+    "set_campaign_budget",
+    "set_adset_budget",
+    "update_campaign",
+    "update_adset",
+    "update_ad",
+    "update_ad_creative",
+  ],
   tiktok: [],
   linkedin: [],
 };

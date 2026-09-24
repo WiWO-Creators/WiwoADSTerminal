@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChevronRight,
+  Pencil,
   Search,
   Settings2,
   X,
@@ -43,6 +44,7 @@ import { OBJETIVO_CORTO } from "@/lib/objetivos";
 import type { AdSummary, PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
+import { EditarAnuncioDialog, type AnuncioEditable } from "./editar-anuncio";
 import { GestionarCampanaDialog, type CampanaGestionable } from "./gestionar-campana";
 import { OrbeDeBoton, Surface } from "./ui";
 
@@ -205,6 +207,7 @@ export function AnunciosView({
     activar: boolean;
   } | null>(null);
   const [gestionando, setGestionando] = useState<CampanaGestionable | null>(null);
+  const [editandoAnuncio, setEditandoAnuncio] = useState<AnuncioEditable | null>(null);
   const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
   const [soloMarcadas, setSoloMarcadas] = useState(false);
   const [orden, setOrden] = useState<{ columna: ColumnaOrden; asc: boolean } | null>(null);
@@ -551,6 +554,32 @@ export function AnunciosView({
         className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
       >
         <Settings2 className="size-3.5" />
+      </button>
+    );
+  }
+
+  /**
+   * Editar el contenido de un anuncio ya publicado — solo Meta (Google no
+   * tiene ninguna acción de escritura para esto, ver `editar-anuncio.tsx`) y
+   * solo a nivel de anuncio, con el id nativo en mano.
+   */
+  function botonEditarAnuncio(fila: Fila) {
+    if (nivel !== "anuncio" || fila.provider !== "meta" || !fila.adId) return null;
+    return (
+      <button
+        type="button"
+        title="Editar anuncio"
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditandoAnuncio({
+            accountId: fila.accountId,
+            adId: fila.adId!,
+            nombre: fila.nombre,
+          });
+        }}
+        className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
+      >
+        <Pencil className="size-3.5" />
       </button>
     );
   }
@@ -1005,6 +1034,7 @@ export function AnunciosView({
                         <div className="flex items-center justify-end gap-1.5">
                           {botonDescartar(fila)}
                           {botonGestionar(fila)}
+                          {botonEditarAnuncio(fila)}
                           {botonEstado(fila)}
                         </div>
                       </TableCell>
@@ -1062,6 +1092,11 @@ export function AnunciosView({
         campana={gestionando}
         open={Boolean(gestionando)}
         onOpenChange={(open) => !open && setGestionando(null)}
+      />
+      <EditarAnuncioDialog
+        anuncio={editandoAnuncio}
+        open={Boolean(editandoAnuncio)}
+        onOpenChange={(open) => !open && setEditandoAnuncio(null)}
       />
     </div>
   );

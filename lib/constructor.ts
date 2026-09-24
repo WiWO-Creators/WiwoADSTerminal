@@ -893,7 +893,7 @@ function paisesEfectivos(
  * formato, pero Meta no puede descargarla, y descubrirlo recién al ejecutar
  * dejaría una campaña y un conjunto ya creados sin anuncio.
  */
-function problemaDeUrlPublica(valor: string): string | null {
+export function problemaDeUrlPublica(valor: string): string | null {
   const texto = valor.trim();
   if (!texto) {
     return "Falta la URL de la pieza: pega una dirección que empiece con https:// (o sube el archivo)";
@@ -1613,7 +1613,17 @@ export function buildPlan(
           // ON_POST + POST_ENGAGEMENT: la forma simple de boostear que Meta
           // documenta sin exigir un botón de acción.
           ...(boosteando
-            ? { destination_type: "ON_POST" }
+            ? {
+                destination_type: "ON_POST",
+                // Windsor lo exige siempre para boost_post, con las dos
+                // formas de conjunto (ON_POST o FACEBOOK_PAGE): "the target
+                // ad set MUST belong to an engagement campaign and name the
+                // post's page in its promoted_object". Faltaba —encontrado
+                // releyendo la descripción real de la acción, no en una
+                // prueba en vivo— y habría hecho fallar cualquier boost
+                // igual que el anuncio de la demo.
+                promoted_object: { page_id: cuenta?.pageId ?? null },
+              }
             : aMensajes
               ? { destination_type: "MESSENGER" }
               : {}),
