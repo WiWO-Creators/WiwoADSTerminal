@@ -31,7 +31,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   admin: "Ve todo, aprueba cambios y administra el equipo.",
   lead: "Ve todos los clientes y aprueba cambios.",
   buyer: "Trabaja los clientes asignados y propone cambios.",
-  analyst: "Solo lectura sobre los clientes asignados.",
+  analyst: "Solo lectura, pero de todos los clientes.",
   client: "Solo ve el rendimiento de su propio portafolio.",
 };
 
@@ -66,7 +66,11 @@ const CAPABILITIES: Record<Role, Capability[]> = {
     "ver_operacion",
   ],
   buyer: ["crear_campanas", "ver_operacion"],
-  analyst: ["ver_operacion"],
+  // Decisión del equipo (2026-09-25): un analista ve TODO el roster de
+  // clientes, sin necesitar asignación manual por portafolio — a diferencia
+  // de buyer/client, que sí quedan acotados a `portfolioIds`. Puede volver a
+  // acotarse más adelante si hace falta un rol de lectura más fino.
+  analyst: ["ver_todos_los_clientes", "ver_operacion"],
   client: [],
 };
 
@@ -87,9 +91,17 @@ export function normalizeRole(value: string | null | undefined): Role {
   return value && isRole(value) ? value : "analyst";
 }
 
+/** Si el ROL en sí tiene esta capacidad, sin mirar si la persona está activa
+ * — para decisiones de solo-interfaz (ej. mostrar u ocultar un selector)
+ * donde no hay un `Actor` completo a mano, no para autorizar una escritura
+ * real (ahí siempre `can`, que sí exige `isActive`). */
+export function roleCan(role: Role, capability: Capability): boolean {
+  return CAPABILITIES[role].includes(capability);
+}
+
 export function can(actor: Actor, capability: Capability): boolean {
   if (!actor.isActive) return false;
-  return CAPABILITIES[actor.role].includes(capability);
+  return roleCan(actor.role, capability);
 }
 
 /**

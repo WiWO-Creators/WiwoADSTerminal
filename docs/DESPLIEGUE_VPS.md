@@ -35,7 +35,7 @@ ejecutan.
 | Archivos | **R2** (binding `MEDIA`): creativos subidos (imágenes/video), máx. 50 MB |
 | UI | Tailwind 4, shadcn/Radix, Sonner, Leaflet, Recharts |
 | Datos de plataformas | **Windsor.ai** (lectura y escritura). Ver `docs/ARQUITECTURA.md` |
-| Login | Google OAuth (única entrada), dominio `@mgcglobalgroup.com` |
+| Login | Google OAuth (única entrada), dominios `@mgcglobalgroup.com` y `@wiwo.me` |
 | IA | Anthropic SDK (`@anthropic-ai/sdk`), modelo `claude-sonnet-5` |
 | Tests | `node --test tests/*.test.mjs` (28 tests), `tsc`, `eslint` |
 
@@ -146,8 +146,8 @@ Sigue pendiente de tu lado:
 - Servir **solo por HTTPS** (Apache/Caddy/Nginx con certificado) y definir
   `APP_ORIGIN` con `https://`.
 - `DEV_LOGIN_ENABLED` fuera o en `false`.
-- El dominio permitido (`@mgcglobalgroup.com`) está fijo en el código
-  (`DOMINIO_PERMITIDO`, callback de Google). Además hay que estar en el equipo:
+- Los dominios permitidos (`@mgcglobalgroup.com` y `@wiwo.me`) están fijos en
+  el código (`DOMINIOS_PERMITIDOS`, callback de Google). Además hay que estar en el equipo:
   un correo del dominio que no esté invitado ni en `OAUTH_ADMIN_EMAILS` **no entra**.
 - La ruta `/api/media/*` es **pública a propósito**: Google y Meta descargan los
   creativos desde sus servidores, sin cookies. Solo entrega objetos bajo el

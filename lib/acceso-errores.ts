@@ -18,7 +18,7 @@ export const ERRORES_ACCESO: Record<string, string> = {
   google_perfil_rechazado: "No pudimos leer tu perfil de Google.",
   google_sin_correo: "Esa cuenta de Google no expone un correo verificado.",
   google_dominio_no_permitido:
-    "Esta app es solo para el equipo — entra con tu correo @mgcglobalgroup.com.",
+    "Esta app es solo para el equipo — entra con tu correo @mgcglobalgroup.com o @wiwo.me.",
   google_falla_red: "No pudimos hablar con Google. Revisa la conexión.",
 };
 
