@@ -19,12 +19,12 @@ export const dynamic = "force-dynamic";
 const SESSION_SECONDS = 60 * 60 * 12;
 
 /**
- * Dominio de correo de la empresa. Probar identidad con Google no es lo
- * mismo que tener permiso: esto es solo el primer filtro (¿esta persona
- * podría ser del equipo?), antes de que `resolveActor` decida si de verdad
- * tiene un rol vigente.
+ * Dominios de correo de la empresa (agencia + WiWO). Probar identidad con
+ * Google no es lo mismo que tener permiso: esto es solo el primer filtro
+ * (¿esta persona podría ser del equipo?), antes de que `resolveActor` decida
+ * si de verdad tiene un rol vigente.
  */
-const DOMINIO_PERMITIDO = "@mgcglobalgroup.com";
+const DOMINIOS_PERMITIDOS = ["@mgcglobalgroup.com", "@wiwo.me"];
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -103,7 +103,7 @@ export async function GET(request: Request) {
     // Si `userinfo` no lo trae, queda el que haya dado el id_token.
     nombre = (profile.name ?? profile.given_name ?? "").trim() || nombre;
     email = profile.email.trim().toLowerCase();
-    if (!email.endsWith(DOMINIO_PERMITIDO)) {
+    if (!DOMINIOS_PERMITIDOS.some((dominio) => email.endsWith(dominio))) {
       return fail("google_dominio_no_permitido");
     }
   } catch {
