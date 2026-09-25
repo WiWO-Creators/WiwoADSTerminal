@@ -27,7 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
+import { roleCan, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
 import { PantallaDeCarga, Surface, OrbeDeBoton } from "./ui";
 
 /** Trae el equipo sin tocar estado, para poder usarla dentro de un efecto. */
@@ -325,7 +325,7 @@ function ClientPicker({
   disabled: boolean;
   onChange: (ids: string[]) => void;
 }) {
-  if (role === "admin" || role === "lead") {
+  if (roleCan(role, "ver_todos_los_clientes")) {
     return (
       <span className="text-xs text-foreground/45">Todos los clientes</span>
     );
