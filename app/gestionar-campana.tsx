@@ -46,17 +46,18 @@ export type CampanaGestionable = {
 };
 
 /**
- * Panel de gestión de algo que ya existe — presupuesto, nombre y, solo en
- * Google a nivel de campaña, estrategia de puja, idiomas, horario, palabras
+ * Panel de gestión de algo que ya existe — presupuesto, nombre y, según la
+ * plataforma y el nivel, estrategia de puja, idiomas, horario, palabras
  * clave negativas y extensiones de anuncio. Cada tarjeta es una acción real
  * de Windsor (`app/api/anuncios/gestionar/route.ts` trae la lista exacta) e
  * independiente de las demás: guardar una no exige guardar el resto.
  *
  * Menos tarjetas en unas combinaciones que en otras es a propósito, no por
  * descuido: Google no tiene presupuesto a nivel de grupo de anuncios (solo
- * de campaña), y ninguna de las dos expone idioma, horario ni extensión a
- * nivel de conjunto — esas viven a nivel de campaña o en otra herramienta de
- * la cuenta.
+ * de campaña), y ni idioma, horario ni extensión de anuncio existen a nivel
+ * de conjunto — esas viven a nivel de campaña. Puja y negativas sí existen a
+ * nivel de conjunto en Google (CPC máximo del grupo, solo con puja manual, y
+ * palabras clave negativas), y por eso tienen su propia tarjeta ahí.
  */
 export function GestionarCampanaDialog({
   campana,
@@ -119,12 +120,6 @@ export function GestionarCampanaDialog({
                   <TarjetaHorario campana={campana} />
                 </AccordionContent>
               </AccordionItem>
-              <AccordionItem value="negativas">
-                <AccordionTrigger>Palabras clave negativas</AccordionTrigger>
-                <AccordionContent>
-                  <TarjetaNegativas campana={campana} />
-                </AccordionContent>
-              </AccordionItem>
               <AccordionItem value="extensiones">
                 <AccordionTrigger>Extensiones de anuncio</AccordionTrigger>
                 <AccordionContent>
@@ -132,6 +127,22 @@ export function GestionarCampanaDialog({
                 </AccordionContent>
               </AccordionItem>
             </>
+          )}
+          {esGoogle && !esCampana && (
+            <AccordionItem value="puja-conjunto">
+              <AccordionTrigger>Puja (CPC máximo)</AccordionTrigger>
+              <AccordionContent>
+                <TarjetaPujaConjunto campana={campana} />
+              </AccordionContent>
+            </AccordionItem>
+          )}
+          {esGoogle && (
+            <AccordionItem value="negativas">
+              <AccordionTrigger>Palabras clave negativas</AccordionTrigger>
+              <AccordionContent>
+                <TarjetaNegativas campana={campana} />
+              </AccordionContent>
+            </AccordionItem>
           )}
         </Accordion>
       </DialogContent>
@@ -143,7 +154,7 @@ async function ejecutar(
   campana: CampanaGestionable,
   action: string,
   params: Record<string, unknown>,
-) {
+): Promise<{ pausado: { nivel: string } | null }> {
   const response = await fetch("/api/anuncios/gestionar", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -154,14 +165,23 @@ async function ejecutar(
       params,
     }),
   });
-  const body = (await response.json()) as { ok: boolean; error?: string };
+  const body = (await response.json()) as {
+    ok: boolean;
+    error?: string;
+    pausado?: { nivel: string } | null;
+  };
   if (!response.ok || !body.ok) {
     throw new Error(body.error ?? "No se pudo aplicar el cambio");
   }
+  return { pausado: body.pausado ?? null };
 }
 
 /** Botón de guardar compartido por cada tarjeta: mismo estado de carga y el
- * mismo manejo de error, para no repetir el try/catch siete veces. */
+ * mismo manejo de error, para no repetir el try/catch siete veces. Cambiar
+ * el nombre no pausa nada (`esSoloRenombre` del lado del servidor); todo lo
+ * demás — presupuesto, puja, idiomas, horario, negativas, extensiones —
+ * pausa la campaña o el conjunto, según lo que se haya tocado, y acá se
+ * avisa en el mismo toast de éxito. */
 function useAccion(campana: CampanaGestionable) {
   const [enviando, setEnviando] = useState(false);
   async function enviar(
@@ -171,8 +191,15 @@ function useAccion(campana: CampanaGestionable) {
   ) {
     setEnviando(true);
     try {
-      await ejecutar(campana, action, params);
-      toast.success(exito);
+      const { pausado } = await ejecutar(campana, action, params);
+      if (pausado) {
+        const que = pausado.nivel === "campana" ? "la campaña" : "el conjunto";
+        toast.success(exito, {
+          description: `Se pausó ${que} para que la revises antes de que siga corriendo.`,
+        });
+      } else {
+        toast.success(exito);
+      }
     } catch (issue) {
       toast.error(
         issue instanceof Error ? issue.message : "No se pudo aplicar el cambio",
@@ -403,6 +430,60 @@ function TarjetaPuja({ campana }: { campana: CampanaGestionable }) {
         {enviando ? <OrbeDeBoton /> : null}
         Guardar
       </Button>
+    </div>
+  );
+}
+
+/**
+ * CPC máximo del grupo de anuncios — a diferencia de `TarjetaPuja` (la
+ * estrategia entera, a nivel de campaña), esto solo tiene sentido cuando la
+ * campaña ya usa CPC manual: la puja manual vive en el grupo, no en la
+ * campaña (`set_max_cpc`, verificado contra `list_actions` real de Windsor).
+ * Con Puja inteligente activa, Windsor rechaza esta acción con su propio
+ * error — no se intenta adivinar acá cuál estrategia tiene la campaña.
+ */
+function TarjetaPujaConjunto({ campana }: { campana: CampanaGestionable }) {
+  const { enviando, enviar } = useAccion(campana);
+  const [monto, setMonto] = useState("");
+
+  async function guardar() {
+    const valor = Number(monto);
+    if (!Number.isFinite(valor) || valor <= 0) {
+      toast.error("Ingresa un monto válido");
+      return;
+    }
+    await enviar(
+      "set_max_cpc",
+      { ad_group_id: campana.id, amount_micros: Math.round(valor * 1_000_000) },
+      "CPC máximo actualizado",
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-0 flex-1">
+          <label className="font-micro block text-[0.6rem] text-foreground/50">
+            CPC MÁXIMO {campana.currency ? `(${campana.currency})` : ""}
+          </label>
+          <Input
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+            inputMode="numeric"
+            placeholder="0"
+            className="mt-1.5 bg-field/60"
+          />
+        </div>
+        <Button onClick={() => void guardar()} disabled={enviando}>
+          {enviando ? <OrbeDeBoton /> : null}
+          Guardar
+        </Button>
+      </div>
+      <p className="text-[0.65rem] leading-5 text-foreground/35">
+        Solo aplica si la campaña usa puja manual (CPC manual) — con puja
+        inteligente activa, la plataforma rechaza este cambio y se muestra el
+        error real que devuelva.
+      </p>
     </div>
   );
 }
@@ -638,6 +719,7 @@ function TarjetaHorario({ campana }: { campana: CampanaGestionable }) {
 function TarjetaNegativas({ campana }: { campana: CampanaGestionable }) {
   const { enviando, enviar } = useAccion(campana);
   const [texto, setTexto] = useState("");
+  const esCampana = campana.nivel === "campana";
 
   async function guardar() {
     const keywords = texto
@@ -651,7 +733,9 @@ function TarjetaNegativas({ campana }: { campana: CampanaGestionable }) {
     }
     await enviar(
       "push_negative_keywords",
-      { level: "campaign", campaign_id: campana.id, keywords },
+      esCampana
+        ? { level: "campaign", campaign_id: campana.id, keywords }
+        : { level: "ad_group", ad_group_id: campana.id, keywords },
       `${keywords.length} palabra${keywords.length === 1 ? "" : "s"} clave negativa añadida${keywords.length === 1 ? "" : "s"}`,
     );
     setTexto("");

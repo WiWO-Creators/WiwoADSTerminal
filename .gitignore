@@ -45,5 +45,11 @@ next-env.d.ts
 # local dev secrets
 .dev.vars
 
+# MCP local del agente (rutas de credenciales de la máquina, no del proyecto)
+.mcp.json
+
+# Estado local de D1 para los scripts de wrangler (SQLite de miniflare)
+/scripts/.wrangler/
+
 # Datos del servidor Node (SQLite y creativos)
 /datos/

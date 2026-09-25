@@ -536,6 +536,12 @@ export type CampaignDraft = {
    * hace falta elegir.
    */
   accountByPlatform: Partial<Record<Platform, string>>;
+  /**
+   * Qué píxel de Meta usar, cuando la cuenta elegida tiene más de uno (ver
+   * `CuentaCliente.pixels`). `null` cuando la cuenta solo tiene uno: ahí no
+   * hace falta elegir, se usa directo.
+   */
+  metaPixelId: string | null;
   name: string;
   /** Nota interna del equipo. No se envía a ninguna plataforma. */
   details: string;
@@ -740,6 +746,19 @@ export type CampaignDraft = {
    * `existingCampaign`.
    */
   existingAdset: { adsetId: string; adsetName: string } | null;
+  /**
+   * Solo tiene efecto cuando se crea una campaña 100% nueva (`existingCampaign`
+   * es `null`): el conjunto y el anuncio nacen activos en vez de pausados,
+   * para no tener que activarlos a mano después de activar la campaña. Seguro
+   * porque la campaña en sí SIEMPRE nace pausada (ver `buildPlan`) — nada
+   * entrega mientras esa pausa siga puesta, sin importar el estado del hijo.
+   *
+   * Al adjuntar a una campaña o conjunto que YA existe (y que puede estar
+   * corriendo de verdad), esto no aplica nunca: ahí el conjunto/anuncio nuevo
+   * sigue naciendo pausado sin excepción — no hay una campaña recién creada
+   * y pausada que sirva de freno.
+   */
+  activarConjuntoYAnuncio: boolean;
 };
 
 /** Cuenta de un cliente, tal como la expone `/api/clientes`. */
@@ -749,8 +768,14 @@ export type CuentaCliente = {
   provider: string;
   currency: string | null;
   pageId: string | null;
-  /** Píxel de Meta de esta cuenta. Ver el porqué en `portafolios-store.ts`. */
-  pixelId: string | null;
+  /**
+   * Píxeles de Meta de esta cuenta — puede haber más de uno (ej. MGC: un
+   * píxel de Converse y otro de Coliseum en la misma cuenta publicitaria).
+   * Ver el porqué en `portafolios-store.ts`. Con exactamente uno, se usa
+   * solo; con más de uno, la persona tiene que elegir cuál (`metaPixelId` en
+   * el draft) — nunca se adivina cuál corresponde a esta campaña.
+   */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   countries: string[];
 };
 
@@ -791,15 +816,34 @@ export type BuildResult = {
 /**
  * Sugiere un presupuesto diario a partir de lo que el cliente ya invierte.
  *
- * No se inventa un número: se toma el gasto real del mes en esa plataforma y
- * se divide por los días transcurridos. Si el cliente no tiene historia en la
- * plataforma, se devuelve null y la interfaz lo dice, en vez de proponer una
- * cifra sin fundamento.
+ * No se inventa un número: nunca propone una cifra que no salga de datos
+ * reales de este cliente. Dos fuentes, en orden:
+ *
+ * 1. Gasto real del periodo en curso, en campañas con actividad — la más
+ *    confiable, porque es inversión efectiva, no solo declarada.
+ * 2. Si no hay gasto este periodo (cuenta pausada, recién conectada, en
+ *    pausa temporal — el caso real de Skydive Andes, 2026-09-25: 24 días sin
+ *    gasto pero con campañas ya configuradas), el presupuesto DIARIO
+ *    CONFIGURADO de sus campañas (activas primero; si no hay ninguna activa,
+ *    las que existan) — no es gasto, pero es lo que el cliente ya definió
+ *    como normal para ese tipo de campaña, mejor referencia que un $0 que no
+ *    dice nada. Se distingue siempre en `basis` cuál de las dos se usó, para
+ *    no confundir "esto se gastó" con "esto se configuró".
+ *
+ * Sin ninguna de las dos, se devuelve null y la interfaz lo dice.
+ *
+ * Trabaja a nivel de campaña (no la cuenta agregada) justamente para poder
+ * excluir `excluirCampanas`: campañas de prueba creadas por este mismo
+ * sistema momentos antes no son "historia" del cliente — confirmado con
+ * Colbún (2026-09-24), donde campañas de prueba de la sesión, sin gasto real,
+ * se citaron como si fueran inversión histórica al sugerir presupuesto. Ver
+ * `nombresDeCampanasRecientes` en `lib/constructor-ejecutar.ts`.
  */
 export function recommendBudget(
   portfolio: PortfolioSummary | null,
   platform: Platform,
   snapshot: PerformanceSnapshot,
+  excluirCampanas: ReadonlySet<string> = new Set(),
 ): BudgetAdvice {
   if (!portfolio) {
     // Pasa tanto si no se eligió cliente como si el elegido no tiene
@@ -813,34 +857,67 @@ export function recommendBudget(
     };
   }
 
-  const provider = portfolio.byProvider.find(
-    (item) => item.provider === platform,
+  const cuentasDelCliente = new Set(portfolio.accounts.map((a) => a.id));
+  const todasLasCampanas = snapshot.campaigns.filter(
+    (c) =>
+      c.provider === platform &&
+      cuentasDelCliente.has(c.accountKey) &&
+      !excluirCampanas.has(c.name),
   );
-  const totals = provider?.currencyTotals ?? [];
 
-  if (totals.length === 0) {
+  if (todasLasCampanas.length === 0) {
     return {
       suggested: null,
       currency: null,
-      basis: `${portfolio.name} no tiene inversión registrada en ${platformLabel(platform)} este mes`,
+      basis: `${portfolio.name} no tiene ninguna campaña registrada en ${platformLabel(platform)}: define el presupuesto a mano`,
     };
   }
-  if (totals.length > 1) {
+  const monedas = new Set(todasLasCampanas.map((c) => c.currency).filter(Boolean));
+  if (monedas.size > 1) {
     return {
       suggested: null,
       currency: null,
       basis: "El cliente factura en varias monedas: define el presupuesto a mano",
     };
   }
+  const currency = todasLasCampanas.find((c) => c.currency)?.currency ?? null;
 
-  const total = totals[0];
-  const days = daysElapsed(snapshot.rangeStart, snapshot.rangeEnd);
-  const daily = total.spendMicros / 1_000_000 / Math.max(days, 1);
+  const conGasto = todasLasCampanas.filter((c) => c.conActividad);
+  const spendMicros = conGasto.reduce((sum, c) => sum + c.spendMicros, 0);
+  if (spendMicros > 0) {
+    const days = daysElapsed(snapshot.rangeStart, snapshot.rangeEnd);
+    const daily = spendMicros / 1_000_000 / Math.max(days, 1);
+    return {
+      suggested: Math.round(daily),
+      currency,
+      basis: `Promedio diario de ${portfolio.name} en el mes: ${days} ${days === 1 ? "día" : "días"} de inversión real`,
+    };
+  }
+
+  const activa = (status: string | null) => status === "ENABLED" || status === "ACTIVE";
+  const conPresupuestoActivas = todasLasCampanas.filter(
+    (c) => c.dailyBudgetMicros !== null && activa(c.status),
+  );
+  const candidatas =
+    conPresupuestoActivas.length > 0
+      ? conPresupuestoActivas
+      : todasLasCampanas.filter((c) => c.dailyBudgetMicros !== null);
+  if (candidatas.length > 0) {
+    const promedioMicros =
+      candidatas.reduce((sum, c) => sum + (c.dailyBudgetMicros ?? 0), 0) / candidatas.length;
+    return {
+      suggested: Math.round(promedioMicros / 1_000_000),
+      currency,
+      basis: `Presupuesto diario ya configurado en las campañas ${
+        candidatas === conPresupuestoActivas ? "activas" : "existentes"
+      } de ${portfolio.name} en ${platformLabel(platform)} — sin gasto real este periodo`,
+    };
+  }
 
   return {
-    suggested: Math.round(daily),
-    currency: total.currency,
-    basis: `Promedio diario de ${portfolio.name} en el mes: ${days} ${days === 1 ? "día" : "días"} de inversión real`,
+    suggested: null,
+    currency: null,
+    basis: `${portfolio.name} no tiene inversión ni presupuesto configurado en ${platformLabel(platform)} este mes`,
   };
 }
 
@@ -874,14 +951,20 @@ function cuentaElegida(
  * "Plan Hogar"): con Chile + 4 comunas, Google Ads mostró la campaña
  * segmentada a los 18,7 M de habitantes del país, no a las comunas pedidas —
  * en las dos plataformas, con el mismo origen.
+ *
+ * El guardia solo cubría el fallback (`targetCountries` vacío); con un país
+ * elegido a mano (o pasado por el Orb) a la vez que comunas/regiones, el
+ * mismo problema volvía a pasar — confirmado otra vez con Colbún
+ * (2026-09-24, campaña "Región del Maule" que terminó segmentando Chile
+ * entero). El chequeo aplica ahora sin importar de dónde salió el país.
  */
 function paisesEfectivos(
   draft: CampaignDraft,
   cuenta: CuentaCliente | null,
 ): string[] {
-  if (draft.targetCountries.length > 0) return draft.targetCountries;
   const yaSegmentadoMasFino = draft.targetPlaces.length > 0 || draft.geoRadius !== null;
   if (yaSegmentadoMasFino) return [];
+  if (draft.targetCountries.length > 0) return draft.targetCountries;
   return cuenta?.countries ?? [];
 }
 
@@ -1189,6 +1272,7 @@ export function buildPlan(
   portfolio: PortfolioSummary | null,
   cuentas: CuentaCliente[],
   snapshot: PerformanceSnapshot,
+  excluirCampanasDePresupuesto: ReadonlySet<string> = new Set(),
 ): BuildResult {
   const issues = validateDraft(draft, cuentas);
   const steps: PlanStep[] = [];
@@ -1202,6 +1286,13 @@ export function buildPlan(
   const enCampanaExistente =
     draft.existingCampaign?.platform === "google" ? draft.existingCampaign : null;
   const enConjuntoExistente = enCampanaExistente ? draft.existingAdset : null;
+  // Solo aplica cuando la campaña es 100% nueva: la campaña recién creada es
+  // la que queda pausada como freno (ver el paso create_campaign más abajo,
+  // siempre "paused"). Adjuntar a algo que ya existe (y que puede estar
+  // corriendo) nunca activa el hijo de entrada.
+  const statusHijoGoogle: "enabled" | "paused" =
+    !enCampanaExistente && draft.activarConjuntoYAnuncio ? "enabled" : "paused";
+  const etiquetaEstadoGoogle = statusHijoGoogle === "enabled" ? "activo" : "pausado";
 
   if (draft.platforms.includes("google")) {
     const cuenta = cuentaElegida(draft, cuentas, "google");
@@ -1235,11 +1326,11 @@ export function buildPlan(
         platform: "google",
         action: "create_ad_group",
         label: enCampanaExistente
-          ? `Crear grupo de anuncios en «${enCampanaExistente.campaignName}» (pausado)`
-          : "Crear grupo de anuncios (pausado)",
+          ? `Crear grupo de anuncios en «${enCampanaExistente.campaignName}» (${etiquetaEstadoGoogle})`
+          : `Crear grupo de anuncios (${etiquetaEstadoGoogle})`,
         params: {
           name: enCampanaExistente ? draft.name : `${draft.name} · principal`,
-          status: "paused",
+          status: statusHijoGoogle,
           ...(enCampanaExistente
             ? { campaign_id: enCampanaExistente.campaignId }
             : {}),
@@ -1251,8 +1342,8 @@ export function buildPlan(
       platform: "google",
       action: "create_responsive_search_ad",
       label: enConjuntoExistente
-        ? `Crear anuncio en «${enConjuntoExistente.adsetName}» (pausado)`
-        : "Crear anuncio de búsqueda responsivo (pausado)",
+        ? `Crear anuncio en «${enConjuntoExistente.adsetName}» (${etiquetaEstadoGoogle})`
+        : `Crear anuncio de búsqueda responsivo (${etiquetaEstadoGoogle})`,
       params: {
         // Igual que el video_id de Meta más abajo: si el grupo se crea en
         // este mismo plan, su id real solo existe después de ejecutar el
@@ -1261,7 +1352,7 @@ export function buildPlan(
         headlines: draft.headlines.filter((t) => t.trim()),
         descriptions: draft.descriptions.filter((d) => d.trim()),
         final_url: draft.landingUrl.trim(),
-        status: "paused",
+        status: statusHijoGoogle,
         ...(draft.pathDisplay1.trim() ? { path1: draft.pathDisplay1.trim() } : {}),
         ...(draft.pathDisplay2.trim() ? { path2: draft.pathDisplay2.trim() } : {}),
       },
@@ -1408,6 +1499,12 @@ export function buildPlan(
   // el boost — ahí se arma un anuncio nuevo con la imagen, como antes.
   const boosteando =
     Boolean(draft.boostPostId) && !enCampanaMetaExistente && !enConjuntoMetaExistente;
+  // Mismo criterio que statusHijoGoogle: solo activo de entrada cuando la
+  // campaña de Meta es 100% nueva en este plan — la campaña pausada es el
+  // freno, nunca el conjunto o el anuncio adjuntados a algo que ya existe.
+  const statusHijoMeta: "active" | "paused" =
+    !enCampanaMetaExistente && draft.activarConjuntoYAnuncio ? "active" : "paused";
+  const etiquetaEstadoMeta = statusHijoMeta === "active" ? "activo" : "pausado";
 
   if (draft.platforms.includes("meta")) {
     const cuenta = cuentaElegida(draft, cuentas, "meta");
@@ -1551,12 +1648,32 @@ export function buildPlan(
     // "Plan Hogar"): 0 conjuntos, 0 anuncios, sin ningún aviso. Ahora se
     // bloquea antes de publicar algo condenado a fallar, en vez de dejarlo
     // pasar y enterarse por la cuenta real.
-    const faltaPixel =
-      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes && !cuenta?.pixelId;
+    const necesitaPixel =
+      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes;
+    const pixelesDeLaCuenta = cuenta?.pixels ?? [];
+    // Una cuenta puede tener más de un píxel (MGC: Converse y Coliseum en la
+    // misma cuenta) — con exactamente uno no hay nada que elegir, con más de
+    // uno la persona tiene que decidir cuál corresponde a esta campaña, nunca
+    // se adivina.
+    const pixelElegido =
+      draft.metaPixelId && pixelesDeLaCuenta.some((p) => p.pixelId === draft.metaPixelId)
+        ? draft.metaPixelId
+        : pixelesDeLaCuenta.length === 1
+          ? pixelesDeLaCuenta[0].pixelId
+          : null;
+    const faltaPixel = necesitaPixel && pixelesDeLaCuenta.length === 0;
+    const pixelAmbiguo = necesitaPixel && pixelesDeLaCuenta.length > 1 && !pixelElegido;
     if (faltaPixel) {
       issues.push({
         field: "accountByPlatform",
         message: `Meta: para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"} hace falta el píxel de esta cuenta de Meta (configúralo en la ficha del cliente), o cambia el destino de conversión a Mensajes.`,
+        blocking: true,
+      });
+    }
+    if (pixelAmbiguo) {
+      issues.push({
+        field: "metaPixelId",
+        message: `Meta: esta cuenta tiene ${pixelesDeLaCuenta.length} píxeles configurados (${pixelesDeLaCuenta.map((p) => p.label ?? p.pixelId).join(", ")}) — elige cuál usar para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"}.`,
         blocking: true,
       });
     }
@@ -1565,8 +1682,8 @@ export function buildPlan(
         platform: "meta",
         action: "create_adset",
         label: enCampanaMetaExistente
-          ? `Crear conjunto de anuncios en «${enCampanaMetaExistente.campaignName}» (pausado)`
-          : "Crear conjunto de anuncios (pausado)",
+          ? `Crear conjunto de anuncios en «${enCampanaMetaExistente.campaignName}» (${etiquetaEstadoMeta})`
+          : `Crear conjunto de anuncios (${etiquetaEstadoMeta})`,
         params: {
           name: enCampanaMetaExistente ? draft.name : `${draft.name} · principal`,
           ...(enCampanaMetaExistente
@@ -1574,23 +1691,32 @@ export function buildPlan(
             : {}),
           optimization_goal: boosteando
             ? "POST_ENGAGEMENT"
-            : aMensajes
-              ? "CONVERSATIONS"
-              : draft.objective === "trafico"
+            : aMensajes && draft.objective === "leads"
+              ? // Verificado en vivo contra Colbún (2026-09-24): "CONVERSATIONS"
+                // lo rechaza Meta acá con "el objetivo de rendimiento no está
+                // disponible" (code 100, subcode 2490408), a pesar de que la
+                // documentación de la acción lo lista como válido para
+                // OUTCOME_LEADS. El valor real que Meta acepta es
+                // "LEAD_GENERATION" — probado con una escritura real, no
+                // supuesto de la documentación.
+                "LEAD_GENERATION"
+              : aMensajes
+                ? "CONVERSATIONS"
+                : draft.objective === "trafico"
                 ? "LINK_CLICKS"
                 : draft.objective === "alcance"
                   ? "REACH"
                   : "OFFSITE_CONVERSIONS",
-          ...(eventoDeConversion !== null && !boosteando && !aMensajes && cuenta?.pixelId
+          ...(eventoDeConversion !== null && !boosteando && !aMensajes && pixelElegido
             ? {
                 promoted_object: {
-                  pixel_id: cuenta.pixelId,
+                  pixel_id: pixelElegido,
                   custom_event_type: eventoDeConversion,
                 },
               }
             : {}),
           billing_event: "IMPRESSIONS",
-          status: "paused",
+          status: statusHijoMeta,
           // Con presupuesto de campaña se omiten los dos: Windsor lo pide
           // así — "omit both only when the campaign uses campaign budget
           // optimization" — y ponerlos igual haría que Meta rechace la
@@ -1625,7 +1751,16 @@ export function buildPlan(
                 promoted_object: { page_id: cuenta?.pageId ?? null },
               }
             : aMensajes
-              ? { destination_type: "MESSENGER" }
+              ? {
+                  destination_type: "MESSENGER",
+                  // Meta lo exige siempre para un destino de mensajería
+                  // (Messenger, Instagram Direct, WhatsApp) — mismo caso que
+                  // boost_post arriba, encontrado en una publicación real
+                  // contra Colbún (2026-09-24): sin esto, Meta rechaza la
+                  // creación con "el objetivo de rendimiento no está
+                  // disponible", un mensaje que no menciona el motivo real.
+                  promoted_object: { page_id: cuenta?.pageId ?? null },
+                }
               : {}),
           ...(draft.budgetMode === "total" && draft.endDate
             ? { end_time: draft.endDate }
@@ -1641,7 +1776,7 @@ export function buildPlan(
       steps.push({
         platform: "meta",
         action: "boost_post",
-        label: "Boostear la publicación (pausado)",
+        label: `Boostear la publicación (${etiquetaEstadoMeta})`,
         params: {
           // El conjunto siempre se crea en este mismo plan cuando se boostea
           // (ver `boosteando` arriba), así que su id real solo existe
@@ -1649,7 +1784,7 @@ export function buildPlan(
           adset_id: MARCADOR_PASO_ANTERIOR,
           post_id: draft.boostPostId,
           name: draft.name,
-          status: "paused",
+          status: statusHijoMeta,
         },
       });
     } else {
@@ -1665,8 +1800,8 @@ export function buildPlan(
         platform: "meta",
         action: "create_ad",
         label: enConjuntoMetaExistente
-          ? `Crear anuncio en «${enConjuntoMetaExistente.adsetName}» (pausado)`
-          : "Crear anuncio (pausado)",
+          ? `Crear anuncio en «${enConjuntoMetaExistente.adsetName}» (${etiquetaEstadoMeta})`
+          : `Crear anuncio (${etiquetaEstadoMeta})`,
         params: {
           // Igual que video_id: si el conjunto se crea en este mismo plan, su
           // id real solo existe después de ejecutar el paso anterior.
@@ -1689,7 +1824,7 @@ export function buildPlan(
             : { link: draft.landingUrl.trim() || undefined }),
           call_to_action_type: draft.callToAction,
           page_id: cuenta?.pageId ?? null,
-          status: "paused",
+          status: statusHijoMeta,
         },
       });
     }
@@ -1721,7 +1856,7 @@ export function buildPlan(
 
   const budgets: Partial<Record<Platform, BudgetAdvice>> = {};
   for (const plataforma of draft.platforms) {
-    budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot);
+    budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot, excluirCampanasDePresupuesto);
   }
 
   return {
@@ -1836,6 +1971,10 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     portfolioId: String(body.portfolioId ?? ""),
     platforms,
     accountByPlatform,
+    metaPixelId:
+      typeof body.metaPixelId === "string" && body.metaPixelId.trim()
+        ? body.metaPixelId.trim()
+        : null,
     name: String(body.name ?? ""),
     details: String(body.details ?? ""),
     objective,
@@ -1924,6 +2063,9 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
         : "estandar",
     existingCampaign: normalizeExistingCampaign(body.existingCampaign),
     existingAdset: normalizeExistingAdset(body.existingAdset),
+    // Default true a propósito: es el ahorro de pasos que se pidió. Solo se
+    // desactiva si alguien lo destildó explícitamente en la pantalla.
+    activarConjuntoYAnuncio: body.activarConjuntoYAnuncio !== false,
   };
 }
 

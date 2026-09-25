@@ -40,11 +40,14 @@ type CuentaVinculada = {
    */
   pageId: string | null;
   /**
-   * Píxel de Meta de esta cuenta puntual, para que el conjunto de anuncios
+   * Píxeles de Meta de esta cuenta puntual, para que el conjunto de anuncios
    * pueda optimizar a leads o ventas en vez de solo a clics — Meta lo exige
-   * (`promoted_object.pixel_id`) y sin él rechaza la creación del conjunto.
+   * (`promoted_object.pixel_id`) y sin ninguno rechaza la creación del
+   * conjunto. Puede haber más de uno (MGC: Converse y Coliseum en la misma
+   * cuenta) — con más de uno, el Constructor exige elegir cuál usar en cada
+   * campaña.
    */
-  pixelId: string | null;
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   /**
    * Países de segmentación de esta cuenta puntual, no del cliente entero.
    *
@@ -57,7 +60,8 @@ type CuentaVinculada = {
 /** Lo que puede guardarse desde la ficha de un cliente. */
 type CambiosPortfolio = Partial<Portfolio> & {
   accountPageId?: { externalId: string; pageId: string | null };
-  accountPixelId?: { externalId: string; pixelId: string | null };
+  accountPixelAdd?: { externalId: string; pixelId: string; label?: string | null };
+  accountPixelRemove?: { externalId: string; pixelRowId: string };
   accountCountries?: { externalId: string; countries: string[] };
 };
 
@@ -67,6 +71,7 @@ type Portfolio = {
   pageId: string | null;
   instagramId: string | null;
   countries: string[];
+  website: string | null;
   contactEmail: string | null;
   needsReview: boolean;
   reviewNote: string | null;
@@ -512,6 +517,7 @@ function Ficha({
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
   const [pageId, setPageId] = useState(portfolio.pageId ?? "");
   const [countries, setCountries] = useState(portfolio.countries.join(", "));
+  const [website, setWebsite] = useState(portfolio.website ?? "");
   const [email, setEmail] = useState(portfolio.contactEmail ?? "");
   const [metaCpa, setMetaCpa] = useState(
     portfolio.targetCpaMicros !== null
@@ -524,6 +530,7 @@ function Ficha({
   const cambiado =
     pageId !== (portfolio.pageId ?? "") ||
     countries !== portfolio.countries.join(", ") ||
+    website !== (portfolio.website ?? "") ||
     email !== (portfolio.contactEmail ?? "") ||
     metaCpa !== (portfolio.targetCpaMicros !== null ? String(portfolio.targetCpaMicros / 1_000_000) : "") ||
     metaRoas !== (portfolio.targetRoas !== null ? String(portfolio.targetRoas) : "");
@@ -655,14 +662,23 @@ function Ficha({
                     />
                   )}
                   {cuenta.provider === "meta" && (
-                    <PixelDeCuenta
+                    <PixelesDeCuenta
                       cuenta={cuenta}
                       editable={editable}
-                      onGuardar={(pixelId) =>
+                      onAgregar={(pixelId, label) =>
                         onGuardar({
-                          accountPixelId: {
+                          accountPixelAdd: {
                             externalId: cuenta.externalId,
                             pixelId,
+                            label,
+                          },
+                        })
+                      }
+                      onQuitar={(pixelRowId) =>
+                        onGuardar({
+                          accountPixelRemove: {
+                            externalId: cuenta.externalId,
+                            pixelRowId,
                           },
                         })
                       }
@@ -688,6 +704,22 @@ function Ficha({
           </ul>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+                SITIO WEB
+              </label>
+              <Input
+                value={website}
+                disabled={!editable}
+                onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://ejemplo.cl"
+                className="h-9 bg-field/60 text-xs"
+              />
+              <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+                El Orb la usa como URL de destino por defecto al proponer una
+                campaña nueva, si nadie da una explícita.
+              </p>
+            </div>
             <div>
               <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                 CORREO DE CONTACTO
@@ -807,6 +839,7 @@ function Ficha({
               onClick={() =>
                 onGuardar({
                   pageId: pageId.trim() || null,
+                  website: website.trim() || null,
                   contactEmail: email.trim() || null,
                   countries: countries
                     .split(",")
@@ -876,45 +909,86 @@ function PaginaDeCuenta({
 }
 
 /**
- * Píxel de Meta de una cuenta puntual, con su propio guardado.
+ * Píxeles de Meta de una cuenta puntual, con su propio guardado.
  *
  * A diferencia de la página, no tiene un campo de respaldo a nivel cliente
  * —nunca existió uno— así que se muestra siempre para cada cuenta de Meta,
- * no solo cuando el cliente tiene más de una.
+ * no solo cuando el cliente tiene más de una. Puede haber más de un píxel
+ * (MGC: Converse y Coliseum en la misma cuenta) — de ahí la lista en vez de
+ * un solo campo.
  */
-function PixelDeCuenta({
+function PixelesDeCuenta({
   cuenta,
   editable,
-  onGuardar,
+  onAgregar,
+  onQuitar,
 }: {
   cuenta: CuentaVinculada;
   editable: boolean;
-  onGuardar: (pixelId: string | null) => void;
+  onAgregar: (pixelId: string, label: string | null) => void;
+  onQuitar: (pixelRowId: string) => void;
 }) {
-  const [valor, setValor] = useState(cuenta.pixelId ?? "");
-  const cambiado = valor.trim() !== (cuenta.pixelId ?? "");
+  const [nuevoId, setNuevoId] = useState("");
+  const [nuevaEtiqueta, setNuevaEtiqueta] = useState("");
 
   return (
-    <div className="mt-2 flex items-center gap-2 pl-1">
-      <span className="font-micro shrink-0 text-[0.55rem] text-foreground/40">
-        PÍXEL
+    <div className="mt-2 pl-1">
+      <span className="font-micro block text-[0.55rem] text-foreground/40">
+        PÍXELES
       </span>
-      <Input
-        value={valor}
-        disabled={!editable}
-        onChange={(e) => setValor(e.target.value)}
-        placeholder="Sin píxel: no se puede publicar leads/ventas en esta cuenta"
-        className="h-7 bg-field/60 text-[0.68rem]"
-      />
-      {editable && cambiado && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => onGuardar(valor.trim() || null)}
-          className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
-        >
-          Guardar
-        </Button>
+      {cuenta.pixels.length === 0 && (
+        <p className="mt-1 text-[0.65rem] text-foreground/40">
+          Sin píxel: no se puede publicar leads/ventas en esta cuenta.
+        </p>
+      )}
+      {cuenta.pixels.length > 0 && (
+        <ul className="mt-1 space-y-1">
+          {cuenta.pixels.map((pixel) => (
+            <li key={pixel.id} className="flex items-center gap-2">
+              <span className="metric-number min-w-0 flex-1 truncate text-[0.68rem] text-foreground/70">
+                {pixel.label ? `${pixel.label} · ${pixel.pixelId}` : pixel.pixelId}
+              </span>
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => onQuitar(pixel.id)}
+                  className="shrink-0 text-[0.62rem] font-semibold text-foreground/40 hover:text-danger"
+                >
+                  Quitar
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <Input
+            value={nuevoId}
+            onChange={(e) => setNuevoId(e.target.value)}
+            placeholder="Id del píxel"
+            className="h-7 bg-field/60 text-[0.68rem]"
+          />
+          <Input
+            value={nuevaEtiqueta}
+            onChange={(e) => setNuevaEtiqueta(e.target.value)}
+            placeholder="Etiqueta (ej. Converse)"
+            className="h-7 bg-field/60 text-[0.68rem]"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!nuevoId.trim()}
+            onClick={() => {
+              onAgregar(nuevoId.trim(), nuevaEtiqueta.trim() || null);
+              setNuevoId("");
+              setNuevaEtiqueta("");
+            }}
+            className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
+          >
+            Agregar
+          </Button>
+        </div>
       )}
     </div>
   );

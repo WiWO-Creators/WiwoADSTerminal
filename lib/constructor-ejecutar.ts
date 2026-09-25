@@ -295,11 +295,14 @@ export async function ejecutarPasosDelPlan(
  * Windsor dijo que creó existe de verdad — ver `actualizarCatalogoDeCuentas`
  * en `lib/windsor.ts`.
  */
-export function idDeCreacion(paso: PasoEjecutado): string | null {
+export function idDeCreacion(
+  paso: PasoEjecutado,
+  evitar: ReadonlySet<string> = new Set(),
+): string | null {
   if (!paso.ok) return null;
   const salida = CLAVES_DE_ID[paso.action];
   if (!salida) return null;
-  return idDeResultado(paso.raw, salida.claves);
+  return idDeResultado(paso.raw, salida.claves, evitar);
 }
 
 /**
@@ -330,6 +333,47 @@ export async function publicacionReciente(
     creado: creados.map((paso) => `${paso.platform}: ${paso.label}`),
     hace: Date.now() - Number(previa.created_at),
   };
+}
+
+/**
+ * Nombres de campañas creadas de verdad desde WiWO.ADS para este cliente en
+ * las últimas `horas` horas — para que `recommendBudget` (`lib/constructor.ts`)
+ * no las cuente como "historial real" al sugerir presupuesto. Confirmado con
+ * Colbún (2026-09-24): campañas de prueba de esta misma sesión, creadas y
+ * borradas minutos antes, aparecieron citadas como si fueran gasto histórico
+ * del cliente — sin gasto real detrás, solo ruido de sesiones de prueba.
+ */
+export async function nombresDeCampanasRecientes(
+  portfolioId: string,
+  horas = 48,
+): Promise<Set<string>> {
+  const filas = await getRawDb()
+    .prepare(
+      `SELECT steps_json FROM ejecuciones
+       WHERE portfolio_id = ? AND created_at > ?`,
+    )
+    .bind(portfolioId, Date.now() - horas * 60 * 60 * 1000)
+    .all<{ steps_json: string }>();
+  const nombres = new Set<string>();
+  for (const fila of filas.results) {
+    let pasos: PasoEjecutado[];
+    try {
+      pasos = JSON.parse(fila.steps_json) as PasoEjecutado[];
+    } catch {
+      continue;
+    }
+    // El nombre real en la plataforma lleva la sigla compuesta
+    // (`nombreCompuesto`, ej. "[TRF] Nombre"), no el `draft.name` a secas —
+    // se toma del `params.name` que de verdad se mandó a Windsor en el paso
+    // `create_campaign`, para comparar contra `CampaignSummary.name` tal
+    // como lo devuelve la plataforma.
+    for (const paso of pasos) {
+      if (paso.action === "create_campaign" && paso.ok && typeof paso.params.name === "string") {
+        nombres.add(paso.params.name);
+      }
+    }
+  }
+  return nombres;
 }
 
 export async function registrarEjecucion(

@@ -71,6 +71,7 @@ import {
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
 import { CopilotoDeCreativos } from "./copiloto-creativos";
+import { GeneradorDeVariantes } from "./generador-variantes";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
 
 /**
@@ -102,6 +103,8 @@ type Cuenta = {
   provider: string;
   currency: string | null;
   pageId: string | null;
+  /** Puede haber más de uno por cuenta (MGC: Converse y Coliseum). */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   countries: string[];
 };
 
@@ -211,16 +214,25 @@ function CampoDinero({
   onChange,
   placeholder = "0",
   className,
+  moneda,
 }: {
   value: number | null;
   onChange: (value: number | null) => void;
   placeholder?: string;
   className?: string;
+  /**
+   * Código real de la cuenta elegida (CLP, USD, PEN…) — nunca se infiere del
+   * país: Truecaller Colombia, por ejemplo, factura en USD. `null` cuando
+   * todavía no se puede resolver una sola cuenta (ninguna elegida y la
+   * plataforma tiene varias) — ahí se cae al "$" genérico de antes.
+   */
+  moneda?: string | null;
 }) {
+  const prefijo = moneda ?? "$";
   return (
     <div className={cn("relative", className)}>
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground/40">
-        $
+        {prefijo}
       </span>
       <Input
         type="text"
@@ -231,7 +243,7 @@ function CampoDinero({
           onChange(digitos === "" ? null : Number(digitos));
         }}
         placeholder={placeholder}
-        className="bg-field/60 pl-6"
+        className="bg-field/60 pl-12"
       />
     </div>
   );
@@ -262,6 +274,7 @@ function borradorInicial(
         : ["google"],
     accountByPlatform:
       attachTo?.accountId ? { [attachTo.platform]: attachTo.accountId } : {},
+    metaPixelId: null,
     name: semilla?.name ?? "",
     details: semilla?.details ?? "",
     objective: semilla?.objective ?? "trafico",
@@ -314,6 +327,10 @@ function borradorInicial(
       adjuntando && attachTo?.adsetId && attachTo.adsetName
         ? { adsetId: attachTo.adsetId, adsetName: attachTo.adsetName }
         : null,
+    // Default true: el ahorro de pasos vale para campaña nueva. En modo
+    // "adjuntar" no tiene efecto de todos modos (ver `buildPlan`), pero
+    // dejarlo en true igual es más simple que bifurcar acá.
+    activarConjuntoYAnuncio: true,
   };
 }
 
@@ -601,6 +618,7 @@ export function ConstructorView({
           {fase === "conjunto" && (
             <FaseConjunto
               draft={draft}
+              cuentas={cuentas}
               onChange={actualizar}
               plataformasElegidas={plataformasElegidas}
               plataformaActiva={plataformaActiva}
@@ -616,6 +634,26 @@ export function ConstructorView({
               plataformaActiva={plataformaActiva}
               onPlataformaActiva={setPlataformaActiva}
             />
+          )}
+
+          {indiceFase === FASES.length - 1 && !draft.existingCampaign && (
+            <label className="mt-6 flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
+              <Checkbox
+                checked={draft.activarConjuntoYAnuncio}
+                onCheckedChange={(checked) =>
+                  actualizar({ activarConjuntoYAnuncio: checked === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-xs leading-5 text-foreground/70">
+                <span className="font-bold text-foreground">
+                  Conjunto y anuncio nacen activos.
+                </span>{" "}
+                No entregan nada mientras la campaña siga pausada — al
+                activarla más tarde, corren solos, sin un paso extra. La
+                campaña en sí siempre nace pausada, sin excepción.
+              </span>
+            </label>
           )}
 
           <div className="mt-6 flex items-center justify-between border-t border-foreground/10 pt-4">
@@ -1184,6 +1222,58 @@ function SelectorCuenta({
   );
 }
 
+/**
+ * Selector de píxel de Meta, solo cuando hace falta: la cuenta elegida tiene
+ * más de un píxel (MGC: Converse y Coliseum en la misma cuenta) y el
+ * objetivo de verdad necesita uno (leads o ventas con destino sitio web —
+ * ver `necesitaPixel` en `lib/constructor.ts`). Con exactamente uno no hay
+ * nada que elegir: se usa directo, sin mostrar este selector.
+ */
+function SelectorPixel({
+  cuentas,
+  draft,
+  onChange,
+}: {
+  cuentas: Cuenta[];
+  draft: CampaignDraft;
+  onChange: (cambios: Partial<CampaignDraft>) => void;
+}) {
+  const necesitaPixel =
+    (draft.objective === "leads" || draft.objective === "ventas") &&
+    draft.conversionLocation !== "mensajes";
+  if (!necesitaPixel) return null;
+
+  const cuentasMeta = cuentas.filter((c) => c.provider === "meta");
+  const cuentaMeta =
+    cuentasMeta.length === 1
+      ? cuentasMeta[0]
+      : draft.accountByPlatform.meta
+        ? cuentasMeta.find((c) => c.externalId === draft.accountByPlatform.meta)
+        : undefined;
+  const pixeles = cuentaMeta?.pixels ?? [];
+  if (pixeles.length <= 1) return null;
+
+  return (
+    <Campo etiqueta="PÍXEL DE META A USAR" className="mt-2">
+      <Select
+        value={draft.metaPixelId ?? ""}
+        onValueChange={(value) => onChange({ metaPixelId: value })}
+      >
+        <SelectTrigger className="w-full bg-field/60">
+          <SelectValue placeholder={`Elige entre ${pixeles.length} píxeles`} />
+        </SelectTrigger>
+        <SelectContent>
+          {pixeles.map((pixel) => (
+            <SelectItem key={pixel.id} value={pixel.pixelId}>
+              {pixel.label ? `${pixel.label} · ${pixel.pixelId}` : pixel.pixelId}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Campo>
+  );
+}
+
 function FaseCampana({
   draft,
   clientes,
@@ -1343,6 +1433,9 @@ function FaseCampana({
               onChange={onChange}
             />
           ))}
+        {draft.portfolioId && draft.platforms.includes("meta") && (
+          <SelectorPixel cuentas={cuentas} draft={draft} onChange={onChange} />
+        )}
       </Seccion>
 
       <Seccion titulo="Nombre">
@@ -1454,12 +1547,14 @@ function FaseCampana({
 
 function FaseConjunto({
   draft,
+  cuentas,
   onChange,
   plataformasElegidas,
   plataformaActiva,
   onPlataformaActiva,
 }: {
   draft: CampaignDraft;
+  cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
   plataformasElegidas: Platform[];
   plataformaActiva: Platform;
@@ -1501,7 +1596,7 @@ function FaseConjunto({
         abajo y se ve sin importar cuál pestaña esté activa.
       */}
       <Seccion titulo="Presupuesto y calendario">
-        <PresupuestoPorPlataforma draft={draft} onChange={onChange} />
+        <PresupuestoPorPlataforma draft={draft} cuentas={cuentas} onChange={onChange} />
       </Seccion>
 
       {/*
@@ -1899,40 +1994,71 @@ function FaseConjunto({
  */
 function PresupuestoPorPlataforma({
   draft,
+  cuentas,
   onChange,
 }: {
   draft: CampaignDraft;
+  cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
 }) {
   const varias = draft.platforms.length > 1;
   const distinto = Object.keys(draft.budgetByPlatform).length > 0;
+
+  // Misma cuenta que ya resuelven FaseAnuncio y VistaPrevia: la elegida a
+  // mano, o la única que tiene esa plataforma si no hay más que una — nunca
+  // se infiere del país, siempre es la moneda real de la cuenta.
+  function monedaDe(platform: Platform): string | null {
+    const cuenta = cuentas.find(
+      (c) =>
+        c.provider === platform &&
+        (draft.accountByPlatform[platform]
+          ? c.externalId === draft.accountByPlatform[platform]
+          : cuentas.filter((x) => x.provider === platform).length === 1),
+    );
+    return cuenta?.currency ?? null;
+  }
 
   if (!varias) {
     return (
       <Campo etiqueta="PRESUPUESTO DIARIO" className="sm:w-60">
         <CampoDinero
           value={draft.dailyBudget}
+          moneda={monedaDe(draft.platforms[0])}
           onChange={(valor) => onChange({ dailyBudget: valor })}
         />
       </Campo>
     );
   }
 
+  const monedasCompartido = new Set(draft.platforms.map(monedaDe).filter(Boolean));
+  const monedaCompartida = monedasCompartido.size === 1 ? [...monedasCompartido][0] : null;
+
   return (
     <div>
       {!distinto ? (
-        <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
-          <CampoDinero
-            value={draft.dailyBudget}
-            onChange={(valor) => onChange({ dailyBudget: valor })}
-          />
-        </Campo>
+        <>
+          <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
+            <CampoDinero
+              value={draft.dailyBudget}
+              moneda={monedaCompartida}
+              onChange={(valor) => onChange({ dailyBudget: valor })}
+            />
+          </Campo>
+          {monedasCompartido.size > 1 && (
+            <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-warn">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              Las cuentas elegidas usan monedas distintas ({[...monedasCompartido].join(" y ")}) —
+              usa "presupuesto distinto por plataforma" para no cargar el mismo número en dos monedas.
+            </p>
+          )}
+        </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {draft.platforms.map((platform) => (
             <Campo key={platform} etiqueta={`PRESUPUESTO DIARIO · ${platformLabel(platform).toUpperCase()}`}>
               <CampoDinero
                 value={draft.budgetByPlatform[platform] ?? null}
+                moneda={monedaDe(platform)}
                 onChange={(valor) =>
                   onChange({
                     budgetByPlatform: {
@@ -2177,6 +2303,13 @@ function FaseAnuncio({
                     recién subido no será alcanzable para Meta ni para Google —
                     solo se verá en esta vista previa.
                   </p>
+                )}
+                {draft.mediaType === "image" && draft.mediaUrl && (
+                  <GeneradorDeVariantes
+                    portfolioId={draft.portfolioId}
+                    mediaUrl={draft.mediaUrl}
+                    onUsar={(url) => onChange({ mediaUrl: url, boostPostId: null })}
+                  />
                 )}
               </Campo>
             )}

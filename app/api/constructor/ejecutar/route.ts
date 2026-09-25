@@ -5,6 +5,7 @@ import {
   cuentaDe,
   ejecutarPasosDelPlan,
   idDeCreacion,
+  nombresDeCampanasRecientes,
   PREFIJO_INCOMPLETA,
   publicacionReciente,
   registrarEjecucion,
@@ -98,8 +99,9 @@ export async function POST(request: Request) {
     snapshot.portfolios.find((item) => item.id === draft.portfolioId) ?? null;
   const cliente = clientes.find((item) => item.id === draft.portfolioId);
   const cuentas: CuentaCliente[] = cliente?.accounts ?? [];
+  const excluirCampanasDePresupuesto = await nombresDeCampanasRecientes(draft.portfolioId);
 
-  const plan = buildPlan(draft, portfolio, cuentas, snapshot);
+  const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto);
   const bloqueantes = plan.issues.filter((issue) => issue.blocking);
   if (bloqueantes.length > 0) {
     return Response.json(
@@ -193,25 +195,59 @@ export async function POST(request: Request) {
       (item): item is { platform: string; nivel: string; id: string } =>
         item.id !== null && catalogoActualizado && !campaignIdsVistos.has(item.id),
     );
+  const idsDeCampana = new Set([ids.campaign].filter((id): id is string => Boolean(id)));
   const conjuntosSinConfirmar = realizados
     .filter((paso) => paso.action === "create_adset" && paso.ok)
-    .map((paso) => ({ platform: paso.platform, nivel: "conjunto", id: idDeCreacion(paso) }))
+    .map((paso) => ({ platform: paso.platform, nivel: "conjunto", id: idDeCreacion(paso, idsDeCampana) }))
     .filter(
       (item): item is { platform: string; nivel: string; id: string } =>
         item.id !== null && catalogoActualizado && !adsetIdsVistos.has(item.id),
     );
+  // El id del padre (ad group de Google o adset de Meta) se descarta como
+  // candidato al id del anuncio: un texto libre de Windsor a veces nombra al
+  // padre en la misma frase que anuncia la creación del hijo, y sin esto ese
+  // id ajeno se aceptaba como si fuera el propio — ver `idDeResultado`.
+  const idsHermanos = new Set([ids.adGroup, ids.adset, ids.campaign].filter((id): id is string => Boolean(id)));
   const anunciosSinConfirmar = realizados
     .filter((paso) => CAMPOS_DE_ID_ANUNCIO[paso.action] && paso.ok)
     .map((paso) => ({
       platform: paso.platform,
       nivel: "anuncio",
-      id: idDeResultado(paso.raw, CAMPOS_DE_ID_ANUNCIO[paso.action]),
+      id: idDeResultado(paso.raw, CAMPOS_DE_ID_ANUNCIO[paso.action], idsHermanos),
     }))
     .filter(
       (item): item is { platform: string; nivel: string; id: string } =>
         item.id !== null && catalogoActualizado && !adIdsVistos.has(item.id),
     );
-  const sinConfirmar = [...campanasSinConfirmar, ...conjuntosSinConfirmar, ...anunciosSinConfirmar];
+  let sinConfirmar = [...campanasSinConfirmar, ...conjuntosSinConfirmar, ...anunciosSinConfirmar];
+
+  // Un solo intento de relectura reportaba "no encontramos" objetos que sí
+  // existían — Windsor a veces tarda unos segundos en reflejar lo recién
+  // creado, no minutos (confirmado en vivo con Colbún, 2026-09-24: existían
+  // las dos campañas cuando se revisó unos minutos después). Un segundo
+  // intento, con una espera corta, resuelve el caso normal de demora sin
+  // multiplicar mucho el tiempo de respuesta.
+  if (sinConfirmar.length > 0 && catalogoActualizado) {
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    try {
+      const reintento = await Promise.race([
+        actualizarCatalogoDeCuentas([...cuentasTocadas.values()]),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+      if (reintento) {
+        campaignIdsVistos = reintento.campaignIdsVistos;
+        adsetIdsVistos = reintento.adsetIdsVistos;
+        adIdsVistos = reintento.adIdsVistos;
+        sinConfirmar = sinConfirmar.filter((item) => {
+          const vistos =
+            item.nivel === "campaña" ? campaignIdsVistos : item.nivel === "conjunto" ? adsetIdsVistos : adIdsVistos;
+          return !vistos.has(item.id);
+        });
+      }
+    } catch (error) {
+      console.error("WiWO.ADS reintento de catálogo tras publicar", error);
+    }
+  }
 
   let aviso: string;
   if (!todoBien) {

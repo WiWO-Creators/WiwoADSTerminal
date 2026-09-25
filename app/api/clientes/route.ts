@@ -2,11 +2,12 @@ import { getSession } from "@/app/sesion";
 import { detalleClientes } from "@/lib/clientes-detalle";
 import { can } from "@/lib/permisos";
 import {
+  addAccountPixel,
   createPortfolio,
   PortafolioError,
+  removeAccountPixel,
   setAccountCountries,
   setAccountPageId,
-  setAccountPixelId,
   updatePortfolio,
 } from "@/lib/portafolios-store";
 
@@ -64,14 +65,15 @@ export async function PATCH(request: Request) {
     const body = (await request.json()) as {
       id?: string;
       accountPageId?: { externalId?: string; pageId?: string | null };
-      accountPixelId?: { externalId?: string; pixelId?: string | null };
+      accountPixelAdd?: { externalId?: string; pixelId?: string; label?: string | null };
+      accountPixelRemove?: { externalId?: string; pixelRowId?: string };
       accountCountries?: { externalId?: string; countries?: string[] };
     } & Record<string, unknown>;
     if (!body.id) throw new PortafolioError("Falta identificar al cliente");
-    const { id, accountPageId, accountPixelId, accountCountries, ...cambios } = body;
+    const { id, accountPageId, accountPixelAdd, accountPixelRemove, accountCountries, ...cambios } = body;
 
-    // Rutas aparte: la página, el píxel y los países viven por cuenta, no en
-    // las columnas sueltas de `portfolios` que actualiza updatePortfolio.
+    // Rutas aparte: la página, los píxeles y los países viven por cuenta, no
+    // en las columnas sueltas de `portfolios` que actualiza updatePortfolio.
     if (accountPageId) {
       if (!accountPageId.externalId) {
         throw new PortafolioError("Falta identificar la cuenta");
@@ -83,15 +85,27 @@ export async function PATCH(request: Request) {
         accountPageId.pageId ?? null,
       );
     }
-    if (accountPixelId) {
-      if (!accountPixelId.externalId) {
-        throw new PortafolioError("Falta identificar la cuenta");
+    if (accountPixelAdd) {
+      if (!accountPixelAdd.externalId || !accountPixelAdd.pixelId) {
+        throw new PortafolioError("Falta identificar la cuenta o el píxel");
       }
-      await setAccountPixelId(
+      await addAccountPixel(
         session.actor,
         id,
-        accountPixelId.externalId,
-        accountPixelId.pixelId ?? null,
+        accountPixelAdd.externalId,
+        accountPixelAdd.pixelId,
+        accountPixelAdd.label ?? null,
+      );
+    }
+    if (accountPixelRemove) {
+      if (!accountPixelRemove.externalId || !accountPixelRemove.pixelRowId) {
+        throw new PortafolioError("Falta identificar la cuenta o el píxel");
+      }
+      await removeAccountPixel(
+        session.actor,
+        id,
+        accountPixelRemove.externalId,
+        accountPixelRemove.pixelRowId,
       );
     }
     if (accountCountries) {

@@ -7,6 +7,7 @@ import {
   ArrowUpDown,
   ChevronRight,
   Columns3,
+  ImageOff,
   Pencil,
   Search,
   Settings2,
@@ -96,7 +97,20 @@ type ColumnaMetricaId =
   | "interacciones"
   | "leads"
   | "compras"
-  | "conversiones";
+  | "conversiones"
+  | "tasaInteraccion"
+  | "ctrEnlace"
+  | "frecuencia"
+  | "roas"
+  | "landingPageViews"
+  | "costoLandingPageView"
+  | "thruplays"
+  | "costoThruplay"
+  | "videoViews"
+  | "qualityRanking"
+  | "engagementRateRanking"
+  | "conversionRateRanking"
+  | "optimizationScore";
 
 type ColumnaOrden = "nombre" | ColumnaMetricaId;
 
@@ -110,6 +124,31 @@ type DefinicionColumnaMetrica = {
   valor: (fila: Fila) => number | null;
   formato: (valor: number, fila: Fila) => string;
 };
+
+/**
+ * Rankings de diagnóstico de Meta son categóricos, no numéricos — se mapean a
+ * un orden para poder ordenar la columna, y el `formato` los devuelve a texto.
+ * "UNKNOWN" (mayoría en cuentas de bajo volumen) no entra en el mapa: se
+ * muestra "—", igual que si no hubiera dato.
+ */
+const RANKING_ORDEN: Record<string, number> = {
+  ABOVE_AVERAGE: 3,
+  AVERAGE: 2,
+  BELOW_AVERAGE_35: 1,
+  BELOW_AVERAGE_20: 1,
+  BELOW_AVERAGE_10: 1,
+  BELOW_AVERAGE: 1,
+};
+const RANKING_LABEL: Record<number, string> = {
+  3: "Sobre el promedio",
+  2: "Promedio",
+  1: "Bajo el promedio",
+};
+
+function valorRanking(f: Fila, campo: "qualityRanking" | "engagementRateRanking" | "conversionRateRanking"): number | null {
+  const valor = f[campo];
+  return valor ? (RANKING_ORDEN[valor] ?? null) : null;
+}
 
 const COLUMNAS_METRICA: DefinicionColumnaMetrica[] = [
   {
@@ -213,6 +252,118 @@ const COLUMNAS_METRICA: DefinicionColumnaMetrica[] = [
     valor: (f) => f.conversions,
     formato: (v) => decimal(v),
   },
+  {
+    // Unificada Google+Meta: mismo cálculo (interacciones/impresiones) sobre
+    // el campo "interacciones" ya unificado en lib/windsor.ts.
+    id: "tasaInteraccion",
+    label: "Tasa de interacción",
+    porDefecto: false,
+    valor: (f) =>
+      f.impressions > 0 && f.engagement !== null
+        ? (f.engagement / f.impressions) * 100
+        : null,
+    formato: (v) => `${decimal(v)}%`,
+  },
+  {
+    id: "ctrEnlace",
+    label: "CTR en enlace",
+    porDefecto: false,
+    valor: (f) =>
+      f.impressions > 0 && f.linkClicks !== null
+        ? (f.linkClicks / f.impressions) * 100
+        : null,
+    formato: (v) => `${decimal(v)}%`,
+  },
+  {
+    // Derivada de impresiones/alcance (la propia definición de Meta), en vez
+    // de pedirla a Windsor: sumar frecuencias entre filas partidas sería
+    // matemáticamente incorrecto, igual que con alcance.
+    id: "frecuencia",
+    label: "Frecuencia",
+    porDefecto: false,
+    valor: (f) => (f.reach && f.reach > 0 ? f.impressions / f.reach : null),
+    formato: (v) => decimal(v),
+  },
+  {
+    // ROAS = valor de compras / invertido. Se deriva del valor (sumable) en
+    // vez de pedir el ratio a Windsor, por la misma razón que Frecuencia.
+    // Solo aplica a campañas con objetivo de compra — "—" en el resto.
+    id: "roas",
+    label: "ROAS",
+    porDefecto: false,
+    valor: (f) =>
+      f.purchaseValue !== null && f.spendMicros > 0
+        ? f.purchaseValue / (f.spendMicros / 1_000_000)
+        : null,
+    formato: (v) => `${decimal(v)}x`,
+  },
+  {
+    id: "landingPageViews",
+    label: "Visitas a landing page",
+    porDefecto: false,
+    valor: (f) => f.landingPageViews,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "costoLandingPageView",
+    label: "Costo por visita a LP",
+    porDefecto: false,
+    valor: (f) =>
+      f.landingPageViews && f.landingPageViews > 0
+        ? f.spendMicros / 1_000_000 / f.landingPageViews
+        : null,
+    formato: (v, f) => dinero(Math.round(v * 1_000_000), f.currency),
+  },
+  {
+    id: "thruplays",
+    label: "ThruPlays",
+    porDefecto: false,
+    valor: (f) => f.thruplays,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "costoThruplay",
+    label: "Costo por ThruPlay",
+    porDefecto: false,
+    valor: (f) =>
+      f.thruplays && f.thruplays > 0 ? f.spendMicros / 1_000_000 / f.thruplays : null,
+    formato: (v, f) => dinero(Math.round(v * 1_000_000), f.currency),
+  },
+  {
+    id: "videoViews",
+    label: "Reproducciones de video",
+    porDefecto: false,
+    valor: (f) => f.videoViews,
+    formato: (v) => entero(v),
+  },
+  {
+    id: "qualityRanking",
+    label: "Calidad",
+    porDefecto: false,
+    valor: (f) => valorRanking(f, "qualityRanking"),
+    formato: (v) => RANKING_LABEL[v] ?? "—",
+  },
+  {
+    id: "engagementRateRanking",
+    label: "Ranking de interacción",
+    porDefecto: false,
+    valor: (f) => valorRanking(f, "engagementRateRanking"),
+    formato: (v) => RANKING_LABEL[v] ?? "—",
+  },
+  {
+    id: "conversionRateRanking",
+    label: "Ranking de conversión",
+    porDefecto: false,
+    valor: (f) => valorRanking(f, "conversionRateRanking"),
+    formato: (v) => RANKING_LABEL[v] ?? "—",
+  },
+  {
+    id: "optimizationScore",
+    label: "Puntuación de optimización",
+    porDefecto: false,
+    valor: (f) => (f.optimizationScore !== null ? f.optimizationScore * 100 : null),
+    formato: (v) => `${Math.round(v)}%`,
+  },
 ];
 
 /** Recordado por navegador, no por cuenta: es una preferencia de vista, no un dato del cliente. */
@@ -291,10 +442,27 @@ type Fila = {
   purchases: number | null;
   /** Conversiones de Google. `null` en Meta — ahí el desglose real es leads/compras/interacciones de arriba. */
   conversions: number | null;
+  /** Valor de las compras (Meta), en la moneda de la cuenta. */
+  purchaseValue: number | null;
+  landingPageViews: number | null;
+  thruplays: number | null;
+  videoViews: number | null;
+  qualityRanking: string | null;
+  engagementRateRanking: string | null;
+  conversionRateRanking: string | null;
+  /** Puntuación de optimización de la campaña (Google), 0 a 1. */
+  optimizationScore: number | null;
   /** Miniatura real de la pieza (solo Meta, ver `WindsorAd.thumbnailUrl`).
    * A nivel de campaña o conjunto es la del primer anuncio del grupo — una
    * referencia visual, no "la" pieza del conjunto entero. */
   thumbnailUrl: string | null;
+  /** Contenido real de la pieza (solo Meta, a nivel de anuncio) — ver
+   * `WindsorAd.message`/`headline`/`destinationUrl`. Precarga el editor de
+   * anuncios en vez de dejarlo en blanco. */
+  message: string | null;
+  headline: string | null;
+  destinationUrl: string | null;
+  callToAction: string | null;
 };
 
 /** Qué campaña y qué conjunto están abiertos. */
@@ -389,17 +557,18 @@ export function AnunciosView({
   } | null>(null);
   const [gestionando, setGestionando] = useState<CampanaGestionable | null>(null);
   const [editandoAnuncio, setEditandoAnuncio] = useState<AnuncioEditable | null>(null);
-  const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
+  const [expandido, setExpandido] = useState<Set<string>>(new Set());
+  // Una marca por nivel, no una sola bolsa — así marcar campañas y pasar a
+  // Conjuntos no las pierde: se usan para acotar automáticamente qué se ve
+  // al bajar de nivel (ver el filtro cruzado más abajo, en `filas`).
+  const [marcasPorNivel, setMarcasPorNivel] = useState<Record<Nivel, Set<string>>>({
+    campana: new Set(),
+    conjunto: new Set(),
+    anuncio: new Set(),
+  });
+  const marcadas = marcasPorNivel[nivel];
   const [soloMarcadas, setSoloMarcadas] = useState(false);
   const [orden, setOrden] = useState<{ columna: ColumnaOrden; asc: boolean } | null>(null);
-
-  // Las claves de fila son por nivel (campaña/conjunto/anuncio): al bajar o
-  // subir un nivel las marcas de antes ya no corresponden a nada visible acá.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
-    setMarcadas(new Set());
-    setSoloMarcadas(false);
-  }, [nivel, seleccion?.campana, seleccion?.conjunto]);
 
   // Preferencia de vista, no dato del cliente: por eso vive en el navegador,
   // no en el servidor. Si falla (privado, bloqueado), la tabla sigue andando
@@ -440,17 +609,48 @@ export function AnunciosView({
   // de Meta no tiene sentido seguir "filtrando" por Google.
   const providerEfectivo = seleccion?.provider ?? provider;
 
+  // Al cambiar de cliente, plataforma, cuenta o al entrar/salir de una campaña
+  // puntual (clic para abrir), las marcas de antes ya no corresponden a nada
+  // visible acá — a diferencia de cambiar de pestaña (Campañas/Conjuntos/
+  // Anuncios), que ahora sí las conserva a propósito (ver el filtro cruzado
+  // en `filas`, más abajo).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+    setMarcasPorNivel({ campana: new Set(), conjunto: new Set(), anuncio: new Set() });
+    setSoloMarcadas(false);
+  }, [seleccion?.campana, seleccion?.conjunto, portfolioId, providerEfectivo, accountKey]);
+
+  // Plataformas que este cliente de verdad tiene conectadas — Palta, por
+  // ejemplo, no tiene ninguna cuenta de Meta: listarla igual como opción de
+  // filtro invitaría a elegir un estado que nunca puede pasar (0 filas, sin
+  // explicar por qué), lo mismo que ya bloquea el selector de plataformas
+  // del Constructor para este cliente.
+  const proveedoresDelCliente = useMemo(() => {
+    if (portfolioId === "all") return null;
+    return new Set(
+      (portfolios.find((p) => p.id === portfolioId)?.cuentas ?? []).map((c) => c.provider),
+    );
+  }, [portfolioId, portfolios]);
+  const plataformasDisponibles = proveedoresDelCliente
+    ? ACTIVE_PLATFORMS.filter((id) => proveedoresDelCliente.has(id))
+    : ACTIVE_PLATFORMS;
+
   // Clientes con más de una cuenta en la misma plataforma (SQM: SPN, España…)
   // — solo aparece el selector cuando de verdad hay más de una entre las que
   // ya pasaron el filtro de plataforma, si no es ruido para el resto. Con
-  // "Toda plataforma" no se muestra nada: antes contaba Google + Meta juntas
-  // (ej. Colbún, 1 cuenta de cada una) y el selector aparecía sin que hubiera
-  // ninguna ambigüedad real — elegir "cuál cuenta" solo tiene sentido una vez
-  // que ya se sabe de qué plataforma.
+  // "Toda plataforma" elegida, igual se muestran SI el cliente tiene más de
+  // una cuenta en total: antes acá no se mostraba nada con "Toda plataforma"
+  // porque antes contaba Google + Meta juntas (ej. Colbún, 1 cuenta de cada
+  // una) sin ninguna ambigüedad real que resolver con el selector — pero un
+  // cliente como SQM, con varias cuentas y todas de la misma plataforma
+  // (Meta), sí tiene ambigüedad real ahí mismo, sin necesitar que primero se
+  // elija "Meta Ads" a mano.
   const cuentasDelCliente = useMemo(() => {
-    if (portfolioId === "all" || providerEfectivo === "all") return [];
+    if (portfolioId === "all") return [];
     const cuentas = portfolios.find((p) => p.id === portfolioId)?.cuentas ?? [];
-    return cuentas.filter((c) => c.provider === providerEfectivo);
+    return providerEfectivo === "all"
+      ? cuentas
+      : cuentas.filter((c) => c.provider === providerEfectivo);
   }, [portfolioId, portfolios, providerEfectivo]);
 
   // Si cambia la plataforma (o se abre una campaña de otra) la cuenta elegida
@@ -488,6 +688,47 @@ export function AnunciosView({
     [performance.ads, permitidas, providerEfectivo, accountKey, seleccion, descartadas],
   );
 
+  // Mismo filtro que `ads`, pero sin acotar por `seleccion` — el panel del
+  // árbol es justo lo que arma esa selección, así que necesita ver toda la
+  // jerarquía (todas las campañas visibles), no solo la campaña ya abierta.
+  const adsParaArbol = useMemo(
+    () =>
+      performance.ads.filter((ad) => {
+        if (ad.campaignId && descartadas.has(ad.campaignId)) return false;
+        if (ad.adId && descartadas.has(ad.adId)) return false;
+        if (permitidas && !permitidas.has(ad.accountKey)) return false;
+        if (providerEfectivo !== "all" && ad.provider !== providerEfectivo) {
+          return false;
+        }
+        if (accountKey !== "all" && ad.accountKey !== accountKey) return false;
+        return true;
+      }),
+    [performance.ads, permitidas, providerEfectivo, accountKey, descartadas],
+  );
+  const arbol = useMemo(() => construirArbol(adsParaArbol), [adsParaArbol]);
+
+  // Si la selección cambia por otra vía (clic en una fila de la tabla, en vez
+  // de en el árbol), la rama correspondiente se abre sola — así el árbol
+  // siempre refleja dónde se está parado, sin importar cómo se llegó ahí.
+  useEffect(() => {
+    if (!seleccion) return;
+    const idCampana = `${seleccion.accountKey}::${seleccion.campana}`;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza el árbol con la selección real
+    setExpandido((actual) => {
+      const siguiente = new Set(actual);
+      siguiente.add(idCampana);
+      if (seleccion.conjunto) siguiente.add(`${idCampana}::${seleccion.conjunto}`);
+      return siguiente;
+    });
+  }, [seleccion]);
+
+  // Campañas (o conjuntos) marcados en otra pestaña acotan lo que se ve acá,
+  // pero solo mientras se navega "de arriba", sin haber entrado a una campaña
+  // puntual con un clic — ahí `seleccion` ya acota todo por su cuenta y esto
+  // sería redundante.
+  const marcasCampanaParaFiltrar = !seleccion ? marcasPorNivel.campana : null;
+  const marcasConjuntoParaFiltrar = !seleccion ? marcasPorNivel.conjunto : null;
+
   const filas = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
     const base = agrupar(ads, nivel).filter((fila) => {
@@ -495,7 +736,17 @@ export function AnunciosView({
       if (estadoFiltro === "pausado" && !pausado(fila.status)) return false;
       if (estadoFiltro === "sin_actividad" && fila.conActividad) return false;
       if (objetivoFiltro !== "todos" && fila.objetivo !== objetivoFiltro) return false;
-      if (soloMarcadas && !marcadas.has(fila.clave)) return false;
+      if (soloMarcadas && !marcadas.has(identidadDeMarca(fila, nivel))) return false;
+      if (nivel === "conjunto" && marcasCampanaParaFiltrar && marcasCampanaParaFiltrar.size > 0) {
+        if (!marcasCampanaParaFiltrar.has(identidadCampana(fila))) return false;
+      }
+      if (nivel === "anuncio") {
+        if (marcasConjuntoParaFiltrar && marcasConjuntoParaFiltrar.size > 0) {
+          if (!marcasConjuntoParaFiltrar.has(identidadConjunto(fila))) return false;
+        } else if (marcasCampanaParaFiltrar && marcasCampanaParaFiltrar.size > 0) {
+          if (!marcasCampanaParaFiltrar.has(identidadCampana(fila))) return false;
+        }
+      }
       if (!texto) return true;
       return `${fila.nombre} ${fila.contexto}`.toLowerCase().includes(texto);
     });
@@ -506,10 +757,30 @@ export function AnunciosView({
     }
     const columna = COLUMNAS_METRICA.find((c) => c.id === orden.columna);
     if (!columna) return base;
-    return [...base].sort(
-      (a, b) => factor * ((columna.valor(a) ?? -Infinity) - (columna.valor(b) ?? -Infinity)),
-    );
-  }, [ads, nivel, estadoFiltro, objetivoFiltro, busqueda, soloMarcadas, marcadas, orden]);
+    // Sin dato siempre al final, sin importar el sentido: tratarlo como
+    // -Infinity hacía que una fila sin actividad pareciera "la más barata"
+    // al ordenar Costo/resultado (u otra columna de costo) ascendente —
+    // ganándole a filas que sí rindieron bien de verdad.
+    return [...base].sort((a, b) => {
+      const va = columna.valor(a);
+      const vb = columna.valor(b);
+      if (va === null && vb === null) return 0;
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      return factor * (va - vb);
+    });
+  }, [
+    ads,
+    nivel,
+    estadoFiltro,
+    objetivoFiltro,
+    busqueda,
+    soloMarcadas,
+    marcadas,
+    marcasCampanaParaFiltrar,
+    marcasConjuntoParaFiltrar,
+    orden,
+  ]);
 
   const sinActividad = filas.filter((fila) => !fila.conActividad).length;
 
@@ -520,12 +791,13 @@ export function AnunciosView({
     });
   }
 
-  function alternarMarcada(clave: string, marcar: boolean) {
-    setMarcadas((actual) => {
-      const siguiente = new Set(actual);
-      if (marcar) siguiente.add(clave);
-      else siguiente.delete(clave);
-      return siguiente;
+  function alternarMarcada(fila: Fila, marcar: boolean) {
+    const id = identidadDeMarca(fila, nivel);
+    setMarcasPorNivel((actual) => {
+      const siguienteNivel = new Set(actual[nivel]);
+      if (marcar) siguienteNivel.add(id);
+      else siguienteNivel.delete(id);
+      return { ...actual, [nivel]: siguienteNivel };
     });
   }
 
@@ -556,6 +828,55 @@ export function AnunciosView({
     else if (id === "conjunto" && seleccion) {
       setSeleccion({ ...seleccion, conjunto: null });
     }
+  }
+
+  /**
+   * Clic en un nodo del panel de árbol (campaña, conjunto o anuncio): mismo
+   * destino que `abrir()`, pero se puede saltar directo a cualquier nivel de
+   * cualquier campaña sin tener que bajar de a un nivel por vez.
+   */
+  function irANodo(nodo: NodoArbol) {
+    if (nodo.tipo === "campana") {
+      setSeleccion({
+        accountKey: nodo.accountKey,
+        provider: nodo.provider,
+        accountName: nodo.accountName,
+        campana: nodo.campaignName,
+        conjunto: null,
+      });
+      setNivel("conjunto");
+      return;
+    }
+    // Conjunto y anuncio comparten destino: el anuncio es hoja, así que
+    // "abrirlo" muestra la tabla de anuncios de SU conjunto (con él adentro),
+    // igual que hace un clic en Meta.
+    setSeleccion({
+      accountKey: nodo.accountKey,
+      provider: nodo.provider,
+      accountName: nodo.accountName,
+      campana: nodo.campaignName,
+      conjunto: nodo.adsetName ?? "",
+    });
+    setNivel("anuncio");
+  }
+
+  function alternarExpandido(id: string) {
+    setExpandido((actual) => {
+      const siguiente = new Set(actual);
+      if (siguiente.has(id)) siguiente.delete(id);
+      else siguiente.add(id);
+      return siguiente;
+    });
+  }
+
+  /** Resalta en el árbol el nodo que corresponde a lo que se está viendo. */
+  function esNodoSeleccionado(nodo: NodoArbol): boolean {
+    if (!seleccion) return false;
+    if (nodo.accountKey !== seleccion.accountKey || nodo.campaignName !== seleccion.campana) {
+      return false;
+    }
+    if (nodo.tipo === "campana") return !seleccion.conjunto;
+    return (nodo.adsetName ?? "") === (seleccion.conjunto ?? "") && nodo.tipo === "conjunto";
   }
 
   const puedeAbrir = nivel === "campana" || (nivel === "conjunto" && seleccion);
@@ -761,7 +1082,22 @@ export function AnunciosView({
    * solo a nivel de anuncio, con el id nativo en mano.
    */
   function botonEditarAnuncio(fila: Fila) {
-    if (nivel !== "anuncio" || fila.provider !== "meta" || !fila.adId) return null;
+    if (nivel !== "anuncio") return null;
+    // Google no tiene ninguna acción de escritura para editar el contenido
+    // de un anuncio ya creado — antes acá no se mostraba nada, lo que se
+    // leía como "no me deja editar" en vez de "esto no existe en Google".
+    // Un botón deshabilitado con el motivo real es más honesto que el vacío.
+    if (fila.provider !== "meta") {
+      return (
+        <span
+          title="Google no tiene una acción para editar el contenido de un anuncio ya creado — crea uno nuevo desde el Constructor y pausa el viejo."
+          className="rounded-full border border-foreground/8 p-1.5 text-foreground/20"
+        >
+          <Pencil className="size-3.5" />
+        </span>
+      );
+    }
+    if (!fila.adId) return null;
     return (
       <button
         type="button"
@@ -772,6 +1108,11 @@ export function AnunciosView({
             accountId: fila.accountId,
             adId: fila.adId!,
             nombre: fila.nombre,
+            mensajeActual: fila.message,
+            tituloActual: fila.headline,
+            enlaceActual: fila.destinationUrl,
+            imagenActual: fila.thumbnailUrl,
+            ctaActual: fila.callToAction,
           });
         }}
         className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
@@ -846,7 +1187,37 @@ export function AnunciosView({
   }
 
   return (
-    <div className="w-full">
+    <div className="flex w-full items-start gap-4">
+      <Surface className="hidden max-h-[calc(100vh-9rem)] w-64 shrink-0 overflow-y-auto p-2 lg:block">
+        <button
+          type="button"
+          onClick={() => verNivel("campana")}
+          className={cn(
+            "mb-1 w-full rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-bold transition-colors",
+            !seleccion ? "bg-brand/10 text-brand" : "text-foreground/50 hover:bg-foreground/5",
+          )}
+        >
+          Todas las campañas
+        </button>
+        {arbol.length === 0 ? (
+          <p className="px-2 py-4 text-[0.68rem] text-foreground/40">
+            Sin campañas con los filtros actuales.
+          </p>
+        ) : (
+          arbol.map((nodo) => (
+            <NodoDelArbol
+              key={nodo.id}
+              nodo={nodo}
+              profundidad={0}
+              expandido={expandido}
+              onToggleExpand={alternarExpandido}
+              onSeleccionar={irANodo}
+              esSeleccionado={esNodoSeleccionado}
+            />
+          ))
+        )}
+      </Surface>
+      <div className="min-w-0 flex-1">
       <Surface className="mb-4 flex flex-wrap items-center gap-3 p-3">
         {/* Sin borde propio: ya vive dentro de una tarjeta con su propio
             contorno — ponerle uno más adentro se leía como una caja adentro
@@ -858,13 +1229,25 @@ export function AnunciosView({
               type="button"
               onClick={() => verNivel(item.id)}
               className={cn(
-                "rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
+                "flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-bold transition-colors",
                 nivel === item.id
                   ? "bg-primary text-primary-foreground"
                   : "text-foreground/55 hover:text-foreground",
               )}
             >
               {item.label}
+              {marcasPorNivel[item.id].size > 0 && (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-[0.62rem] leading-none",
+                    nivel === item.id
+                      ? "bg-primary-foreground/20"
+                      : "bg-brand/15 text-brand",
+                  )}
+                >
+                  {marcasPorNivel[item.id].size}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -918,7 +1301,7 @@ export function AnunciosView({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Toda plataforma</SelectItem>
-              {ACTIVE_PLATFORMS.map((id) => (
+              {plataformasDisponibles.map((id) => (
                 <SelectItem key={id} value={id}>
                   {platformLabel(id)}
                 </SelectItem>
@@ -940,7 +1323,12 @@ export function AnunciosView({
               <SelectItem value="all">Todas las cuentas</SelectItem>
               {cuentasDelCliente.map((cuenta) => (
                 <SelectItem key={cuenta.key} value={cuenta.key}>
-                  {cuenta.name}
+                  {/* Con "Toda plataforma" el nombre de cuenta solo no
+                      alcanza para distinguir Google de Meta si el cliente
+                      tiene ambas — se agrega la plataforma acá nomás. */}
+                  {providerEfectivo === "all"
+                    ? `${cuenta.name} · ${platformLabel(cuenta.provider as Platform)}`
+                    : cuenta.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1015,6 +1403,37 @@ export function AnunciosView({
             ) : null}
           </h3>
           <div className="flex items-center gap-2">
+            {(nivel === "conjunto" || nivel === "anuncio") &&
+              marcasCampanaParaFiltrar &&
+              marcasCampanaParaFiltrar.size > 0 &&
+              !(nivel === "anuncio" && marcasConjuntoParaFiltrar && marcasConjuntoParaFiltrar.size > 0) && (
+                <span className="flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/12 px-2.5 py-1 text-[0.62rem] font-bold text-brand">
+                  De {marcasCampanaParaFiltrar.size} campaña{marcasCampanaParaFiltrar.size === 1 ? "" : "s"} marcada
+                  {marcasCampanaParaFiltrar.size === 1 ? "" : "s"}
+                  <button
+                    type="button"
+                    onClick={() => setMarcasPorNivel((actual) => ({ ...actual, campana: new Set() }))}
+                    className="text-brand/70 hover:text-brand"
+                    aria-label="Quitar el filtro de campañas marcadas"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              )}
+            {nivel === "anuncio" && marcasConjuntoParaFiltrar && marcasConjuntoParaFiltrar.size > 0 && (
+              <span className="flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/12 px-2.5 py-1 text-[0.62rem] font-bold text-brand">
+                De {marcasConjuntoParaFiltrar.size} conjunto{marcasConjuntoParaFiltrar.size === 1 ? "" : "s"} marcado
+                {marcasConjuntoParaFiltrar.size === 1 ? "" : "s"}
+                <button
+                  type="button"
+                  onClick={() => setMarcasPorNivel((actual) => ({ ...actual, conjunto: new Set() }))}
+                  className="text-brand/70 hover:text-brand"
+                  aria-label="Quitar el filtro de conjuntos marcados"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            )}
             {marcadas.size > 0 && (
               <>
                 <button
@@ -1032,7 +1451,7 @@ export function AnunciosView({
                 <button
                   type="button"
                   onClick={() => {
-                    setMarcadas(new Set());
+                    setMarcasPorNivel((actual) => ({ ...actual, [nivel]: new Set() }));
                     setSoloMarcadas(false);
                   }}
                   className="text-[0.62rem] font-semibold text-foreground/40 hover:text-foreground/70"
@@ -1090,12 +1509,16 @@ export function AnunciosView({
                   <TableHead className="w-10 pl-4">
                     <Checkbox
                       checked={
-                        filas.length > 0 && filas.every((fila) => marcadas.has(fila.clave))
+                        filas.length > 0 &&
+                        filas.every((fila) => marcadas.has(identidadDeMarca(fila, nivel)))
                       }
                       onCheckedChange={(marcado) =>
-                        setMarcadas(
-                          marcado ? new Set(filas.map((fila) => fila.clave)) : new Set(),
-                        )
+                        setMarcasPorNivel((actual) => ({
+                          ...actual,
+                          [nivel]: marcado
+                            ? new Set(filas.map((fila) => identidadDeMarca(fila, nivel)))
+                            : new Set(),
+                        }))
                       }
                       aria-label="Marcar todas las filas visibles"
                     />
@@ -1171,8 +1594,8 @@ export function AnunciosView({
                   >
                     <TableCell className="pl-4" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
-                        checked={marcadas.has(fila.clave)}
-                        onCheckedChange={(marcado) => alternarMarcada(fila.clave, Boolean(marcado))}
+                        checked={marcadas.has(identidadDeMarca(fila, nivel))}
+                        onCheckedChange={(marcado) => alternarMarcada(fila, Boolean(marcado))}
                         aria-label={`Marcar ${fila.nombre}`}
                       />
                     </TableCell>
@@ -1188,13 +1611,15 @@ export function AnunciosView({
                             />
                           ) : (
                             <span
-                              className="size-9 shrink-0 rounded-md bg-foreground/8"
+                              className="grid size-9 shrink-0 place-items-center rounded-md bg-foreground/8 text-foreground/25"
                               title={
                                 fila.provider === "google"
                                   ? "Google no entrega miniatura de la pieza por esta vía"
                                   : "Sin miniatura disponible"
                               }
-                            />
+                            >
+                              <ImageOff className="size-4" />
+                            </span>
                           ))}
                         <div className="min-w-0">
                           <span
@@ -1340,6 +1765,205 @@ export function AnunciosView({
         open={Boolean(editandoAnuncio)}
         onOpenChange={(open) => !open && setEditandoAnuncio(null)}
       />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Identidad de una fila para las marcas — no `fila.clave` (que ya trae el
+ * nivel adentro): esto es a propósito el mismo id sin importar en qué nivel
+ * se esté mirando, para poder comparar "esta fila de conjunto ¿pertenece a
+ * una campaña marcada?" entre pestañas distintas.
+ */
+function identidadCampana(fila: Fila): string {
+  return `${fila.accountKey}::${fila.campaignName}`;
+}
+function identidadConjunto(fila: Fila): string {
+  return `${fila.accountKey}::${fila.campaignName}::${fila.adsetName ?? ""}`;
+}
+/** La identidad que corresponde marcar/comparar según el nivel que se ve. */
+function identidadDeMarca(fila: Fila, nivel: Nivel): string {
+  if (nivel === "campana") return identidadCampana(fila);
+  if (nivel === "conjunto") return identidadConjunto(fila);
+  return fila.clave;
+}
+
+/** Un nodo del panel de navegación en árbol (campaña → conjunto → anuncio). */
+type NodoArbol = {
+  id: string;
+  tipo: Nivel;
+  nombre: string;
+  accountKey: string;
+  provider: string;
+  accountName: string;
+  campaignName: string;
+  adsetName: string | null;
+  status: string | null;
+  conActividad: boolean;
+  hijos: NodoArbol[];
+};
+
+/**
+ * Arma la jerarquía completa (campaña → conjunto → anuncio) para el panel de
+ * navegación tipo árbol — a diferencia de `agrupar`, que aplana a un solo
+ * nivel a la vez para la tabla, esto anida los tres para poder verlos y
+ * moverse entre ellos sin perder de vista el resto de la campaña, como en
+ * Meta Ads Manager.
+ */
+function construirArbol(ads: AdSummary[]): NodoArbol[] {
+  const campanas = new Map<string, NodoArbol>();
+  const conjuntos = new Map<string, NodoArbol>();
+
+  for (const ad of ads) {
+    const claveCampana = `${ad.accountKey}::${ad.campaignName}`;
+    let campana = campanas.get(claveCampana);
+    if (!campana) {
+      campana = {
+        id: claveCampana,
+        tipo: "campana",
+        nombre: ad.campaignName,
+        accountKey: ad.accountKey,
+        provider: ad.provider,
+        accountName: ad.accountName,
+        campaignName: ad.campaignName,
+        adsetName: null,
+        status: ad.status,
+        conActividad: ad.conActividad,
+        hijos: [],
+      };
+      campanas.set(claveCampana, campana);
+    }
+    if (activo(ad.status)) campana.status = ad.status;
+    if (ad.conActividad) campana.conActividad = true;
+
+    const nombreConjunto = ad.adsetName ?? `${ad.campaignName} · sin conjunto`;
+    const claveConjunto = `${claveCampana}::${nombreConjunto}`;
+    let conjunto = conjuntos.get(claveConjunto);
+    if (!conjunto) {
+      conjunto = {
+        id: claveConjunto,
+        tipo: "conjunto",
+        nombre: nombreConjunto,
+        accountKey: ad.accountKey,
+        provider: ad.provider,
+        accountName: ad.accountName,
+        campaignName: ad.campaignName,
+        adsetName: ad.adsetName,
+        status: ad.status,
+        conActividad: ad.conActividad,
+        hijos: [],
+      };
+      conjuntos.set(claveConjunto, conjunto);
+      campana.hijos.push(conjunto);
+    }
+    if (activo(ad.status)) conjunto.status = ad.status;
+    if (ad.conActividad) conjunto.conActividad = true;
+
+    const nombreAnuncio = ad.adName ? primerTitulo(ad.adName) : `${ad.campaignName} · sin anuncio`;
+    conjunto.hijos.push({
+      id: `${claveConjunto}::${ad.adId ?? nombreAnuncio}`,
+      tipo: "anuncio",
+      nombre: nombreAnuncio,
+      accountKey: ad.accountKey,
+      provider: ad.provider,
+      accountName: ad.accountName,
+      campaignName: ad.campaignName,
+      adsetName: ad.adsetName,
+      status: ad.status,
+      conActividad: ad.conActividad,
+      hijos: [],
+    });
+  }
+
+  return [...campanas.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+}
+
+const ICONO_DE_TIPO: Record<Nivel, string> = {
+  campana: "📣",
+  conjunto: "🗂️",
+  anuncio: "🖼️",
+};
+
+/** Una fila del panel de árbol, recursiva — campaña, conjunto o anuncio. */
+function NodoDelArbol({
+  nodo,
+  profundidad,
+  expandido,
+  onToggleExpand,
+  onSeleccionar,
+  esSeleccionado,
+}: {
+  nodo: NodoArbol;
+  profundidad: number;
+  expandido: Set<string>;
+  onToggleExpand: (id: string) => void;
+  onSeleccionar: (nodo: NodoArbol) => void;
+  esSeleccionado: (nodo: NodoArbol) => boolean;
+}) {
+  const abierto = expandido.has(nodo.id);
+  const tieneHijos = nodo.hijos.length > 0;
+  const seleccionado = esSeleccionado(nodo);
+
+  return (
+    <div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onSeleccionar(nodo)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") onSeleccionar(nodo);
+        }}
+        className={cn(
+          "flex cursor-pointer items-center gap-1.5 rounded-lg py-1.5 pr-2 text-xs transition-colors hover:bg-foreground/5",
+          seleccionado ? "bg-brand/10 font-bold text-brand" : "text-foreground/75",
+        )}
+        style={{ paddingLeft: `${profundidad * 14 + 6}px` }}
+      >
+        {tieneHijos ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand(nodo.id);
+            }}
+            aria-label={abierto ? "Contraer" : "Expandir"}
+            className="shrink-0 text-foreground/35 hover:text-foreground"
+          >
+            <ChevronRight className={cn("size-3 transition-transform", abierto && "rotate-90")} />
+          </button>
+        ) : (
+          <span className="inline-block size-3 shrink-0" />
+        )}
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            activo(nodo.status) ? "bg-ok-deep" : "bg-foreground/25",
+          )}
+          title={activo(nodo.status) ? "Activo" : "Pausado"}
+        />
+        <span className="shrink-0" aria-hidden>
+          {ICONO_DE_TIPO[nodo.tipo]}
+        </span>
+        <span className="min-w-0 flex-1 truncate" title={nodo.nombre}>
+          {nodo.nombre}
+        </span>
+        {tieneHijos && (
+          <span className="shrink-0 text-[0.6rem] text-foreground/35">{nodo.hijos.length}</span>
+        )}
+      </div>
+      {abierto &&
+        nodo.hijos.map((hijo) => (
+          <NodoDelArbol
+            key={hijo.id}
+            nodo={hijo}
+            profundidad={profundidad + 1}
+            expandido={expandido}
+            onToggleExpand={onToggleExpand}
+            onSeleccionar={onSeleccionar}
+            esSeleccionado={esSeleccionado}
+          />
+        ))}
     </div>
   );
 }
@@ -1413,7 +2037,19 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         leads: ad.leads,
         purchases: ad.purchases,
         conversions: ad.conversions,
+        purchaseValue: ad.purchaseValue,
+        landingPageViews: ad.landingPageViews,
+        thruplays: ad.thruplays,
+        videoViews: ad.videoViews,
+        qualityRanking: ad.qualityRanking,
+        engagementRateRanking: ad.engagementRateRanking,
+        conversionRateRanking: ad.conversionRateRanking,
+        optimizationScore: ad.optimizationScore,
         thumbnailUrl: ad.thumbnailUrl ?? null,
+        message: ad.message,
+        headline: ad.headline,
+        destinationUrl: ad.destinationUrl,
+        callToAction: ad.callToAction ?? null,
       });
       continue;
     }
@@ -1425,12 +2061,33 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
       actual.resultado === null || resultado === null
         ? (actual.resultado ?? resultado)
         : actual.resultado + resultado;
-    actual.reach = sumarNullable(actual.reach, ad.reach);
+    // Alcance NUNCA se suma —la misma persona alcanzada en dos filas se
+    // contaría dos veces—, mismo criterio que ya usa lib/windsor.ts. Bug
+    // preexistente, encontrado ahora porque "Frecuencia" (impresiones /
+    // alcance) lo hacía salir artificialmente bajo.
+    actual.reach =
+      actual.reach === null || ad.reach === null
+        ? (actual.reach ?? ad.reach)
+        : Math.max(actual.reach, ad.reach);
     actual.linkClicks = sumarNullable(actual.linkClicks, ad.linkClicks);
     actual.engagement = sumarNullable(actual.engagement, ad.engagement);
     actual.leads = sumarNullable(actual.leads, ad.leads);
     actual.purchases = sumarNullable(actual.purchases, ad.purchases);
     actual.conversions = sumarNullable(actual.conversions, ad.conversions);
+    actual.purchaseValue = sumarNullable(actual.purchaseValue, ad.purchaseValue);
+    actual.landingPageViews = sumarNullable(
+      actual.landingPageViews,
+      ad.landingPageViews,
+    );
+    actual.thruplays = sumarNullable(actual.thruplays, ad.thruplays);
+    actual.videoViews = sumarNullable(actual.videoViews, ad.videoViews);
+    // Categóricos: no se pueden sumar ni promediar, se queda con el primero.
+    actual.qualityRanking = actual.qualityRanking ?? ad.qualityRanking;
+    actual.engagementRateRanking =
+      actual.engagementRateRanking ?? ad.engagementRateRanking;
+    actual.conversionRateRanking =
+      actual.conversionRateRanking ?? ad.conversionRateRanking;
+    actual.optimizationScore = actual.optimizationScore ?? ad.optimizationScore;
     // Basta un elemento con actividad para que el grupo tenga cifras reales.
     if (ad.conActividad) actual.conActividad = true;
     if (ad.pendienteSincronizacion) actual.pendienteSincronizacion = true;
@@ -1440,6 +2097,10 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
     actual.adsetId = actual.adsetId ?? ad.adsetId;
     actual.adId = actual.adId ?? ad.adId;
     actual.thumbnailUrl = actual.thumbnailUrl ?? ad.thumbnailUrl ?? null;
+    actual.message = actual.message ?? ad.message;
+    actual.headline = actual.headline ?? ad.headline;
+    actual.destinationUrl = actual.destinationUrl ?? ad.destinationUrl;
+    actual.callToAction = actual.callToAction ?? ad.callToAction ?? null;
   }
 
   for (const fila of grupos.values()) {
@@ -1456,7 +2117,14 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
   });
 }
 
-/** Suma dos métricas que pueden no aplicar: null solo si ninguna de las dos aplicó nunca. */
+/**
+ * Suma dos métricas que pueden no aplicar: null solo si ninguna de las dos
+ * aplicó nunca. No es lo mismo que `addNullable` de `lib/windsor.ts` —esa
+ * devuelve null si CUALQUIERA de las dos es null, porque fusiona filas
+ * partidas del mismo anuncio—; esta agrega varios anuncios distintos en una
+ * fila de campaña/conjunto, donde que uno no tenga el dato no debe borrar el
+ * de los demás. Mismo nombre en espíritu, política de null opuesta a propósito.
+ */
 function sumarNullable(a: number | null, b: number | null): number | null {
   if (a === null && b === null) return null;
   return (a ?? 0) + (b ?? 0);

@@ -1167,6 +1167,24 @@ export type WindsorAd = {
   leads: number | null;
   purchases: number | null;
   conversions: number | null;
+  /** Valor de las compras (Meta), en la moneda de la cuenta — no en micros. */
+  purchaseValue: number | null;
+  /** Visitas a la página de destino (Meta). */
+  landingPageViews: number | null;
+  /** ThruPlays: video visto hasta 15 s o completo (Meta). */
+  thruplays: number | null;
+  /** Reproducciones de video, 3+ segundos (Meta). */
+  videoViews: number | null;
+  /**
+   * Rankings de diagnóstico de Meta (calidad / interacción / conversión):
+   * "ABOVE_AVERAGE" | "AVERAGE" | "BELOW_AVERAGE_xx" | "UNKNOWN". `UNKNOWN`
+   * es normal en anuncios de bajo volumen, no un error.
+   */
+  qualityRanking: string | null;
+  engagementRateRanking: string | null;
+  conversionRateRanking: string | null;
+  /** Puntuación de optimización de la campaña (Google), 0 a 1. */
+  optimizationScore: number | null;
   /**
    * Miniatura real de la pieza, tal como la sirve Meta (`thumbnail_url`,
    * tabla "Ad" — verificado con `get_fields`, no es un supuesto). `null` en
@@ -1175,6 +1193,17 @@ export type WindsorAd = {
    * verificado que permite ver la pieza real, no una maqueta.
    */
   thumbnailUrl?: string | null;
+  /**
+   * Contenido real de la pieza de Meta, para precargar el formulario de
+   * edición en vez de mostrarlo en blanco (ver `editar-anuncio.tsx`). `null`
+   * en Google (sin acción de escritura para editar un anuncio ya creado) o
+   * si Meta no la trae. `destinationUrl` sale del campo `link` de Windsor,
+   * no de `link_url` — verificado con datos reales (2026-09-24): `link_url`
+   * siempre viene vacío, `link` viene poblado de forma consistente.
+   */
+  message: string | null;
+  headline: string | null;
+  destinationUrl: string | null;
   /**
    * false: la entidad existe en la cuenta pero no tuvo actividad en el rango.
    *
@@ -1275,11 +1304,26 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
       clicks: Math.round(number(row.clicks)),
       reach: optionalNumber(row.reach),
       linkClicks: optionalNumber(row.actions_link_click),
-      engagement: optionalNumber(row.actions_post_engagement),
+      // Unificado con Google: Meta trae `actions_post_engagement`, Google
+      // `engagements` — es la misma métrica con nombre distinto por plataforma.
+      engagement: optionalNumber(
+        first(row, "actions_post_engagement", "engagements"),
+      ),
       leads: optionalNumber(row.actions_lead),
       purchases: optionalNumber(row.actions_omni_purchase),
       conversions: optionalNumber(row.conversions),
+      purchaseValue: optionalNumber(row.action_values_omni_purchase),
+      landingPageViews: optionalNumber(row.actions_landing_page_view),
+      thruplays: optionalNumber(row.video_thruplay_watched_actions_video_view),
+      videoViews: optionalNumber(row.actions_video_view),
+      qualityRanking: text(row.quality_ranking),
+      engagementRateRanking: text(row.engagement_rate_ranking),
+      conversionRateRanking: text(row.conversion_rate_ranking),
+      optimizationScore: optionalNumber(row.campaign_optimization_score),
       thumbnailUrl: text(row.thumbnail_url),
+      message: text(row.body),
+      headline: text(row.title),
+      destinationUrl: text(row.link),
       conActividad: true,
     };
 
@@ -1296,6 +1340,20 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.leads = addNullable(actual.leads, fila.leads);
     actual.purchases = addNullable(actual.purchases, fila.purchases);
     actual.conversions = addNullable(actual.conversions, fila.conversions);
+    actual.purchaseValue = addNullable(actual.purchaseValue, fila.purchaseValue);
+    actual.landingPageViews = addNullable(
+      actual.landingPageViews,
+      fila.landingPageViews,
+    );
+    actual.thruplays = addNullable(actual.thruplays, fila.thruplays);
+    actual.videoViews = addNullable(actual.videoViews, fila.videoViews);
+    // Categóricos: no se pueden sumar ni promediar, se queda con el primero.
+    actual.qualityRanking = actual.qualityRanking ?? fila.qualityRanking;
+    actual.engagementRateRanking =
+      actual.engagementRateRanking ?? fila.engagementRateRanking;
+    actual.conversionRateRanking =
+      actual.conversionRateRanking ?? fila.conversionRateRanking;
+    actual.optimizationScore = actual.optimizationScore ?? fila.optimizationScore;
     actual.reach =
       actual.reach === null || fila.reach === null
         ? (actual.reach ?? fila.reach)
@@ -1304,6 +1362,9 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.adsetId = actual.adsetId ?? fila.adsetId;
     actual.adId = actual.adId ?? fila.adId;
     actual.thumbnailUrl = actual.thumbnailUrl ?? fila.thumbnailUrl;
+    actual.message = actual.message ?? fila.message;
+    actual.headline = actual.headline ?? fila.headline;
+    actual.destinationUrl = actual.destinationUrl ?? fila.destinationUrl;
   }
 
   return [...merged.values()];

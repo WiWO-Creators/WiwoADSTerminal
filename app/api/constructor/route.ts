@@ -6,6 +6,7 @@ import {
   type CampaignDraft,
   type CuentaCliente,
 } from "@/lib/constructor";
+import { nombresDeCampanasRecientes } from "@/lib/constructor-ejecutar";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { can, enAlcance } from "@/lib/permisos";
 
@@ -95,7 +96,14 @@ export async function POST(request: Request) {
     const portfolio =
       snapshot.portfolios.find((item) => item.id === draft.portfolioId) ?? null;
 
-    const plan = buildPlan(draft, portfolio, cuentas, snapshot);
+    // Campañas de prueba creadas por este mismo sistema en las últimas
+    // horas no cuentan como "historia" del cliente al sugerir presupuesto —
+    // ver `recommendBudget`.
+    const excluirCampanasDePresupuesto = draft.portfolioId
+      ? await nombresDeCampanasRecientes(draft.portfolioId)
+      : new Set<string>();
+
+    const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto);
     const landing = draft.landingUrl.trim();
     if (landing) {
       const aviso = await avisoDeLandingCaida(landing);

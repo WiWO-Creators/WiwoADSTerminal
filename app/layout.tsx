@@ -6,8 +6,9 @@ export const metadata: Metadata = {
   description:
     "Cola operativa de decisiones, salud de medición, pacing y trazabilidad para el ecosistema WiWO / MGC.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
 };
 

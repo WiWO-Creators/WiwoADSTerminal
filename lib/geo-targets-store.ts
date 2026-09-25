@@ -26,6 +26,18 @@ function sinAcentos(texto: string): string {
 }
 
 /**
+ * Quien pide una región casi siempre la nombra "Región de/del/Metropolitana
+ * de <nombre>" — pero `geo_targets.name` viene del CSV oficial de Google en
+ * inglés y sin ese prefijo ("Maule", no "Región del Maule"; "Santiago
+ * Metropolitan Region", no "Región Metropolitana"). Sin quitarlo, la
+ * búsqueda de "Región del Maule" no encontraba nada contra "Maule" — el
+ * `LIKE` exige que el nombre guardado CONTENGA la consulta completa — y la
+ * región pedida quedaba descartada en silencio, cayendo la campaña a
+ * segmentar el país entero (confirmado en vivo con Colbún, 2026-09-24).
+ */
+const PREFIJO_REGION = /^region\s+(?:de\s+la\s+|del\s+|de\s+)?/;
+
+/**
  * Nombre real en español de ciudades cuyo nombre oficial en la tabla de
  * Google es sustancialmente distinto (no solo una tilde) — Google entrega
  * "Mexico City", no "Ciudad de México", y buscar la segunda no encontraba
@@ -48,6 +60,7 @@ const ALIAS_EN_ESPANOL: Record<string, string> = {
   pekin: "Beijing",
   tokio: "Tokyo",
   "nueva delhi": "New Delhi",
+  metropolitana: "Santiago Metropolitan Region",
   amberes: "Antwerp",
   florencia: "Florence",
   napoles: "Naples",
@@ -81,7 +94,7 @@ export async function buscarGeoTargets(opciones: {
   const texto = opciones.query.trim();
   if (texto.length < 2) return [];
   const limite = Math.min(opciones.limite ?? LIMITE_MAXIMO, LIMITE_MAXIMO);
-  const normalizado = sinAcentos(texto);
+  const normalizado = sinAcentos(texto).replace(PREFIJO_REGION, "");
 
   const db = getRawDb();
   const condicionesBase = ["tier = ?"];

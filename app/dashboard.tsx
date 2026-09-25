@@ -87,10 +87,22 @@ type ItemDeMenu = {
    *  Viven acá para que renombrar un módulo sea un cambio en un solo lugar. */
   icono?: LucideIcon;
   resumen?: string;
+  /**
+   * Sigue visible en el menú (a propósito: no se quita, para no dar la
+   * sensación de que el módulo dejó de existir), pero no se puede entrar.
+   * Se excluye también de las tarjetas de Inicio, ver `modulosDeInicio`.
+   */
+  bloqueado?: boolean;
 };
 
 const navItems: ItemDeMenu[] = [
   { key: "control", label: "Inicio", icono: Home },
+  {
+    key: "health",
+    label: "Dashboard C-Level",
+    icono: LineChart,
+    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+  },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
     // trae su tabla de anuncios embebida, así que es una sola entrada.
@@ -116,12 +128,7 @@ const navItems: ItemDeMenu[] = [
     roles: ["admin", "lead", "buyer"],
     icono: Target,
     resumen: "Segmentos y cobertura geográfica por cuenta.",
-  },
-  {
-    key: "health",
-    label: "Dashboard C-Level",
-    icono: LineChart,
-    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+    bloqueado: true,
   },
 ];
 
@@ -170,7 +177,10 @@ function modulosDeInicio(role: string): ModuloInicio[] {
     { item: itemEquipo, grupo: "gestion" as const },
   ];
   return conGrupo
-    .filter(({ item }) => item.key !== "control" && puedeVerItem(item, role))
+    .filter(
+      ({ item }) =>
+        item.key !== "control" && !item.bloqueado && puedeVerItem(item, role),
+    )
     .flatMap(({ item, grupo }) =>
       item.icono && item.resumen
         ? [
@@ -792,8 +802,9 @@ function AppSidebar({
                 <SidebarMenuItem key={item.key}>
                   <SidebarMenuButton
                     isActive={activo}
-                    onClick={() => onNavigate(item.key)}
-                    tooltip={item.label}
+                    disabled={item.bloqueado}
+                    onClick={item.bloqueado ? undefined : () => onNavigate(item.key)}
+                    tooltip={item.bloqueado ? `${item.label} · Próximamente` : item.label}
                     className={cn(
                       "h-11 gap-2.5 rounded-full px-4 text-[0.95rem] font-medium text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-bold data-[active=true]:text-foreground",
                       "group-data-[collapsible=icon]:justify-center",
@@ -816,9 +827,14 @@ function AppSidebar({
                         )}
                       />
                     )}
-                    <span className="group-data-[collapsible=icon]:hidden">
+                    <span className="flex-1 group-data-[collapsible=icon]:hidden">
                       {item.label}
                     </span>
+                    {item.bloqueado && (
+                      <span className="font-micro shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.6rem] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                        Pronto
+                      </span>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );

@@ -6,6 +6,8 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
+  Maximize2,
+  Minimize2,
   Paperclip,
   RotateCcw,
   Square,
@@ -81,6 +83,7 @@ export function AsistenteFlotante({
   onCambioAplicado: () => void;
 }) {
   const [abierto, setAbierto] = useState(false);
+  const [grande, setGrande] = useState(false);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [texto, setTexto] = useState("");
   const [csv, setCsv] = useState<{ nombre: string; texto: string } | null>(null);
@@ -90,6 +93,17 @@ export function AsistenteFlotante({
   const cancelar = useRef<AbortController | null>(null);
   const fondo = useRef<HTMLDivElement>(null);
   const archivo = useRef<HTMLInputElement>(null);
+  const areaDeTexto = useRef<HTMLTextAreaElement>(null);
+
+  // Crece con el contenido en vez de quedar en una sola línea siempre —
+  // escribir un pedido largo en una caja de una línea obligaba a desplazarse
+  // por dentro de la caja para verlo, difícil de editar.
+  useEffect(() => {
+    const area = areaDeTexto.current;
+    if (!area) return;
+    area.style.height = "auto";
+    area.style.height = `${Math.min(area.scrollHeight, grande ? 240 : 112)}px`;
+  }, [texto, grande]);
 
   useEffect(() => {
     fondo.current?.scrollIntoView({ block: "end" });
@@ -263,7 +277,12 @@ export function AsistenteFlotante({
         <section
           role="dialog"
           aria-label="Asistente de IA"
-          className="fixed right-4 bottom-24 z-40 flex h-[min(660px,calc(100svh-7.5rem))] w-[min(430px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)]"
+          className={cn(
+            "fixed right-4 bottom-24 z-40 flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)] transition-[height,width] duration-150",
+            grande
+              ? "h-[min(880px,calc(100svh-6rem))] w-[min(680px,calc(100vw-2rem))]"
+              : "h-[min(660px,calc(100svh-7.5rem))] w-[min(430px,calc(100vw-2rem))]",
+          )}
         >
           <header className="flex items-center gap-3 border-b border-border px-4 py-3">
             <div className="min-w-0 flex-1">
@@ -283,6 +302,15 @@ export function AsistenteFlotante({
                 <RotateCcw className="size-4" />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setGrande((v) => !v)}
+              aria-label={grande ? "Achicar el chat" : "Agrandar el chat"}
+              title={grande ? "Achicar el chat" : "Agrandar el chat"}
+              className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {grande ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
             <button
               type="button"
               onClick={() => setAbierto(false)}
@@ -424,6 +452,7 @@ export function AsistenteFlotante({
                 <Paperclip className="size-4" />
               </button>
               <textarea
+                ref={areaDeTexto}
                 value={texto}
                 onChange={(evento) => setTexto(evento.target.value)}
                 onKeyDown={(evento) => {
@@ -434,7 +463,7 @@ export function AsistenteFlotante({
                 }}
                 rows={1}
                 placeholder={csv ? "¿Qué quieres saber de este archivo?" : "Escribe tu pregunta…"}
-                className="max-h-28 min-h-10 flex-1 resize-none rounded-2xl border border-border bg-field px-3.5 py-2.5 text-sm text-foreground outline-none focus:border-brand"
+                className="min-h-10 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-field px-3.5 py-2.5 text-sm text-foreground outline-none focus:border-brand"
               />
               {cargando ? (
                 <button

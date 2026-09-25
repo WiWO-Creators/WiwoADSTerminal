@@ -27,6 +27,22 @@ export type AnuncioEditable = {
   accountId: string;
   adId: string;
   nombre: string;
+  /**
+   * Contenido real de la pieza, tal como lo trae Windsor hoy — para
+   * precargar el formulario en vez de mostrarlo en blanco. `null` cuando
+   * Meta no lo trae (ej. `tituloActual` en piezas que reusan un post
+   * orgánico, que no tienen título propio) — ahí el campo queda vacío,
+   * no hay nada real que precargar.
+   */
+  mensajeActual: string | null;
+  tituloActual: string | null;
+  enlaceActual: string | null;
+  /** Solo para mostrar de referencia: no se precarga en el selector, que
+   * solo lista un subconjunto curado de botones reales de Meta. */
+  ctaActual: string | null;
+  /** Solo para vista previa: nunca se precarga en el campo de texto — ver
+   * el aviso debajo de ese campo sobre URLs firmadas del CDN de Meta. */
+  imagenActual: string | null;
 };
 
 /**
@@ -64,20 +80,29 @@ export function EditarAnuncioDialog({
   const [cta, setCta] = useState<CallToAction | "">("");
 
   // Se sincroniza al cambiar de anuncio (el diálogo es una sola instancia,
-  // no se remonta por fila) — sin esto, el nombre del anuncio anterior
-  // quedaría pegado en el campo al abrir uno distinto.
+  // no se remonta por fila) — sin esto, los datos del anuncio anterior
+  // quedarían pegados en los campos al abrir uno distinto. A diferencia de
+  // antes, los campos de texto se precargan con el contenido real de la
+  // pieza (mensaje, título, enlace) en vez de quedar en blanco — la imagen
+  // no: ver el aviso junto a ese campo sobre URLs firmadas del CDN de Meta.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza con el anuncio elegido al abrir o al cambiar de fila
     setNombre(anuncio?.nombre ?? "");
-  }, [anuncio?.adId, anuncio?.nombre]);
+    setMensaje(anuncio?.mensajeActual ?? "");
+    setTitulo(anuncio?.tituloActual ?? "");
+    setDescripcion("");
+    setEnlace(anuncio?.enlaceActual ?? "");
+    setImagenUrl("");
+    setCta("");
+  }, [anuncio?.adId, anuncio?.nombre, anuncio?.mensajeActual, anuncio?.tituloActual, anuncio?.enlaceActual]);
 
   if (!anuncio) return null;
 
   function limpiar() {
-    setMensaje("");
-    setTitulo("");
+    setMensaje(anuncio?.mensajeActual ?? "");
+    setTitulo(anuncio?.tituloActual ?? "");
     setDescripcion("");
-    setEnlace("");
+    setEnlace(anuncio?.enlaceActual ?? "");
     setImagenUrl("");
     setCta("");
   }
@@ -114,11 +139,23 @@ export function EditarAnuncioDialog({
 
   async function guardar() {
     if (!anuncio) return;
+    // Los campos de texto vienen precargados con el contenido real: se manda
+    // el que de verdad cambió respecto de lo que ya tenía, no "cualquiera
+    // que no esté vacío" (antes, con el campo siempre vacío, no había forma
+    // de distinguir "no lo toqué" de "lo cambié"). Vaciar el campo a mano no
+    // manda nada — igual que antes, no hay forma de borrar un contenido acá,
+    // solo de reemplazarlo por otro.
     const cambios: Record<string, unknown> = {};
-    if (mensaje.trim()) cambios.message = mensaje.trim();
-    if (titulo.trim()) cambios.headline = titulo.trim();
+    if (mensaje.trim() && mensaje.trim() !== (anuncio.mensajeActual ?? "").trim()) {
+      cambios.message = mensaje.trim();
+    }
+    if (titulo.trim() && titulo.trim() !== (anuncio.tituloActual ?? "").trim()) {
+      cambios.headline = titulo.trim();
+    }
     if (descripcion.trim()) cambios.description = descripcion.trim();
-    if (enlace.trim()) cambios.link = enlace.trim();
+    if (enlace.trim() && enlace.trim() !== (anuncio.enlaceActual ?? "").trim()) {
+      cambios.link = enlace.trim();
+    }
     if (cta) cambios.call_to_action_type = cta;
     if (imagenUrl.trim()) {
       const problema = problemaDeUrlPublica(imagenUrl);
@@ -145,11 +182,21 @@ export function EditarAnuncioDialog({
           params: { ad_id: anuncio.adId, ...cambios },
         }),
       });
-      const body = (await response.json()) as { ok: boolean; error?: string };
+      const body = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+        pausado?: { nivel: string } | null;
+      };
       if (!response.ok || !body.ok) {
         throw new Error(body.error ?? "No se pudo actualizar el anuncio");
       }
-      toast.success("Anuncio actualizado");
+      if (body.pausado) {
+        toast.success("Anuncio actualizado y pausado", {
+          description: "Revísalo y activalo de nuevo cuando esté todo en orden.",
+        });
+      } else {
+        toast.success("Anuncio actualizado");
+      }
       limpiar();
       onOpenChange(false);
     } catch (issue) {
@@ -208,7 +255,7 @@ export function EditarAnuncioDialog({
             <Textarea
               value={mensaje}
               onChange={(e) => setMensaje(e.target.value)}
-              placeholder="Dejar igual"
+              placeholder={anuncio.mensajeActual ? "Dejar igual" : "Sin texto principal cargado"}
               rows={3}
               className="bg-field/60"
             />
@@ -221,7 +268,7 @@ export function EditarAnuncioDialog({
               <Input
                 value={titulo}
                 onChange={(e) => setTitulo(e.target.value)}
-                placeholder="Dejar igual"
+                placeholder={anuncio.tituloActual ? "Dejar igual" : "Sin título (pieza sin título propio)"}
                 className="bg-field/60"
               />
             </div>
@@ -245,7 +292,7 @@ export function EditarAnuncioDialog({
               <Input
                 value={enlace}
                 onChange={(e) => setEnlace(e.target.value)}
-                placeholder="Dejar igual"
+                placeholder={anuncio.enlaceActual ? "Dejar igual" : "Sin enlace cargado"}
                 className="bg-field/60"
               />
             </div>
@@ -255,22 +302,49 @@ export function EditarAnuncioDialog({
               </label>
               <Select value={cta} onValueChange={(v) => setCta(v as CallToAction)}>
                 <SelectTrigger className="w-full bg-field/60">
-                  <SelectValue placeholder="Dejar igual" />
+                  <SelectValue
+                    placeholder={
+                      anuncio.ctaActual && !(anuncio.ctaActual in CALL_TO_ACTIONS)
+                        ? `Actual: ${anuncio.ctaActual}`
+                        : "Dejar igual"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {(Object.keys(CALL_TO_ACTIONS) as CallToAction[]).map((key) => (
                     <SelectItem key={key} value={key}>
                       {CALL_TO_ACTIONS[key]}
+                      {key === anuncio.ctaActual ? " (actual)" : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {anuncio.ctaActual && !(anuncio.ctaActual in CALL_TO_ACTIONS) && (
+                <p className="mt-1 text-[0.62rem] leading-4 text-foreground/40">
+                  El botón actual ({anuncio.ctaActual}) no está en esta lista corta — elegir uno
+                  de acá lo reemplaza.
+                </p>
+              )}
             </div>
           </div>
           <div>
             <label className="font-micro mb-1 block text-[0.6rem] text-foreground/45">
               IMAGEN (URL PÚBLICA)
             </label>
+            {anuncio.imagenActual && (
+              <div className="mb-2 flex items-center gap-2">
+                {/* eslint-disable-next-line @next/next/no-img-element -- miniatura real de Meta, dominio no fijo */}
+                <img
+                  src={anuncio.imagenActual}
+                  alt="Imagen actual del anuncio"
+                  className="size-14 shrink-0 rounded-md border border-foreground/10 object-cover"
+                />
+                <p className="text-[0.62rem] leading-4 text-foreground/40">
+                  Imagen actual — no se precarga acá abajo a propósito (ver el
+                  aviso). Pega una URL nueva solo si quieres reemplazarla.
+                </p>
+              </div>
+            )}
             <Input
               value={imagenUrl}
               onChange={(e) => setImagenUrl(e.target.value)}
