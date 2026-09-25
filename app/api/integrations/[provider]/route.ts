@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import {
   disconnectIntegration,
   IntegrationError,
@@ -39,8 +40,7 @@ async function mutate(
   const session = await getSession();
   const user = session?.actor ?? null;
   if (!user) return responseError("Inicia sesión para continuar", 401);
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return responseError("Origen no permitido", 403);
   }
   const { provider } = await context.params;

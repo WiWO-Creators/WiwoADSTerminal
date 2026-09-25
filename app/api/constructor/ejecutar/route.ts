@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { detalleClientes } from "@/lib/clientes-detalle";
 import { buildPlan, normalizeDraft, type CampaignDraft, type CuentaCliente } from "@/lib/constructor";
 import {
@@ -64,8 +65,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {

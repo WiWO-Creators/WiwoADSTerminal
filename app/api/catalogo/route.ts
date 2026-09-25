@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { can } from "@/lib/permisos";
 import { PLATFORM, platformLabel } from "@/lib/plataformas";
 import { fetchWindsorCatalog, windsorConfigured } from "@/lib/windsor";
@@ -35,8 +36,7 @@ export async function POST(request: Request) {
   if (!can(session.actor, "administrar_conexiones")) {
     return fail("No tienes permiso para reconstruir el catálogo", 403);
   }
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
   if (!windsorConfigured()) return fail("Falta configurar WINDSOR_API_KEY", 503);

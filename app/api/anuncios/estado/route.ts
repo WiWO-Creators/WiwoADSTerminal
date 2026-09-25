@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { can } from "@/lib/permisos";
 import { isActivePlatform } from "@/lib/plataformas";
 import { executeWindsorAction, type WindsorProvider } from "@/lib/windsor";
@@ -77,8 +78,7 @@ export async function POST(request: Request) {
     return fail("Tu rol no puede pausar ni activar anuncios", 403);
   }
 
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {

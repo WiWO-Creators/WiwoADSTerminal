@@ -5,6 +5,7 @@ import {
   listTeam,
   updateMember,
 } from "@/lib/equipo";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { can } from "@/lib/permisos";
 
 export const dynamic = "force-dynamic";
@@ -81,8 +82,7 @@ export async function PATCH(request: Request) {
 
 /** Mismo origen y JSON: las mutaciones no se aceptan desde otro sitio. */
 function guardMutation(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {

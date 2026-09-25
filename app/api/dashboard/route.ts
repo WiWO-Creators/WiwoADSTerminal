@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import {
   applyDecisionAction,
   approveDecisionBatch,
@@ -40,8 +41,7 @@ export async function POST(request: Request) {
     );
   }
   const user = session.actor;
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return Response.json({ error: "Origen no permitido" }, { status: 403 });
   }
   const contentType = request.headers.get("content-type") ?? "";

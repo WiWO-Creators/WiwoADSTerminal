@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { descartarPendiente } from "@/lib/publicaciones-pendientes";
 import { can } from "@/lib/permisos";
 
@@ -19,8 +20,7 @@ export async function POST(request: Request) {
   if (!can(session.actor, "aprobar_cambios")) {
     return fail("Este rol no puede descartar campañas pendientes", 403);
   }
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
 
