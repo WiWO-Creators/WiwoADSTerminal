@@ -11,6 +11,7 @@ import {
   GOOGLE_STATE_COOKIE,
   GOOGLE_VERIFIER_COOKIE,
   googleLoginConfigured,
+  origenPublico,
   safePath,
 } from "../route";
 
@@ -63,7 +64,7 @@ export async function GET(request: Request) {
         code,
         client_id: env.GOOGLE_CLIENT_ID!,
         client_secret: env.GOOGLE_CLIENT_SECRET!,
-        redirect_uri: `${url.origin}/api/acceso/google/callback`,
+        redirect_uri: `${origenPublico(url)}/api/acceso/google/callback`,
         grant_type: "authorization_code",
         code_verifier: verifier,
       }),
