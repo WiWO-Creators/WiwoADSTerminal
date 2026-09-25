@@ -54,59 +54,19 @@ export default async function AccesoPage({
 
           <ThinkingOrb size="xl" state="thinking" label="" bare />
 
-          <div>
-            <h1 className="max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-[-0.04em] text-balance sm:text-5xl">
-              Sistema operativo de paid media
-            </h1>
-            <p className="mt-4 max-w-[46ch] text-base leading-7 text-[#F8FAD7]/70">
-              WiWO.ADS es la herramienta interna con la que el equipo de MGC
-              Global Group y WiWO opera las cuentas publicitarias de sus
-              clientes: qué cambiar, cuándo y por qué, todo en un solo lugar.
-            </p>
-          </div>
-
-          <ul className="grid max-w-[46ch] gap-4 text-sm leading-6 text-[#F8FAD7]/78">
-            <li className="flex gap-3">
-              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
-                ●
-              </span>
-              <span>
-                <strong className="text-[#F8FAD7]">Gestión de campañas.</strong>{" "}
-                Crea y edita campañas, conjuntos de anuncios y creativos de
-                Meta Ads y Google Ads desde un mismo panel.
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
-                ●
-              </span>
-              <span>
-                <strong className="text-[#F8FAD7]">Pacing y salud de medición.</strong>{" "}
-                Sigue gasto, ritmo de inversión y estado de píxeles y eventos
-                de conversión por cliente.
-              </span>
-            </li>
-            <li className="flex gap-3">
-              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
-                ●
-              </span>
-              <span>
-                <strong className="text-[#F8FAD7]">Cola de decisiones.</strong>{" "}
-                Prioriza qué cuenta necesita atención hoy, con contexto y
-                trazabilidad de cada cambio hecho por el equipo.
-              </span>
-            </li>
-          </ul>
+          <h1 className="max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-[-0.04em] text-balance sm:text-5xl">
+            Sistema operativo de paid media
+          </h1>
         </section>
 
         {/* ── Acceso ────────────────────────────────────────────────── */}
         <section className="w-full justify-self-center lg:justify-self-end">
           <div className="w-full max-w-md rounded-[28px] border border-[#F8FAD7]/14 bg-[#F8FAD7]/[0.08] p-8 shadow-[0_28px_80px_rgba(12,12,40,0.42)] backdrop-blur-xl">
             <h2 className="text-3xl font-extrabold tracking-[-0.03em]">
-              Entrar
+              Acceso del equipo
             </h2>
             <p className="mt-3 text-sm leading-6 text-[#F8FAD7]/72">
-              Usa tu cuenta de Google del equipo para acceder al orquestador.
+              Entrá con la cuenta de Google con la que trabajamos.
             </p>
 
             {params.cerrada === "1" && !error && (
@@ -135,7 +95,8 @@ export default async function AccesoPage({
               </p>
             ) : (
               <p className="mt-4 text-xs leading-5 text-[#F8FAD7]/50">
-                Solo entran cuentas del dominio de la empresa.
+                Solo cuentas autorizadas pueden ingresar. Si no entrás, pedí
+                acceso al equipo.
               </p>
             )}
           </div>

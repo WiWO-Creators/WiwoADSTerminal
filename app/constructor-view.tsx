@@ -2048,7 +2048,7 @@ function PresupuestoPorPlataforma({
             <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-warn">
               <Info className="mt-0.5 size-3.5 shrink-0" />
               Las cuentas elegidas usan monedas distintas ({[...monedasCompartido].join(" y ")}) —
-              usa "presupuesto distinto por plataforma" para no cargar el mismo número en dos monedas.
+              usa &ldquo;presupuesto distinto por plataforma&rdquo; para no cargar el mismo número en dos monedas.
             </p>
           )}
         </>
