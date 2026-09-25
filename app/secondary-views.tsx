@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowRight,
+  CircleDollarSign,
   HeartPulse,
   LockKeyhole,
   RefreshCw,
@@ -21,10 +22,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { PortfolioSummary } from "@/lib/portafolios";
 import { cn } from "@/lib/utils";
+import { summarizeObjectives, type ObjectiveTotal } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
+import { TarjetaResumenCliente } from "./resumen-cliente";
+import { TarjetaResumenSemanal } from "./resumen-semanal";
 import {
   HealthBadge,
   StatCard,
@@ -39,6 +42,10 @@ export type ModuloInicio = {
   label: string;
   icono: LucideIcon;
   resumen: string;
+  /** Misma agrupación que el menú lateral: "gestion" es administración de
+   * cuenta, no el trabajo de campaña del día a día. Separarlas acá también
+   * evita que las dos se lean como una sola lista pareja de siete opciones. */
+  grupo: "principal" | "gestion";
 };
 
 /**
@@ -62,24 +69,11 @@ export function ControlRoomView({
   onOpenIntegrations: () => void;
 }) {
   const hasLiveData = performance.accountsWithData > 0;
-  const isCurrent = performance.mode === "live";
-  const monthLabel = etiquetaPeriodo(performance);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                isCurrent ? "bg-ok-deep" : "bg-warn-deep",
-              )}
-            />
-            {hasLiveData
-              ? `${isCurrent ? "Datos reales" : "Datos reales · actualización pendiente"} · ${monthLabel}`
-              : "Configuración · todavía sin métricas"}
-          </p>
           <span
             className="mb-3 block h-1 w-9 rounded-full bg-gradient-to-r from-[#3bff00] to-[#4242ff]"
             aria-hidden="true"
@@ -101,19 +95,48 @@ export function ControlRoomView({
         )}
       </div>
 
-      <nav aria-label="Módulos">
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {modulos.map((modulo) => (
-            <li key={modulo.key}>
-              <TarjetaDeModulo
-                modulo={modulo}
-                onOpen={() => onNavigate(modulo.key)}
-              />
-            </li>
-          ))}
-        </ul>
+      <nav aria-label="Módulos" className="space-y-7">
+        <GrupoDeModulos
+          modulos={modulos.filter((m) => m.grupo === "principal")}
+          onNavigate={onNavigate}
+        />
+        {modulos.some((m) => m.grupo === "gestion") && (
+          <div>
+            <p className="font-micro mb-3 text-[0.68rem] text-foreground/40">
+              GESTIÓN
+            </p>
+            <GrupoDeModulos
+              modulos={modulos.filter((m) => m.grupo === "gestion")}
+              onNavigate={onNavigate}
+            />
+          </div>
+        )}
       </nav>
     </div>
+  );
+}
+
+/* auto-rows-fr iguala el alto de TODAS las filas, no solo el de las tarjetas
+   de una misma fila: así el bloque se lee como una grilla pareja aunque los
+   resúmenes tengan largos distintos. */
+function GrupoDeModulos({
+  modulos,
+  onNavigate,
+}: {
+  modulos: ModuloInicio[];
+  onNavigate: (key: ViewKey) => void;
+}) {
+  return (
+    <ul className="grid auto-rows-fr gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {modulos.map((modulo) => (
+        <li key={modulo.key}>
+          <TarjetaDeModulo
+            modulo={modulo}
+            onOpen={() => onNavigate(modulo.key)}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -134,26 +157,32 @@ function TarjetaDeModulo({
     <button
       type="button"
       onClick={onOpen}
-      className="group flex h-full w-full items-start gap-4 rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-colors hover:border-foreground/25 hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-[#4242FF] focus-visible:outline-none"
+      className="group flex h-full w-full flex-col items-start rounded-[16px] border border-border bg-card p-5 text-left shadow-[var(--shadow-1)] transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--acento-tema)] hover:bg-foreground/[0.04] hover:shadow-[0_0_0_1px_var(--acento-tema),var(--shadow-2)] focus-visible:ring-2 focus-visible:ring-[var(--acento-tema)] focus-visible:outline-none active:translate-y-0 active:scale-[0.99]"
     >
       <span
         aria-hidden="true"
-        className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-brand"
-      >
-        <Icono className="size-5" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="text-[1.02rem] font-bold text-foreground">
-            {modulo.label}
-          </span>
-          <ArrowRight
-            aria-hidden="true"
-            className="size-4 shrink-0 text-foreground/35 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70"
-          />
+        className="mb-4 block h-1 w-8 rounded-full bg-gradient-to-r from-[#3bff00] to-[#4242ff] opacity-70 transition-opacity group-hover:opacity-100"
+      />
+      <span className="flex w-full min-w-0 flex-1 items-start gap-4">
+        <span
+          aria-hidden="true"
+          className="grid size-10 shrink-0 place-items-center rounded-[12px] bg-foreground/[0.06] text-foreground transition-colors group-hover:bg-[var(--acento-tema)] group-hover:text-[var(--acento-tema-contenido)]"
+        >
+          <Icono className="size-5" />
         </span>
-        <span className="mt-1.5 block text-sm leading-6 text-foreground/58">
-          {modulo.resumen}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="text-[1.02rem] font-bold text-foreground">
+              {modulo.label}
+            </span>
+            <ArrowRight
+              aria-hidden="true"
+              className="size-4 shrink-0 text-foreground/35 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70"
+            />
+          </span>
+          <span className="mt-1.5 block text-sm leading-6 text-foreground/58">
+            {modulo.resumen}
+          </span>
         </span>
       </span>
     </button>
@@ -162,7 +191,7 @@ function TarjetaDeModulo({
 
 export function HealthView({
   client,
-  portfolios,
+  performance,
   onOpenIntegrations,
   checks,
   score,
@@ -170,6 +199,7 @@ export function HealthView({
   totalCount,
   critical,
   warnings,
+  puedeVerResumen,
 }: {
   /**
    * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
@@ -177,7 +207,7 @@ export function HealthView({
    * repetir la misma elección en dos lugares que podían desincronizarse.
    */
   client: string | null;
-  portfolios: PortfolioSummary[];
+  performance: PerformanceSnapshot;
   onOpenIntegrations: () => void;
   checks: HealthCheck[];
   score: number;
@@ -185,20 +215,31 @@ export function HealthView({
   totalCount: number;
   critical: number;
   warnings: number;
+  /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
+  puedeVerResumen: boolean;
 }) {
+  const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
+  const monthLabel = etiquetaPeriodo(performance);
+  // Resultado de "Resultados" mezclando ventas, leads y awareness en una
+  // sola cifra: cada objetivo se mide con su propia métrica (ver
+  // `summarizeObjectives`), así que acá se recalcula solo con las campañas
+  // de este cliente — `byObjective` en el snapshot es de toda la cartera.
+  const cuentasDelCliente = new Set(portfolio?.accounts.map((a) => a.id) ?? []);
+  const objetivosDelCliente = portfolio
+    ? summarizeObjectives(
+        performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)),
+      )
+    : [];
 
   // Sin cliente elegido no hay nada que medir: antes el selector arrancaba
   // solo en una de sus cuentas de Windsor, elegida al azar, sin decir a qué
-  // cliente pertenecía ni qué pasaba con sus otras cuentas.
+  // cliente pertenecía ni qué pasaba con sus otras cuentas. El resumen de la
+  // cartera completa no depende de elegir uno, así que se muestra igual.
   if (!portfolio) {
     return (
       <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
         <div className="mb-5">
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <HeartPulse className="size-3 text-brand" />
-            Salud por cliente
-          </p>
           <h2 className="neo-section-title">
             Elige un cliente
           </h2>
@@ -207,7 +248,7 @@ export function HealthView({
             lectura sigue autorizada y si los datos llegaron al día.
           </p>
         </div>
-        <Surface className="flex flex-col items-center gap-2 p-10 text-center">
+        <Surface className="mb-6 flex flex-col items-center gap-2 p-10 text-center">
           <p className="text-sm leading-6 text-foreground/60">
             Usa el selector de cliente de la barra superior para elegir a
             quién revisar.
@@ -218,6 +259,7 @@ export function HealthView({
             </p>
           )}
         </Surface>
+        <TarjetaResumenSemanal puedeVer={puedeVerResumen} />
       </div>
     );
   }
@@ -226,17 +268,6 @@ export function HealthView({
     <div className="mx-auto w-full max-w-[1400px] p-4 md:p-6">
       <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                checks.length > 0 && critical === 0 && warnings === 0
-                  ? "bg-ok-deep"
-                  : "bg-warn-deep",
-              )}
-            />
-            Salud real de conexiones y frescura
-          </p>
           <h2 className="neo-section-title">
             {portfolio.name}
           </h2>
@@ -257,9 +288,39 @@ export function HealthView({
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
         <p className="text-xs leading-5 text-foreground/60">
           Este sistema no ejecuta cambios automáticos en ninguna cuenta: crear,
-          pausar o activar algo siempre pasa primero por Decisiones, con
-          aprobación explícita.
+          pausar o activar algo siempre lo confirma una persona — desde el
+          Constructor, el botón de una campaña o una propuesta del asistente.
         </p>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <StatCard
+          label={`Inversión · ${monthLabel}`}
+          value={
+            portfolio.currencyTotals.length === 0
+              ? "—"
+              : portfolio.currencyTotals
+                  .map((t) => formatCurrency(t.spendMicros, t.currency))
+                  .join(" · ")
+          }
+          note={
+            portfolio.accountsWithData > 0
+              ? `${portfolio.accountsWithData} de ${portfolio.accountCount} cuentas con datos`
+              : "Sin datos en el periodo"
+          }
+          icon={CircleDollarSign}
+        />
+        <StatCard
+          label={`Clics · ${monthLabel}`}
+          value={portfolio.clicks === null ? "—" : formatInteger(portfolio.clicks)}
+          note={
+            portfolio.impressions === null
+              ? "Sin lectura disponible"
+              : `${formatInteger(portfolio.impressions)} impresiones`
+          }
+          icon={Activity}
+        />
+        <TarjetaResultadosPorObjetivo objetivos={objetivosDelCliente} monthLabel={monthLabel} />
       </div>
 
       {critical > 0 && (
@@ -336,6 +397,20 @@ export function HealthView({
         />
       </div>
 
+      {/* Del cliente elegido, no de toda la cartera — a diferencia del
+          resumen agregado de arriba cuando no hay cliente elegido, acá ya se
+          sabe de quién es la pantalla, así que no tiene sentido mezclarlo
+          con el gasto de otros clientes. */}
+      <TarjetaResumenCliente
+        portfolio={portfolio}
+        periodo={{
+          desde: performance.rangeStart,
+          hasta: performance.rangeEnd,
+          enCurso: performance.rango.enCurso,
+        }}
+        objetivos={objetivosDelCliente}
+      />
+
       <Surface className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-foreground/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -381,7 +456,12 @@ export function HealthView({
           <TableBody>
             {checks.map((check) => (
               <TableRow
-                key={check.account + "-" + check.check}
+                // Antes sin `platform`: Google Ads y Meta Ads de la misma
+                // cuenta compartían key ("Colbún Energía-Autorización e
+                // inventario" x2), React lo advertía en consola como "two
+                // children with the same key" y la tabla quedaba expuesta al
+                // mismo bug de reconciliación que ya se vio en Clientes.
+                key={`${check.account}-${check.platform}-${check.check}`}
                 className="h-16"
               >
                 <TableCell className="pl-4 text-sm font-bold text-foreground">
@@ -437,6 +517,59 @@ export function HealthView({
 }
 
 /**
+ * Reemplaza la tarjeta genérica de "Resultados": una sola cifra mezclando
+ * ventas, leads, tráfico y awareness no dice nada, porque cada objetivo se
+ * mide con una métrica distinta (una compra no es un clic). Una fila por
+ * objetivo que el cliente de verdad corrió en el rango — el que no tuvo
+ * campañas activas simplemente no aparece, no hace falta un caso especial
+ * para ocultarlo.
+ */
+function TarjetaResultadosPorObjetivo({
+  objetivos,
+  monthLabel,
+}: {
+  objetivos: ObjectiveTotal[];
+  monthLabel: string;
+}) {
+  if (objetivos.length === 0) {
+    return (
+      <StatCard
+        label={`Resultados · ${monthLabel}`}
+        value="—"
+        note="Sin campañas con sigla de objetivo activas en el rango"
+        icon={HeartPulse}
+        tone="cyan"
+      />
+    );
+  }
+  return (
+    <Surface className="neo-card-accent p-5">
+      <p className="font-micro text-[0.62rem] text-foreground/45">
+        RESULTADOS POR OBJETIVO · {monthLabel.toUpperCase()}
+      </p>
+      <div className="mt-3 space-y-2.5">
+        {objetivos.map((obj) => (
+          <div
+            key={obj.objetivo}
+            className="flex items-center justify-between gap-3"
+          >
+            <span className="min-w-0 truncate text-xs font-semibold text-foreground/70">
+              {obj.label}
+            </span>
+            <span className="metric-number shrink-0 text-sm font-extrabold text-foreground">
+              {obj.result === null ? "—" : formatConversiones(obj.result)}
+              <span className="ml-1.5 text-[0.62rem] font-normal text-foreground/40">
+                {obj.resultLabel.toLowerCase()}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Surface>
+  );
+}
+
+/**
  * Cómo se nombra el periodo en pantalla.
  *
  * Un rango de mes se nombra por su mes —"septiembre de 2026" dice más que
@@ -452,6 +585,30 @@ function etiquetaPeriodo(performance: PerformanceSnapshot): string {
   return performance.rango.label;
 }
 
+function formatCurrency(valorMicros: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(valorMicros / 1_000_000);
+  } catch {
+    return `${currency} ${Math.round(valorMicros / 1_000_000).toLocaleString("es-CL")}`;
+  }
+}
+
+function formatInteger(valor: number): string {
+  return valor.toLocaleString("es-CL");
+}
+
+/** Las conversiones pueden venir fraccionadas (atribución repartida entre
+ * varios puntos de contacto) — "12.9983" se lee como un error, no precisión. */
+function formatConversiones(valor: number): string {
+  return valor % 1 === 0
+    ? formatInteger(valor)
+    : valor.toLocaleString("es-CL", { maximumFractionDigits: 1 });
+}
+
 function formatMonth(value: string): string {
   return new Intl.DateTimeFormat("es-CL", {
     month: "long",
@@ -459,4 +616,3 @@ function formatMonth(value: string): string {
     timeZone: "UTC",
   }).format(new Date(`${value}T00:00:00Z`));
 }
-

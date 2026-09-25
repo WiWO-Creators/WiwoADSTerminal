@@ -6,6 +6,8 @@ import {
   ArrowRight,
   ArrowUp,
   Check,
+  Maximize2,
+  Minimize2,
   Paperclip,
   RotateCcw,
   Square,
@@ -13,6 +15,8 @@ import {
 } from "lucide-react";
 
 import type { Propuesta } from "@/lib/asistente";
+import { OBJECTIVES, type SemillaDeCampana } from "@/lib/constructor";
+import { PAISES_SEGMENTABLES } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import { ThinkingOrb } from "./ui";
 
@@ -41,6 +45,7 @@ const SUGERENCIAS = [
   "¿Qué campañas están rindiendo peor este periodo?",
   "Recomiéndame qué pausar y por qué",
   "¿Cómo va este cliente en resumen?",
+  "Recomiéndame una campaña de tráfico en Google y Meta, presupuesto diario de $5.000, para promocionar nuestros planes, dirigida a Chile. Déjame el Constructor listo.",
 ];
 
 function nuevoId() {
@@ -57,9 +62,10 @@ function conNegritas(texto: string): React.ReactNode[] {
 /**
  * El asistente de IA: un orbe flotante que abre un chat con Claude.
  *
- * Lee campañas y analiza CSV por su cuenta, pero nunca escribe en una
- * plataforma: sus cambios llegan como tarjetas con un botón, y la persona
- * decide (ver `lib/asistente.ts`).
+ * Lee campañas y analiza CSV por su cuenta. Nunca escribe directo en ninguna
+ * plataforma: para pausar o activar algo que ya existe, o para una campaña
+ * nueva, siempre deja una tarjeta con un botón y la persona decide — la
+ * campaña nueva se revisa y se publica desde el Constructor, no antes.
  */
 export function AsistenteFlotante({
   clienteId,
@@ -73,10 +79,11 @@ export function AsistenteFlotante({
   clienteNombre: string | null;
   rango: string;
   puedeAprobar: boolean;
-  onAbrirConstructor: (portfolioId: string) => void;
+  onAbrirConstructor: (portfolioId: string, semilla: SemillaDeCampana) => void;
   onCambioAplicado: () => void;
 }) {
   const [abierto, setAbierto] = useState(false);
+  const [grande, setGrande] = useState(false);
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [texto, setTexto] = useState("");
   const [csv, setCsv] = useState<{ nombre: string; texto: string } | null>(null);
@@ -86,6 +93,17 @@ export function AsistenteFlotante({
   const cancelar = useRef<AbortController | null>(null);
   const fondo = useRef<HTMLDivElement>(null);
   const archivo = useRef<HTMLInputElement>(null);
+  const areaDeTexto = useRef<HTMLTextAreaElement>(null);
+
+  // Crece con el contenido en vez de quedar en una sola línea siempre —
+  // escribir un pedido largo en una caja de una línea obligaba a desplazarse
+  // por dentro de la caja para verlo, difícil de editar.
+  useEffect(() => {
+    const area = areaDeTexto.current;
+    if (!area) return;
+    area.style.height = "auto";
+    area.style.height = `${Math.min(area.scrollHeight, grande ? 240 : 112)}px`;
+  }, [texto, grande]);
 
   useEffect(() => {
     fondo.current?.scrollIntoView({ block: "end" });
@@ -259,11 +277,16 @@ export function AsistenteFlotante({
         <section
           role="dialog"
           aria-label="Asistente de IA"
-          className="fixed right-4 bottom-24 z-40 flex h-[min(660px,calc(100svh-7.5rem))] w-[min(430px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)]"
+          className={cn(
+            "fixed right-4 bottom-24 z-40 flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)] transition-[height,width] duration-150",
+            grande
+              ? "h-[min(880px,calc(100svh-6rem))] w-[min(680px,calc(100vw-2rem))]"
+              : "h-[min(660px,calc(100svh-7.5rem))] w-[min(430px,calc(100vw-2rem))]",
+          )}
         >
           <header className="flex items-center gap-3 border-b border-border px-4 py-3">
             <div className="min-w-0 flex-1">
-              <h2 className="text-sm font-bold text-foreground">Asistente</h2>
+              <h2 className="text-sm font-bold text-foreground">Thinking Orb</h2>
               <p className="truncate text-xs text-muted-foreground">
                 {clienteNombre ? `Cliente: ${clienteNombre}` : "Todos los clientes"}
               </p>
@@ -279,6 +302,15 @@ export function AsistenteFlotante({
                 <RotateCcw className="size-4" />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setGrande((v) => !v)}
+              aria-label={grande ? "Achicar el chat" : "Agrandar el chat"}
+              title={grande ? "Achicar el chat" : "Agrandar el chat"}
+              className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {grande ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </button>
             <button
               type="button"
               onClick={() => setAbierto(false)}
@@ -342,7 +374,24 @@ export function AsistenteFlotante({
                     onAbrirConstructor={() => {
                       if (p.tipo !== "constructor") return;
                       setAbierto(false);
-                      onAbrirConstructor(p.clienteId);
+                      onAbrirConstructor(p.clienteId, {
+                        propuestaId: p.id,
+                        name: p.nombreSugerido,
+                        objective: p.objetivo,
+                        platforms: p.plataformas,
+                        details: p.resumen,
+                        targetCountries: p.paises,
+                        targetPlaces: p.targetPlaces.length > 0 ? p.targetPlaces : undefined,
+                        targetLanguages:
+                          p.targetLanguages.length > 0 ? p.targetLanguages : undefined,
+                        landingUrl: p.landingUrl || undefined,
+                        headlines: p.headlines.length > 0 ? p.headlines : undefined,
+                        descriptions: p.descriptions.length > 0 ? p.descriptions : undefined,
+                        keywords: p.keywords.length > 0 ? p.keywords : undefined,
+                        metaMessage: p.metaMessage || undefined,
+                        metaHeadline: p.metaHeadline || undefined,
+                        metaDescription: p.metaDescription || undefined,
+                      });
                     }}
                   />
                 ))}
@@ -352,7 +401,7 @@ export function AsistenteFlotante({
             {(esperandoTexto || herramienta) && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <ThinkingOrb size="sm" state="generating" label="" />
-                {herramienta ?? "Pensando…"}
+                {herramienta ?? "Un momento…"}
               </div>
             )}
             {errorDeCarga && (
@@ -403,6 +452,7 @@ export function AsistenteFlotante({
                 <Paperclip className="size-4" />
               </button>
               <textarea
+                ref={areaDeTexto}
                 value={texto}
                 onChange={(evento) => setTexto(evento.target.value)}
                 onKeyDown={(evento) => {
@@ -413,7 +463,7 @@ export function AsistenteFlotante({
                 }}
                 rows={1}
                 placeholder={csv ? "¿Qué quieres saber de este archivo?" : "Escribe tu pregunta…"}
-                className="max-h-28 min-h-10 flex-1 resize-none rounded-2xl border border-border bg-field px-3.5 py-2.5 text-sm text-foreground outline-none focus:border-brand"
+                className="min-h-10 flex-1 resize-none overflow-y-auto rounded-2xl border border-border bg-field px-3.5 py-2.5 text-sm text-foreground outline-none focus:border-brand"
               />
               {cargando ? (
                 <button
@@ -473,13 +523,61 @@ function TarjetaDePropuesta({
   onAbrirConstructor: () => void;
 }) {
   if (propuesta.tipo === "constructor") {
+    const paisesLabel = propuesta.paises
+      .map((iso2) => PAISES_SEGMENTABLES.find((p) => p.iso2 === iso2)?.label ?? iso2)
+      .join(", ");
     return (
       <div className="w-full rounded-xl border border-border bg-card p-3">
-        <p className="font-micro text-[0.6rem] text-muted-foreground">Campaña nueva sugerida</p>
-        <p className="mt-1 text-sm font-semibold text-foreground">{propuesta.clienteNombre}</p>
-        <p className="mt-1 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+        <p className="font-micro text-[0.6rem] text-muted-foreground">
+          Campaña nueva sugerida · {propuesta.clienteNombre}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">
+          {propuesta.nombreSugerido || "Sin nombre"}
+        </p>
+        <p className="mt-1 flex flex-wrap gap-1.5 text-[0.68rem]">
+          <span className="rounded-full bg-brand/10 px-2 py-0.5 font-semibold text-brand">
+            {OBJECTIVES[propuesta.objetivo]?.label ?? propuesta.objetivo}
+          </span>
+          {propuesta.plataformas.map((p) => (
+            <span key={p} className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground">
+              {p === "google" ? "Google Ads" : "Meta Ads"}
+            </span>
+          ))}
+          {paisesLabel && (
+            <span className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground">
+              {paisesLabel}
+            </span>
+          )}
+          {propuesta.targetPlaces.map((lugar) => (
+            <span
+              key={lugar.id}
+              className="rounded-full bg-field px-2 py-0.5 font-semibold text-muted-foreground"
+            >
+              {lugar.nombre}
+            </span>
+          ))}
+        </p>
+        <p className="mt-2 text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
           {propuesta.resumen}
         </p>
+        {propuesta.headlines.length > 0 && (
+          <p className="mt-2 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Títulos sugeridos: </span>
+            {propuesta.headlines.join(" · ")}
+          </p>
+        )}
+        {propuesta.keywords.length > 0 && (
+          <p className="mt-1 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Palabras clave: </span>
+            {propuesta.keywords.join(", ")}
+          </p>
+        )}
+        {propuesta.metaMessage && (
+          <p className="mt-1 text-[0.68rem] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground/70">Texto de Meta: </span>
+            {propuesta.metaMessage}
+          </p>
+        )}
         <button
           type="button"
           onClick={onAbrirConstructor}

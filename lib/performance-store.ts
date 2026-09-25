@@ -18,13 +18,14 @@ import {
   type PortfolioSummary,
 } from "@/lib/portafolios";
 import { accountIndex } from "@/lib/portafolios-store";
-import { valorPorObjetivo, type ConversionBreakdown } from "@/lib/conversiones";
+import { publicacionesPendientes } from "@/lib/publicaciones-pendientes";
+import type { ConversionBreakdown } from "@/lib/conversiones";
 import {
   objetivoDeNombre,
   objetivoDePlataforma,
-  OBJETIVO_LABELS,
-  RESULTADO_POR_OBJETIVO,
+  summarizeObjectives,
   type Objetivo,
+  type ObjectiveTotal,
 } from "@/lib/objetivos";
 import {
   fetchGoogleConversionBreakdown,
@@ -54,6 +55,13 @@ export type PerformanceAccountSummary = {
   clicks: number | null;
   conversions: number | null;
   conversionValueMicros: number | null;
+  /**
+   * Conversaciones de mensajería iniciadas (Meta, ventana de 7 días —
+   * `actions_onsite_conversion_messaging_conversation_started_7d`). Es un
+   * conteo, no el contenido: cuántas personas escribieron, no qué dijeron ni
+   * qué se les contestó — Windsor no expone la conversación en sí.
+   */
+  messagingConversations: number | null;
   dataFrom: string | null;
   dataThrough: string | null;
   lastSyncedAt: number | null;
@@ -101,24 +109,7 @@ export type CampaignSummary = WindsorCampaign & {
   conversionBreakdown: ConversionBreakdown | null;
 };
 
-/**
- * Totales de una familia de objetivo.
- *
- * Cada objetivo se mide con su propia métrica: en awareness la interacción, en
- * leads el formulario, en ventas la compra. Reportar una sola cifra de
- * "resultados" para todos mezcla cosas que no se comparan entre sí.
- */
-export type ObjectiveTotal = {
-  objetivo: Objetivo;
-  label: string;
-  resultLabel: string;
-  campaigns: number;
-  currencyTotals: CurrencyTotal[];
-  impressions: number;
-  clicks: number;
-  /** La métrica propia del objetivo. null: no se mide con conversiones. */
-  result: number | null;
-};
+export type { ObjectiveTotal };
 
 /** Fila de anuncio con su cuenta resuelta, para filtrar por portafolio. */
 export type AdSummary = WindsorAd & {
@@ -406,6 +397,9 @@ function toAccountSummary(row: PerformanceRow): PerformanceAccountSummary {
           : null
       : null,
     conversionBreakdown: null,
+    // Solo Windsor trae conversaciones de mensajería; el camino OAuth de
+    // respaldo (esta función) no lo pide todavía.
+    messagingConversations: null,
     conversionValueMicros: hasData
       ? row.provider === "google"
         ? Number(row.conversion_value_micros ?? 0)
@@ -508,6 +502,9 @@ async function windsorSnapshot(
         )
           ? null
           : daily.reduce((sum, row) => sum + (row.conversionValueMicros ?? 0), 0),
+        messagingConversations: daily.some((row) => row.conversations === null)
+          ? null
+          : daily.reduce((sum, row) => sum + (row.conversations ?? 0), 0),
         dataFrom: dates.at(0) ?? null,
         dataThrough: dates.at(-1) ?? null,
         lastSyncedAt: fetchedAt,
@@ -580,6 +577,7 @@ async function windsorSnapshot(
       clicks: 0,
       conversions: null,
       conversionValueMicros: null,
+      messagingConversations: null,
       dataFrom: null,
       dataThrough: null,
       lastSyncedAt: fetchedAt,
@@ -592,11 +590,55 @@ async function windsorSnapshot(
   const visibles = allowedAccounts(accounts, actor, index);
   const clavesVisibles = new Set(visibles.map((account) => account.id));
 
+  // Cliente con una única cuenta por plataforma: ahí (y solo ahí) se puede
+  // ofrecer una campaña recién publicada que Windsor todavía no sincronizó,
+  // sin arriesgarse a adivinar a cuál cuenta pertenece. Ver
+  // `campanasPendientesDeSincronizar` para el porqué completo.
+  const cuentaUnicaPorPortfolio = new Map<
+    string,
+    Array<{ provider: Platform; accountId: string; accountName: string }>
+  >();
+  {
+    const porPortfolio = new Map<
+      string,
+      Map<Platform, Array<{ provider: Platform; accountId: string; accountName: string }>>
+    >();
+    for (const cuenta of visibles) {
+      const portfolioId = portfolioIdFor(cuenta, index);
+      const externalId = cuenta.id.split(":").at(-1) ?? cuenta.id;
+      const porProvider = porPortfolio.get(portfolioId) ?? new Map();
+      const lista = porProvider.get(cuenta.provider) ?? [];
+      lista.push({ provider: cuenta.provider, accountId: externalId, accountName: cuenta.name });
+      porProvider.set(cuenta.provider, lista);
+      porPortfolio.set(portfolioId, porProvider);
+    }
+    for (const [portfolioId, porProvider] of porPortfolio) {
+      const unicas = [...porProvider.values()]
+        .filter((lista) => lista.length === 1)
+        .map((lista) => lista[0]);
+      if (unicas.length > 0) cuentaUnicaPorPortfolio.set(portfolioId, unicas);
+    }
+  }
+
+  const pendientes = await publicacionesPendientes(
+    new Set(
+      campaignsResult.status === "fulfilled"
+        ? campaignsResult.value.flatMap((c) => (c.campaignId ? [c.campaignId] : []))
+        : [],
+    ),
+    new Set(
+      adsResult.status === "fulfilled"
+        ? adsResult.value.flatMap((a) => (a.adId ? [a.adId] : []))
+        : [],
+    ),
+    cuentaUnicaPorPortfolio,
+  );
+
   // Las campañas son un pedido aparte y agregado; si falla, el tablero sigue
   // mostrando el nivel de cuenta en vez de caerse entero.
   let campaigns: CampaignSummary[] = [];
   if (options.incluirCampanas && campaignsResult.status === "fulfilled") {
-    campaigns = campaignsResult.value
+    campaigns = [...campaignsResult.value, ...pendientes.campanas]
       .map((row) => {
         const porSigla = objetivoDeNombre(row.name);
         const deducido = porSigla
@@ -626,7 +668,7 @@ async function windsorSnapshot(
   // resto del tablero sigue funcionando sin ese detalle.
   let ads: AdSummary[] = [];
   if (options.incluirAnuncios && adsResult.status === "fulfilled") {
-    ads = adsResult.value
+    ads = [...adsResult.value, ...pendientes.anuncios]
       .map((row) => ({
         ...row,
         accountKey: `windsor:${row.provider}:${row.accountId}`,
@@ -658,77 +700,3 @@ function allowedAccounts(
   );
 }
 
-/**
- * Agrupa las campañas por objetivo y calcula el resultado propio de cada uno.
- *
- * Meta reporta la métrica directamente; Google la obtiene de las categorías de
- * conversión que corresponden a ese objetivo. Las campañas sin sigla quedan
- * fuera: clasificarlas a ciegas las pondría en la familia equivocada.
- */
-function summarizeObjectives(campaigns: CampaignSummary[]): ObjectiveTotal[] {
-  const grupos = new Map<Objetivo, CampaignSummary[]>();
-  for (const campaign of campaigns) {
-    if (!campaign.objetivo) continue;
-    // Las campañas que existen pero no entregaron en el rango quedan fuera de
-    // este resumen: es el resumen del periodo. Contarlas diría "12 campañas de
-    // ventas" cuando solo dos estuvieron al aire. En la tabla sí aparecen.
-    if (!campaign.conActividad) continue;
-    grupos.set(campaign.objetivo, [
-      ...(grupos.get(campaign.objetivo) ?? []),
-      campaign,
-    ]);
-  }
-
-  return [...grupos.entries()]
-    .map(([objetivo, items]) => {
-      const totals = new Map<string, CurrencyTotal>();
-      for (const item of items) {
-        const currency = item.currency ?? "N/D";
-        const actual = totals.get(currency) ?? {
-          currency,
-          spendMicros: 0,
-          conversionValueMicros: null,
-        };
-        actual.spendMicros += item.spendMicros;
-        totals.set(currency, actual);
-      }
-
-      let result: number | null = null;
-      for (const item of items) {
-        const valor =
-          item.provider === "google"
-            ? valorPorObjetivo(item.conversionBreakdown, objetivo)
-            : metaResult(item, objetivo);
-        if (valor === null) continue;
-        result = (result ?? 0) + valor;
-      }
-
-      return {
-        objetivo,
-        label: OBJETIVO_LABELS[objetivo],
-        resultLabel: RESULTADO_POR_OBJETIVO[objetivo],
-        campaigns: items.length,
-        currencyTotals: [...totals.values()].sort((a, b) =>
-          a.currency.localeCompare(b.currency),
-        ),
-        impressions: items.reduce((sum, i) => sum + i.impressions, 0),
-        clicks: items.reduce((sum, i) => sum + i.clicks, 0),
-        result: result === null ? null : Math.round(result * 100) / 100,
-      };
-    })
-    .sort((a, b) => b.campaigns - a.campaigns);
-}
-
-/** La métrica que Meta usa como resultado en cada familia. */
-function metaResult(
-  campaign: CampaignSummary,
-  objetivo: Objetivo,
-): number | null {
-  if (objetivo === "AE") return campaign.engagement;
-  if (objetivo === "TRF") return campaign.linkClicks;
-  if (objetivo === "LDS") return campaign.leads;
-  if (objetivo === "VTA") return campaign.purchases;
-  // Otras conversiones: Meta las reporta como conversaciones iniciadas, un
-  // campo que solo viene en el corte diario, no en el de campaña.
-  return null;
-}

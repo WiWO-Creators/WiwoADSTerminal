@@ -28,3 +28,23 @@ export function unidadesMenoresMeta(currency: string | null | undefined): number
     ? 1
     : 100;
 }
+
+/**
+ * Formatea un monto en micros como moneda legible — compartida entre
+ * `lib/reglas.ts` y `lib/alertas.ts`, que antes tenían cada una su propia
+ * copia idéntica sin ningún comentario que justificara duplicarla (a
+ * diferencia de los umbrales de esos mismos archivos, que sí documentan por
+ * qué se repiten a propósito).
+ */
+export function moneda(valorMicros: number, currency: string | null): string {
+  try {
+    return new Intl.NumberFormat("es-CL", {
+      style: "currency",
+      currency: currency ?? "CLP",
+      maximumFractionDigits: 0,
+    }).format(valorMicros / 1_000_000);
+  } catch {
+    // Un código de moneda que Intl no reconoce no debe tumbar la evaluación.
+    return `${(valorMicros / 1_000_000).toLocaleString("es-CL")} ${currency ?? ""}`;
+  }
+}

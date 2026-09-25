@@ -1,0 +1,14 @@
+-- Píxel de Meta por cuenta, no por cliente.
+--
+-- Verificado contra `list_actions` real de Windsor (create_adset, connector
+-- "facebook"): optimizar a conversiones fuera de Meta (leads, ventas) exige
+-- `promoted_object` con `pixel_id` — sin él, Meta rechaza la creación del
+-- conjunto de anuncios. WiWO.ADS no tenía dónde guardar ese dato: toda
+-- campaña de leads/ventas con destino sitio web creaba una campaña sin
+-- conjunto ni anuncio, confirmado en la cuenta real de Colbún (2026-09-23,
+-- "Plan Hogar").
+--
+-- Por cuenta, igual que `page_id` (0008): SQM y ALO Group ya prueban que un
+-- cliente puede facturar Meta desde varias cuentas, cada una con su propio
+-- píxel.
+ALTER TABLE `portfolio_accounts` ADD `pixel_id` text;

@@ -259,6 +259,35 @@ export const accountMetricsDaily = sqliteTable(
   ],
 );
 
+/**
+ * Regiones/estados/provincias y ciudades/comunas reales de Google Ads, para
+ * buscarlas al segmentar una campaña — misma fuente oficial que
+ * `GOOGLE_GEO_TARGET_IDS` (developers.google.com/google-ads/api/data/geo),
+ * pero son demasiadas filas (decenas de miles) para vivir como constante en
+ * el código como los 219 países. Solo Google usa estos ids: Meta no expone,
+ * a través de Windsor, una forma de buscar sus propios ids de región/ciudad
+ * (son un sistema aparte, no los mismos números), así que un lugar elegido
+ * acá segmenta la campaña de Google pero no la de Meta.
+ */
+export const geoTargets = sqliteTable(
+  "geo_targets",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    canonicalName: text("canonical_name").notNull(),
+    countryCode: text("country_code").notNull(),
+    targetType: text("target_type").notNull(),
+    tier: text("tier").notNull(),
+  },
+  (table) => [
+    index("idx_geo_targets_tier_country_name").on(
+      table.tier,
+      table.countryCode,
+      table.name,
+    ),
+  ],
+);
+
 export const metricSyncRuns = sqliteTable(
   "metric_sync_runs",
   {

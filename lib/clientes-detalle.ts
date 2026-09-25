@@ -19,6 +19,14 @@ export type CuentaDetalle = {
   provider: string;
   currency: string | null;
   pageId: string | null;
+  /**
+   * Píxeles de Meta de esta cuenta, para que el conjunto de anuncios pueda
+   * optimizar a conversiones (leads, ventas) en vez de solo a clics. Puede
+   * haber más de uno (ver `portafolios-store.ts`) — sin fallback a nivel
+   * cliente, a diferencia de `pageId`, porque nunca existió un campo así en
+   * `portfolios`.
+   */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   countries: string[];
   /** false: la cuenta existe, pero no reportó nada en el periodo actual. */
   conDatos: boolean;
@@ -122,6 +130,7 @@ export async function detalleClientes(
       const pageId =
         portfolio.accountPages[externalId] ??
         (unicaDeSuProveedor ? portfolio.pageId : null);
+      const pixels = portfolio.accountPixels[externalId] ?? [];
       const countriesPropias = portfolio.accountCountries[externalId] ?? [];
       const countries =
         countriesPropias.length > 0
@@ -137,6 +146,7 @@ export async function detalleClientes(
           provider: proveedor,
           conDatos: true,
           pageId,
+          pixels,
           countries,
         };
       }
@@ -148,6 +158,7 @@ export async function detalleClientes(
           provider: proveedor,
           conDatos: false,
           pageId,
+          pixels,
           countries,
         };
       }
@@ -162,6 +173,7 @@ export async function detalleClientes(
         currency: null,
         conDatos: false,
         pageId,
+        pixels,
         countries,
       };
     }),

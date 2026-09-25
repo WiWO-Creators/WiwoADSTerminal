@@ -66,21 +66,25 @@ lateral tiene dos grupos:
 **Operación** (trabajo de campaña, día a día):
 | Sección | Qué hace |
 |---|---|
-| **Clientes** | Cartera de clientes, cuentas conectadas por cliente, tabla de campañas/conjuntos/anuncios con pausar/activar y gestión (ver abajo) |
-| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
-| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios) |
-| **Dashboard C-Level** | Lectura ejecutiva: inversión, resultados, estado de cartera y calidad del dato |
+| **Cliente** | Cartera de clientes para elegir uno; adentro, ficha, cuentas conectadas y tabla de campañas/conjuntos/anuncios de ese cliente, con pausar/activar y gestión (ver abajo) |
+| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, región/ciudad por búsqueda, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
+| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas —recordadas en el navegador—, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios ya leído) |
+| **Dashboard C-Level** | Lectura ejecutiva: inversión, clics, resultados **desglosados por objetivo real** (una cifra de "conversiones" mezclando ventas con awareness no dice nada — cada [AE]/[VTA]/[LDS]/[TRF]/[OCV] se mide con su propia métrica), estado de cartera y calidad del dato |
 
 **Gestión** (administración de cuenta, no campaña):
 | Sección | Qué hace |
 |---|---|
 | **Auditoría** | Bitácora de cada intento real de publicación (éxito o error), con el detalle de cada paso |
-| **Cuentas** | Conexión de cuentas publicitarias por cliente |
-| **Ajustes** | Preferencias personales: periodo por defecto, tema |
+| **Cuentas** | Conexión de cuentas publicitarias por cliente. Incluye una tabla "Estado por cliente y plataforma": un cliente puede estar bien en Google y con problemas en Meta a la vez, y esto lo muestra por separado en vez de mezclar todos los clientes de una plataforma en un solo estado |
 | **Equipo** (engranaje junto a tu ficha) | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
 
 Transversal a todo:
 
+- **Puerta de cliente al entrar**: la primera vez en cada sesión de navegador,
+  antes de ver nada más, hay que elegir un cliente (como el selector de
+  cuenta de Google Ads Manager). Después de elegir, el resto de la app sigue
+  igual — incluido poder volver a "Todos los clientes" desde el selector del
+  encabezado.
 - **Selector de cliente** solo en el encabezado: cambiar ahí cambia el cliente
   activo en toda la app y **no cambia de pantalla**. Ninguna vista debería
   tener su propio selector; si ves uno, es un bug.
@@ -158,6 +162,8 @@ lib/
   windsor.ts            TODA la lectura y escritura contra Windsor.ai
   constructor.ts        arma el plan de una campaña (buildPlan) sin ejecutarlo
   geo.ts                países segmentables + su id de Google verificado
+  geo-targets-store.ts  búsqueda de región/ciudad reales (tabla geo_targets)
+  objetivos.ts          taxonomía [AE]/[VTA]/[LDS]/[TRF]/[OCV] + resultado por objetivo
   permisos.ts           roles y capacidades
   reglas.ts             motor de recomendaciones (fase 1, sin autonomía)
   asistente.ts          agente de IA: herramientas de lectura y propuestas
@@ -189,10 +195,19 @@ no tener que redescubrirlos:
   (app propia en Meta for Developers, credenciales nuevas, revisión de
   permisos `ads_management`) — una decisión de infraestructura distinta a
   todo lo que corre hoy sobre Windsor.
-- **Segmentación por ciudad o región** (Google y Meta) no está disponible:
-  las dos exigen buscar un id mediante un endpoint de búsqueda geográfica
-  que Windsor no expone. Sí está disponible por **país** y por **radio**
-  (círculo en el mapa, con coordenadas crudas — eso no exige buscar nada).
+- **Segmentación por región/ciudad**: para **Google** usa el id real del
+  lugar (tabla `geo_targets` en D1, sembrada desde la misma fuente oficial
+  que los 219 países — `drizzle/0014_geo_targets.sql` — buscable desde el
+  Constructor, pestaña "Región / Ciudad"). Windsor no expone, para el
+  conector `facebook`, una forma de buscar el id de región/ciudad propio de
+  Meta (es un sistema de ids distinto al de Google) — para **Meta**, el
+  lugar se geocodifica contra Nominatim/OpenStreetMap (`lib/geocoding.ts`,
+  con caché en D1) y se segmenta con un círculo real alrededor de su centro
+  (`geo_locations.custom_locations`), acotado a 1-80 km. Dos límites reales,
+  no de la interfaz: si Nominatim no ubica el lugar, ese lugar solo
+  segmenta a Google (se avisa en el Constructor); y una región más grande
+  que 80 km de radio queda cubierta solo alrededor del centro, no en toda
+  su área.
 - **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
   las que ya existen (eso todavía se hace en Google Ads directamente).
 - **Borrar campañas**: no existe esa acción en Windsor; solo se pausan. El
@@ -203,6 +218,14 @@ no tener que redescubrirlos:
 - **Edición de creativo de un anuncio ya publicado**: no implementada
   todavía, aunque Windsor sí expone la acción (`update_ad_creative` en
   Meta) — quedó fuera por alcance, no por imposibilidad.
+- **Tipos de campaña de Google**: solo Búsqueda y Display. La acción real
+  de Windsor (`create_campaign`) solo acepta esos dos valores de
+  `channel_type` — no existe una acción para crear Performance Max,
+  Shopping, Video ni Demand Gen. No es una limitación de la interfaz: es
+  que Windsor no tiene la acción, así que no hay nada real que ofrecer ahí
+  sin inventarlo. En Meta sí se puede elegir el objetivo real (ODAX)
+  aparte del objetivo de negocio — ver "Objetivo de Meta" en el paso de
+  Campaña del Constructor.
 
 ## Seguir leyendo
 

@@ -42,26 +42,36 @@ export type Publicacion = {
 type Entrada = { posts: Publicacion[]; aviso: string | null; ts: number };
 
 /**
- * Lo ya traído vive fuera del componente: cerrar y volver a abrir el selector
- * (o cambiar de filtro) muestra el contenido al instante en vez de repetir la
- * consulta. Se trae siempre el último año completo y los filtros de fecha se
- * aplican acá, sin volver a pedir nada.
+ * Lo ya traído vive fuera del componente: cerrar y volver a abrir el
+ * selector con el mismo periodo muestra el contenido al instante en vez de
+ * repetir la consulta. Antes se traía siempre el último año completo de
+ * entrada, filtrando la fecha después en el cliente — pensado para no
+ * volver a pedir nada al cambiar de filtro, pero en la práctica era la
+ * causa real de la demora y de los timeouts contra Windsor ("Windsor falló
+ * tras 3 intentos en facebook_organic": el barrido de un año entero de
+ * publicaciones tarda mucho más que el de los 90 días que se ven por
+ * defecto). Ahora se pide justo el periodo elegido — cambiar de filtro sí
+ * repite la consulta, pero cada una es varias veces más chica.
  */
 const cache = new Map<string, Entrada>();
 const enVuelo = new Map<string, Promise<Entrada>>();
 const VIGENCIA_MS = 10 * 60 * 1000;
-const DIAS_DE_HISTORIAL = 365;
 
-function traer(portfolioId: string, accountId: string): Promise<Entrada> {
-  const clave = `${portfolioId}:${accountId}`;
+function claveDe(portfolioId: string, accountId: string, desde: string, hasta: string): string {
+  return `${portfolioId}:${accountId}:${desde}:${hasta}`;
+}
+
+function traer(
+  portfolioId: string,
+  accountId: string,
+  desde: string,
+  hasta: string,
+): Promise<Entrada> {
+  const clave = claveDe(portfolioId, accountId, desde, hasta);
   const pendiente = enVuelo.get(clave);
   if (pendiente) return pendiente;
 
   const promesa = (async () => {
-    const hasta = new Date().toISOString().slice(0, 10);
-    const desde = new Date(Date.now() - DIAS_DE_HISTORIAL * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
     const params = new URLSearchParams({ portfolioId, accountId, desde, hasta });
     const response = await fetch(`/api/creatividades?${params}`, {
       cache: "no-store",
@@ -87,11 +97,14 @@ function traer(portfolioId: string, accountId: string): Promise<Entrada> {
   return promesa;
 }
 
-/** Pide el contenido en segundo plano, para que el selector ya lo tenga al abrirse. */
+/** Pide el contenido en segundo plano, para que el selector ya lo tenga al
+ * abrirse — mismo periodo por defecto que usa el diálogo (`rango` más abajo,
+ * resuelto con la misma función para que la clave de caché coincida). */
 export function precargarPublicaciones(portfolioId: string, accountId: string) {
-  const entrada = cache.get(`${portfolioId}:${accountId}`);
+  const { desde, hasta } = resolverRango("ultimos_90", new Date());
+  const entrada = cache.get(claveDe(portfolioId, accountId, desde, hasta));
   if (entrada && Date.now() - entrada.ts < VIGENCIA_MS) return;
-  void traer(portfolioId, accountId).catch(() => {
+  void traer(portfolioId, accountId, desde, hasta).catch(() => {
     // Precargar es un adelanto: si falla, el selector vuelve a intentarlo al abrirse.
   });
 }
@@ -148,7 +161,6 @@ export function SelectorDePublicaciones({
   nombreCuenta: string;
   onSeleccionar: (post: Publicacion) => void;
 }) {
-  const clave = `${portfolioId}:${accountId}`;
   const [entrada, setEntrada] = useState<Entrada | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [plataforma, setPlataforma] = useState<"todas" | Publicacion["platform"]>("todas");
@@ -158,17 +170,20 @@ export function SelectorDePublicaciones({
   const [visibles, setVisibles] = useState(LOTE);
   const areaRef = useRef<HTMLDivElement>(null);
 
+  const periodo = resolverRango(rango, new Date());
+  const clave = claveDe(portfolioId, accountId, periodo.desde, periodo.hasta);
+
   useEffect(() => {
     if (!open) return;
     let cancelado = false;
     // Lo que ya está en memoria se muestra al instante; si además está
     // viejo, se refresca por detrás sin borrar lo que se ve.
     const guardado = cache.get(clave) ?? null;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza con la caché externa al abrir
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza con la caché externa al abrir o al cambiar de periodo
     setEntrada(guardado);
     setError(null);
     if (guardado && Date.now() - guardado.ts < VIGENCIA_MS) return;
-    traer(portfolioId, accountId)
+    traer(portfolioId, accountId, periodo.desde, periodo.hasta)
       .then((nueva) => {
         if (!cancelado) setEntrada(nueva);
       })
@@ -180,9 +195,7 @@ export function SelectorDePublicaciones({
     return () => {
       cancelado = true;
     };
-  }, [open, clave, portfolioId, accountId]);
-
-  const periodo = resolverRango(rango, new Date());
+  }, [open, clave, portfolioId, accountId, periodo.desde, periodo.hasta]);
 
   const filtrados = useMemo(() => {
     const posts = entrada?.posts ?? [];
@@ -228,6 +241,16 @@ export function SelectorDePublicaciones({
   }, [open, visibles, filtrados.length]);
 
   const cargando = !entrada && !error;
+  const [demorando, setDemorando] = useState(false);
+  useEffect(() => {
+    if (!cargando) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a la vista normal apenas termina de cargar
+      setDemorando(false);
+      return;
+    }
+    const aviso = setTimeout(() => setDemorando(true), 5000);
+    return () => clearTimeout(aviso);
+  }, [cargando]);
   const conteo = (plataformaId: Publicacion["platform"]) =>
     (entrada?.posts ?? []).filter((post) => post.platform === plataformaId).length;
 
@@ -346,9 +369,17 @@ export function SelectorDePublicaciones({
         >
           {cargando ? (
             <div>
-              <div className="flex items-center justify-center gap-2 pb-3 text-sm text-foreground/55">
-                <ThinkingOrb size="md" state="thinking" label="" />
-                Buscando publicaciones…
+              <div className="flex flex-col items-center justify-center gap-1.5 pb-3 text-center">
+                <div className="flex items-center gap-2 text-sm text-foreground/55">
+                  <ThinkingOrb size="md" state="thinking" label="" />
+                  Buscando publicaciones…
+                </div>
+                {demorando && (
+                  <p className="text-xs text-foreground/40">
+                    La primera vez que se lee esta cuenta puede tardar más de
+                    un minuto — las siguientes son casi al instante.
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {Array.from({ length: 8 }, (_, indice) => (

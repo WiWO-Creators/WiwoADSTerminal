@@ -73,5 +73,6 @@ declare module "cloudflare:workers" {
     META_APP_ID?: string;
     META_APP_SECRET?: string;
     META_GRAPH_VERSION?: string;
+    GEMINI_API_KEY?: string;
   };
 }

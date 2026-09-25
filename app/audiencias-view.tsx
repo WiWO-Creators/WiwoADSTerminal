@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Users } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -88,20 +87,20 @@ export function AudienciasView({
   puedeAprobar: boolean;
 }) {
   const [pestana, setPestana] = useState<"mensajeria" | "listas">("mensajeria");
-  const cuentasDelCliente = new Set(
-    portfolios
-      .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
-      .flatMap((p) => p.accounts.map((a) => a.id)),
-  );
+  const cuentasVisibles = portfolios
+    .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
+    .flatMap((p) => p.accounts);
+  const cuentasDelCliente = new Set(cuentasVisibles.map((a) => a.id));
   const adsDelCliente = ads.filter((ad) => cuentasDelCliente.has(ad.accountKey));
+  // Conversaciones de mensajería iniciadas (Meta, 7 días) por cuenta — solo
+  // el conteo, ver la nota en MensajeriaView sobre por qué no hay contenido.
+  const conversacionesPorCuenta = new Map(
+    cuentasVisibles.map((a) => [a.id, a.messagingConversations] as const),
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Users className="size-3 text-brand" />
-          Audiencias y mensajería
-        </p>
         <h2 className="neo-section-title">Audiencias</h2>
       </div>
       <div className="mb-4 flex gap-2">
@@ -127,10 +126,15 @@ export function AudienciasView({
         ))}
       </div>
       {pestana === "mensajeria" ? (
-        <MensajeriaView ads={adsDelCliente} puedeAprobar={puedeAprobar} />
+        <MensajeriaView
+          ads={adsDelCliente}
+          puedeAprobar={puedeAprobar}
+          conversacionesPorCuenta={conversacionesPorCuenta}
+        />
       ) : (
         <ListasDeContactos
           portfolios={portfolios}
+          ads={adsDelCliente}
           clienteSeleccionado={clienteSeleccionado}
         />
       )}
@@ -138,11 +142,38 @@ export function AudienciasView({
   );
 }
 
+/** Dónde vive, en este navegador, lo último creado con "Crear lista" para
+ * cada cuenta — Windsor no trae una acción para listar las que ya existen
+ * (ver `ListaConocida`), así que sin esto se perdía todo al recargar. No es
+ * la fuente de verdad (esa es Google Ads): si se borra el storage, o se abre
+ * en otro navegador, simplemente no hay atajos, pero crear/subir/adjuntar
+ * pegando el id a mano sigue funcionando igual. */
+function claveListas(accountId: string): string {
+  return `wiwo:listas-customer-match:${accountId}`;
+}
+
+function cargarListasGuardadas(accountId: string): ListaConocida[] {
+  try {
+    const crudo = window.localStorage.getItem(claveListas(accountId));
+    if (!crudo) return [];
+    const datos = JSON.parse(crudo) as unknown;
+    if (!Array.isArray(datos)) return [];
+    return datos.filter(
+      (item): item is ListaConocida =>
+        Boolean(item) && typeof item === "object" && "id" in item && "nombre" in item,
+    );
+  } catch {
+    return [];
+  }
+}
+
 function ListasDeContactos({
   portfolios,
+  ads,
   clienteSeleccionado,
 }: {
   portfolios: PortfolioSummary[];
+  ads: AdSummary[];
   clienteSeleccionado: string | null;
 }) {
   const cuentasGoogle: CuentaGoogle[] = portfolios
@@ -169,6 +200,44 @@ function ListasDeContactos({
       : "";
   const cuenta = cuentasGoogle.find((c) => c.accountId === cuentaId) ?? null;
   const [listas, setListas] = useState<ListaConocida[]>([]);
+  const [cuentaDeListas, setCuentaDeListas] = useState<string | null>(null);
+  if ((cuenta?.accountId ?? null) !== cuentaDeListas) {
+    setCuentaDeListas(cuenta?.accountId ?? null);
+    setListas(cuenta ? cargarListasGuardadas(cuenta.accountId) : []);
+  }
+
+  function agregarLista(id: string, nombre: string) {
+    setListas((actual) => {
+      const siguiente = [...actual, { id, nombre }];
+      if (cuenta) {
+        try {
+          window.localStorage.setItem(
+            claveListas(cuenta.accountId),
+            JSON.stringify(siguiente),
+          );
+        } catch {
+          // Sin storage disponible (privado, cuota llena): la lista sigue
+          // usable en esta sesión, solo no sobrevive a un recargo.
+        }
+      }
+      return siguiente;
+    });
+  }
+
+  const gruposDeAnuncios: Array<{ id: string; nombre: string; campana: string }> = [];
+  {
+    const vistos = new Set<string>();
+    for (const ad of ads) {
+      if (ad.provider !== "google" || ad.accountId !== cuenta?.accountId) continue;
+      if (!ad.adsetId || vistos.has(ad.adsetId)) continue;
+      vistos.add(ad.adsetId);
+      gruposDeAnuncios.push({
+        id: ad.adsetId,
+        nombre: ad.adsetName ?? ad.adsetId,
+        campana: ad.campaignName,
+      });
+    }
+  }
 
   return (
     <div className="w-full">
@@ -212,15 +281,14 @@ function ListasDeContactos({
 
       {cuenta && (
         <div className="space-y-4">
-          <TarjetaCrearLista
-            cuenta={cuenta}
-            onCreada={(id, nombre) =>
-              setListas((actual) => [...actual, { id, nombre }])
-            }
-          />
+          <TarjetaCrearLista cuenta={cuenta} onCreada={agregarLista} />
           <TarjetaSubirContactos cuenta={cuenta} listas={listas} />
           <TarjetaEstadoSubida cuenta={cuenta} />
-          <TarjetaAdjuntar cuenta={cuenta} listas={listas} />
+          <TarjetaAdjuntar
+            cuenta={cuenta}
+            listas={listas}
+            gruposDeAnuncios={gruposDeAnuncios}
+          />
           <TarjetaAdministrarLista cuenta={cuenta} listas={listas} />
         </div>
       )}
@@ -507,13 +575,23 @@ function TarjetaEstadoSubida({ cuenta }: { cuenta: CuentaGoogle }) {
 function TarjetaAdjuntar({
   cuenta,
   listas,
+  gruposDeAnuncios,
 }: {
   cuenta: CuentaGoogle;
   listas: ListaConocida[];
+  gruposDeAnuncios: Array<{ id: string; nombre: string; campana: string }>;
 }) {
   const [enviando, setEnviando] = useState(false);
   const [listaId, setListaId] = useState("");
   const [adGroupId, setAdGroupId] = useState("");
+  // Manual solo si no hay grupos ya leídos para esta cuenta, o si la persona
+  // lo pide a propósito — pegar el id a mano sigue funcionando siempre.
+  const [manual, setManual] = useState(gruposDeAnuncios.length === 0);
+  const [cuentaDeManual, setCuentaDeManual] = useState(cuenta.accountId);
+  if (cuentaDeManual !== cuenta.accountId) {
+    setCuentaDeManual(cuenta.accountId);
+    setManual(gruposDeAnuncios.length === 0);
+  }
   const [excluir, setExcluir] = useState(false);
 
   async function adjuntar() {
@@ -564,12 +642,39 @@ function TarjetaAdjuntar({
             ))}
           </div>
         )}
-        <Input
-          value={adGroupId}
-          onChange={(e) => setAdGroupId(e.target.value)}
-          placeholder="Id del grupo de anuncios (Publicaciones o Google Ads)"
-          className="bg-field/60"
-        />
+        {manual ? (
+          <Input
+            value={adGroupId}
+            onChange={(e) => setAdGroupId(e.target.value)}
+            placeholder="Id del grupo de anuncios (Publicaciones o Google Ads)"
+            className="bg-field/60"
+          />
+        ) : (
+          <Select value={adGroupId} onValueChange={setAdGroupId}>
+            <SelectTrigger className="w-full bg-field/60">
+              <SelectValue placeholder="Elige un grupo de anuncios…" />
+            </SelectTrigger>
+            <SelectContent>
+              {gruposDeAnuncios.map((grupo) => (
+                <SelectItem key={grupo.id} value={grupo.id}>
+                  {grupo.campana} · {grupo.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {gruposDeAnuncios.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setManual((actual) => !actual);
+              setAdGroupId("");
+            }}
+            className="text-[0.68rem] font-semibold text-foreground/45 underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {manual ? "Elegir de la lista en vez de pegar el id" : "Pegar el id a mano"}
+          </button>
+        )}
         <label className="flex items-center gap-2 text-xs text-foreground/70">
           <input
             type="checkbox"

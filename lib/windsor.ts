@@ -46,6 +46,14 @@ const CATALOG_MESES = 36;
 const TIMEOUT_MS = 60_000;
 /** El catálogo barre años: con 60 s se cortaba antes de responder. */
 const CATALOG_TIMEOUT_MS = 280_000;
+/**
+ * `facebook_organic`/`instagram` cuando es la primera vez que se lee esa
+ * cuenta (verificado en vivo: 1:30 min). Con el timeout general de 60 s, esa
+ * primera lectura se cortaba a los 60 s —sin haber fallado de verdad, solo
+ * lenta— y el reintento volvía a empezar de cero: el doble de espera real
+ * para terminar sirviendo lo mismo que habría llegado solo, sin cortar nada.
+ */
+const TIMEOUT_ORGANICO_MS = 110_000;
 const REINTENTOS = 3;
 
 /**
@@ -130,6 +138,15 @@ export type WindsorCampaign = {
    * el campo (no se pide junto con las métricas de actividad).
    */
   dailyBudgetMicros: number | null;
+  /**
+   * `true` solo para las filas que arma `campanasPendientesDeSincronizar`
+   * (`lib/publicaciones-pendientes.ts`): se creó de verdad hace poco a través
+   * del Constructor, con su id real, pero Windsor todavía no la sincronizó
+   * a `get_data` — ausente (no `false`) en cualquier fila que sí viene del
+   * catálogo real de Windsor, para no confundir "recién publicada" con
+   * "confirmada".
+   */
+  pendienteSincronizacion?: true;
 };
 
 type Row = Record<string, unknown>;
@@ -511,11 +528,32 @@ function claveDeAnuncio(a: WindsorAd): string {
  *
  * No toca `construidoEn`: sigue siendo la fecha del último barrido completo,
  * que es la que decide cuándo toca el siguiente.
+ *
+ * `campaignIdsVistos` (y, con la misma lógica, `adsetIdsVistos`/
+ * `adIdsVistos`) devuelve, sin filtrar por lo ya guardado, cada id que
+ * Windsor realmente entregó en esta lectura — es lo que permite a quien
+ * llama comprobar si una campaña, conjunto o anuncio recién creado existe de
+ * verdad en la cuenta real, en vez de confiar a ciegas en que
+ * `execute_action` haya respondido `ok`. Se verificó contra un caso real
+ * (2026-09-22): Windsor confirmó como creada una campaña de Meta que nunca
+ * llegó a existir en la cuenta — ni acá, ni en el historial de cambios de la
+ * cuenta real.
  */
 export async function actualizarCatalogoDeCuentas(
   cuentas: Array<{ provider: WindsorProvider; accountId: string }>,
-): Promise<{ agregadas: number; fallos: string[] }> {
-  if (!windsorConfigured() || cuentas.length === 0) return { agregadas: 0, fallos: [] };
+): Promise<{
+  agregadas: number;
+  fallos: string[];
+  campaignIdsVistos: Set<string>;
+  adsetIdsVistos: Set<string>;
+  adIdsVistos: Set<string>;
+}> {
+  const campaignIdsVistos = new Set<string>();
+  const adsetIdsVistos = new Set<string>();
+  const adIdsVistos = new Set<string>();
+  if (!windsorConfigured() || cuentas.length === 0) {
+    return { agregadas: 0, fallos: [], campaignIdsVistos, adsetIdsVistos, adIdsVistos };
+  }
 
   const hoy = new Date();
   const rango = rangoCatalogo(hoy.toISOString().slice(0, 10));
@@ -525,10 +563,13 @@ export async function actualizarCatalogoDeCuentas(
     .prepare("SELECT value, updated_at FROM app_meta WHERE key = ? LIMIT 1")
     .bind(cacheId)
     .first<{ value: string; updated_at: number }>();
-  // Sin un catálogo base no hay a qué fundir: el barrido completo lo arma.
-  if (!cached) return { agregadas: 0, fallos: [] };
-
-  const catalogo = JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">;
+  // Sin un catálogo base no hay a qué fundir —el barrido completo lo arma—,
+  // pero igual se sigue: la consulta a Windsor de acá abajo es la única
+  // forma de llenar `campaignIdsVistos`, y quien llama la necesita aunque
+  // todavía no exista un catálogo guardado.
+  const catalogo: Omit<Catalogo, "construidoEn"> = cached
+    ? (JSON.parse(await descomprimirTexto(cached.value)) as Omit<Catalogo, "construidoEn">)
+    : { campanas: [], anuncios: [], rango, fallos: [] };
   const desde = iso(new Date(hoy.getTime() - CATALOGO_PARCIAL_DIAS * 86_400_000));
   const hasta = iso(hoy);
   const fallos: string[] = [];
@@ -551,7 +592,23 @@ export async function actualizarCatalogoDeCuentas(
         ]);
         const campanas = sinActividad(toCampaigns(filasCampanas, provider));
         const anuncios = sinActividad(toAds(filasAnuncios, provider));
+        for (const c of campanas) {
+          if (c.campaignId) campaignIdsVistos.add(c.campaignId);
+        }
+        for (const a of anuncios) {
+          if (a.adsetId) adsetIdsVistos.add(a.adsetId);
+          if (a.adId) adIdsVistos.add(a.adId);
+        }
 
+        // Ojo: esta lectura parcial solo cubre los últimos
+        // CATALOGO_PARCIAL_DIAS (45) días, a propósito, para que sea rápida —
+        // nada que ver con los 36 meses del barrido completo. Por eso NO se
+        // puede usar esto para detectar borrados: una campaña real, pausada
+        // hace más de 45 días pero no borrada, tampoco aparecería acá, y
+        // sacarla del catálogo sería peor que el problema que se quiere
+        // resolver (una campaña que sigue existiendo desaparecería sola de
+        // WiWO.ADS). Detectar borrados de verdad exige el rango de 3 años del
+        // barrido completo — ver `fetchWindsorCatalog`/"Actualizar".
         const porCampana = new Map(catalogo.campanas.map((c) => [claveDeCampana(c), c]));
         for (const c of campanas) {
           if (!porCampana.has(claveDeCampana(c))) agregadas += 1;
@@ -571,7 +628,7 @@ export async function actualizarCatalogoDeCuentas(
     }),
   );
 
-  if (agregadas > 0 || fallos.length < unicas.size) {
+  if (cached && (agregadas > 0 || fallos.length < unicas.size)) {
     await db
       .prepare(
         `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
@@ -579,10 +636,42 @@ export async function actualizarCatalogoDeCuentas(
            updated_at = excluded.updated_at`,
       )
       // `updated_at` se conserva: es la fecha del barrido completo.
-      .bind(cacheId, JSON.stringify(catalogo), Number(cached.updated_at))
+      .bind(cacheId, await comprimirTexto(JSON.stringify(catalogo)), Number(cached.updated_at))
       .run();
   }
-  return { agregadas, fallos };
+  return { agregadas, fallos, campaignIdsVistos, adsetIdsVistos, adIdsVistos };
+}
+
+/**
+ * Prefijo que marca un valor de `app_meta` comprimido con gzip y codificado
+ * en base64 — necesario desde que el catálogo completo (todas las campañas y
+ * anuncios de todos los clientes, sin filtrar por actividad) empezó a superar
+ * el límite real de D1 para una fila (~1 MB: `SQLITE_TOOBIG`, confirmado en
+ * vivo el 2026-09-23). El texto comprime muy bien —son miles de objetos con
+ * las mismas claves repetidas— así que esto solo debería volver a hacer falta
+ * si el catálogo crece mucho más; ahí el siguiente paso es partirlo por
+ * plataforma en vez de una sola fila.
+ */
+const PREFIJO_COMPRIMIDO = "gz:";
+
+async function comprimirTexto(texto: string): Promise<string> {
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  void writer.write(new TextEncoder().encode(texto));
+  void writer.close();
+  const comprimido = await new Response(cs.readable).arrayBuffer();
+  return PREFIJO_COMPRIMIDO + Buffer.from(comprimido).toString("base64");
+}
+
+async function descomprimirTexto(valor: string): Promise<string> {
+  if (!valor.startsWith(PREFIJO_COMPRIMIDO)) return valor;
+  const bytes = Buffer.from(valor.slice(PREFIJO_COMPRIMIDO.length), "base64");
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  void writer.write(bytes);
+  void writer.close();
+  const descomprimido = await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(descomprimido);
 }
 
 /**
@@ -629,7 +718,7 @@ export async function fetchWindsorCatalog(
 
   const guardado = cached
     ? ({
-        ...(JSON.parse(cached.value) as Omit<Catalogo, "construidoEn">),
+        ...(JSON.parse(await descomprimirTexto(cached.value)) as Omit<Catalogo, "construidoEn">),
         construidoEn: Number(cached.updated_at),
       } satisfies Catalogo)
     : null;
@@ -702,7 +791,7 @@ export async function fetchWindsorCatalog(
          ON CONFLICT(key) DO UPDATE SET value = excluded.value,
            updated_at = excluded.updated_at`,
       )
-      .bind(cacheId, JSON.stringify(catalogo), catalogo.construidoEn)
+      .bind(cacheId, await comprimirTexto(JSON.stringify(catalogo)), catalogo.construidoEn)
       .run();
   }
 
@@ -1078,6 +1167,43 @@ export type WindsorAd = {
   leads: number | null;
   purchases: number | null;
   conversions: number | null;
+  /** Valor de las compras (Meta), en la moneda de la cuenta — no en micros. */
+  purchaseValue: number | null;
+  /** Visitas a la página de destino (Meta). */
+  landingPageViews: number | null;
+  /** ThruPlays: video visto hasta 15 s o completo (Meta). */
+  thruplays: number | null;
+  /** Reproducciones de video, 3+ segundos (Meta). */
+  videoViews: number | null;
+  /**
+   * Rankings de diagnóstico de Meta (calidad / interacción / conversión):
+   * "ABOVE_AVERAGE" | "AVERAGE" | "BELOW_AVERAGE_xx" | "UNKNOWN". `UNKNOWN`
+   * es normal en anuncios de bajo volumen, no un error.
+   */
+  qualityRanking: string | null;
+  engagementRateRanking: string | null;
+  conversionRateRanking: string | null;
+  /** Puntuación de optimización de la campaña (Google), 0 a 1. */
+  optimizationScore: number | null;
+  /**
+   * Miniatura real de la pieza, tal como la sirve Meta (`thumbnail_url`,
+   * tabla "Ad" — verificado con `get_fields`, no es un supuesto). `null` en
+   * Google o si Windsor no la trae. A diferencia de `link_url` — el destino
+   * del anuncio —, esta sí llega poblada de forma consistente: es lo único
+   * verificado que permite ver la pieza real, no una maqueta.
+   */
+  thumbnailUrl?: string | null;
+  /**
+   * Contenido real de la pieza de Meta, para precargar el formulario de
+   * edición en vez de mostrarlo en blanco (ver `editar-anuncio.tsx`). `null`
+   * en Google (sin acción de escritura para editar un anuncio ya creado) o
+   * si Meta no la trae. `destinationUrl` sale del campo `link` de Windsor,
+   * no de `link_url` — verificado con datos reales (2026-09-24): `link_url`
+   * siempre viene vacío, `link` viene poblado de forma consistente.
+   */
+  message: string | null;
+  headline: string | null;
+  destinationUrl: string | null;
   /**
    * false: la entidad existe en la cuenta pero no tuvo actividad en el rango.
    *
@@ -1086,6 +1212,9 @@ export type WindsorAd = {
    * leería como "no rindió".
    */
   conActividad: boolean;
+  /** Ver `WindsorCampaign.pendienteSincronizacion` — mismo significado, a
+   * nivel de anuncio. */
+  pendienteSincronizacion?: true;
 };
 
 /** Anuncios y conjuntos del rango, completados con el catálogo. */
@@ -1175,10 +1304,26 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
       clicks: Math.round(number(row.clicks)),
       reach: optionalNumber(row.reach),
       linkClicks: optionalNumber(row.actions_link_click),
-      engagement: optionalNumber(row.actions_post_engagement),
+      // Unificado con Google: Meta trae `actions_post_engagement`, Google
+      // `engagements` — es la misma métrica con nombre distinto por plataforma.
+      engagement: optionalNumber(
+        first(row, "actions_post_engagement", "engagements"),
+      ),
       leads: optionalNumber(row.actions_lead),
       purchases: optionalNumber(row.actions_omni_purchase),
       conversions: optionalNumber(row.conversions),
+      purchaseValue: optionalNumber(row.action_values_omni_purchase),
+      landingPageViews: optionalNumber(row.actions_landing_page_view),
+      thruplays: optionalNumber(row.video_thruplay_watched_actions_video_view),
+      videoViews: optionalNumber(row.actions_video_view),
+      qualityRanking: text(row.quality_ranking),
+      engagementRateRanking: text(row.engagement_rate_ranking),
+      conversionRateRanking: text(row.conversion_rate_ranking),
+      optimizationScore: optionalNumber(row.campaign_optimization_score),
+      thumbnailUrl: text(row.thumbnail_url),
+      message: text(row.body),
+      headline: text(row.title),
+      destinationUrl: text(row.link),
       conActividad: true,
     };
 
@@ -1195,6 +1340,20 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.leads = addNullable(actual.leads, fila.leads);
     actual.purchases = addNullable(actual.purchases, fila.purchases);
     actual.conversions = addNullable(actual.conversions, fila.conversions);
+    actual.purchaseValue = addNullable(actual.purchaseValue, fila.purchaseValue);
+    actual.landingPageViews = addNullable(
+      actual.landingPageViews,
+      fila.landingPageViews,
+    );
+    actual.thruplays = addNullable(actual.thruplays, fila.thruplays);
+    actual.videoViews = addNullable(actual.videoViews, fila.videoViews);
+    // Categóricos: no se pueden sumar ni promediar, se queda con el primero.
+    actual.qualityRanking = actual.qualityRanking ?? fila.qualityRanking;
+    actual.engagementRateRanking =
+      actual.engagementRateRanking ?? fila.engagementRateRanking;
+    actual.conversionRateRanking =
+      actual.conversionRateRanking ?? fila.conversionRateRanking;
+    actual.optimizationScore = actual.optimizationScore ?? fila.optimizationScore;
     actual.reach =
       actual.reach === null || fila.reach === null
         ? (actual.reach ?? fila.reach)
@@ -1202,6 +1361,10 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.campaignId = actual.campaignId ?? fila.campaignId;
     actual.adsetId = actual.adsetId ?? fila.adsetId;
     actual.adId = actual.adId ?? fila.adId;
+    actual.thumbnailUrl = actual.thumbnailUrl ?? fila.thumbnailUrl;
+    actual.message = actual.message ?? fila.message;
+    actual.headline = actual.headline ?? fila.headline;
+    actual.destinationUrl = actual.destinationUrl ?? fila.destinationUrl;
   }
 
   return [...merged.values()];
@@ -1306,6 +1469,7 @@ export async function fetchFacebookPosts(
         "facebook_organic",
         [
           "account_id",
+          "account_name",
           "post_id",
           "message",
           "created_time",
@@ -1319,8 +1483,13 @@ export async function fetchFacebookPosts(
         ],
         rangeStart,
         rangeEnd,
-        { selectAccounts: pageId },
+        { selectAccounts: pageId, timeoutMs: TIMEOUT_ORGANICO_MS },
       );
+
+      // El nombre real de la página viaja gratis en esta misma consulta
+      // (`account_name`) — se guarda aparte para el paso de Identidad del
+      // Constructor sin pedirle a Windsor una consulta extra solo por eso.
+      void guardarNombreDeCuenta("facebook", pageId, text(raw[0]?.account_name));
 
       return raw
         .map((row): OrganicPost | null => {
@@ -1368,6 +1537,8 @@ export async function fetchInstagramMedia(
         "instagram",
         [
           "account_id",
+          "account_name",
+          "username",
           "media_id",
           "media_caption",
           "timestamp",
@@ -1392,7 +1563,14 @@ export async function fetchInstagramMedia(
         ],
         rangeStart,
         rangeEnd,
-        { selectAccounts: accountId },
+        { selectAccounts: accountId, timeoutMs: TIMEOUT_ORGANICO_MS },
+      );
+
+      void guardarNombreDeCuenta(
+        "instagram",
+        accountId,
+        text(raw[0]?.account_name),
+        text(raw[0]?.username),
       );
 
       return raw
@@ -1440,6 +1618,93 @@ export async function fetchInstagramMedia(
         .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
     },
   );
+}
+
+const IDENTIDAD_CACHE_KEY = "windsor_identidad_v1";
+
+export type IdentidadMeta = {
+  pageName: string | null;
+  instagramName: string | null;
+  instagramUsername: string | null;
+};
+
+/**
+ * Guarda el nombre real de una página/cuenta detrás de un post o una
+ * publicación que de todos modos ya se estaba trayendo — nunca dispara una
+ * consulta propia a Windsor. Una primera versión de esto sí pedía su propia
+ * consulta (`facebook_organic`/`instagram`, dos años de rango) y duplicó el
+ * tiempo de `/api/creatividades` en frío: de ~93 s a más de 2 min, medido en
+ * vivo. Por eso ahora es un efecto secundario de `fetchFacebookPosts` /
+ * `fetchInstagramMedia` en vez de una función que se llama aparte.
+ */
+async function guardarNombreDeCuenta(
+  plataforma: "facebook" | "instagram",
+  accountId: string,
+  nombre: string | null,
+  usuario: string | null = null,
+): Promise<void> {
+  if (!nombre && !usuario) return;
+  try {
+    const db = getRawDb();
+    await db
+      .prepare(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        `${IDENTIDAD_CACHE_KEY}:${plataforma}:${accountId}`,
+        JSON.stringify({ nombre, usuario }),
+        Date.now(),
+      )
+      .run();
+  } catch (error) {
+    // Es un dato de cortesía para la pantalla de Identidad — perderlo no
+    // debe tumbar la lectura real de publicaciones que lo trajo de paso.
+    console.error("WiWO.ADS guardarNombreDeCuenta", error);
+  }
+}
+
+/**
+ * Nombre real de la Página de Facebook y de la cuenta de Instagram detrás de
+ * un `pageId`/`instagramId` — para mostrar "Colbún Energía" y
+ * "@energiacolbun" en vez del id numérico crudo en el paso de Identidad del
+ * Constructor. Nunca golpea Windsor: solo lee lo que
+ * `fetchFacebookPosts`/`fetchInstagramMedia` ya haya guardado de paso la
+ * última vez que alguien abrió el selector de publicaciones de esa cuenta.
+ * `null` si eso todavía no pasó — la pantalla se cae de vuelta al id crudo,
+ * nunca inventa un nombre.
+ */
+export async function fetchIdentidadMeta(
+  pageId: string | null,
+  instagramId: string | null,
+): Promise<IdentidadMeta> {
+  const vacio: IdentidadMeta = { pageName: null, instagramName: null, instagramUsername: null };
+  if (!pageId && !instagramId) return vacio;
+
+  const db = getRawDb();
+  const claves = [
+    pageId ? `${IDENTIDAD_CACHE_KEY}:facebook:${pageId}` : null,
+    instagramId ? `${IDENTIDAD_CACHE_KEY}:instagram:${instagramId}` : null,
+  ].filter((k): k is string => k !== null);
+  if (claves.length === 0) return vacio;
+
+  const { results } = await db
+    .prepare(
+      `SELECT key, value FROM app_meta WHERE key IN (${claves.map(() => "?").join(",")})`,
+    )
+    .bind(...claves)
+    .all<{ key: string; value: string }>();
+
+  const porClave = new Map((results ?? []).map((r) => [r.key, JSON.parse(r.value) as { nombre: string | null; usuario: string | null }]));
+  const pagina = pageId ? porClave.get(`${IDENTIDAD_CACHE_KEY}:facebook:${pageId}`) : null;
+  const instagram = instagramId ? porClave.get(`${IDENTIDAD_CACHE_KEY}:instagram:${instagramId}`) : null;
+
+  return {
+    pageName: pagina?.nombre ?? null,
+    instagramName: instagram?.nombre ?? null,
+    instagramUsername: instagram?.usuario ?? null,
+  };
 }
 
 /**

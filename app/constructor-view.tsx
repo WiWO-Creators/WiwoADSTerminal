@@ -14,7 +14,6 @@ import {
   Megaphone,
   Rocket,
   ShieldCheck,
-  Sparkles,
   Upload,
   Wand2,
 } from "lucide-react";
@@ -51,6 +50,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { nombreCompuesto } from "@/lib/nomenclatura";
 import {
   CALL_TO_ACTIONS,
+  META_OBJECTIVE_LABELS,
   META_PLACEMENTS,
   META_SURFACES,
   OBJECTIVES,
@@ -59,7 +59,9 @@ import {
   type CampaignDraft,
   type Gender,
   type GoogleChannel,
+  type MetaObjectiveOverride,
   type Objective,
+  type SemillaDeCampana,
   type SpecialAdCategory,
 } from "@/lib/constructor";
 import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
@@ -68,6 +70,8 @@ import {
   precargarPublicaciones,
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
+import { CopilotoDeCreativos } from "./copiloto-creativos";
+import { GeneradorDeVariantes } from "./generador-variantes";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
 
 /**
@@ -99,6 +103,8 @@ type Cuenta = {
   provider: string;
   currency: string | null;
   pageId: string | null;
+  /** Puede haber más de uno por cuenta (MGC: Converse y Coliseum). */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   countries: string[];
 };
 
@@ -114,9 +120,10 @@ type PlanStep = {
   params: Record<string, unknown>;
   informativo?: boolean;
 };
+type BudgetAdvice = { suggested: number | null; currency: string | null; basis: string };
 type Plan = {
   issues: Issue[];
-  budget: { suggested: number | null; currency: string | null; basis: string };
+  budgets: Partial<Record<Platform, BudgetAdvice>>;
   steps: PlanStep[];
   simulation: true;
 };
@@ -133,6 +140,19 @@ type Resultado = {
     error: string | null;
   }>;
   ids: Record<string, string>;
+  /** Campañas, conjuntos o anuncios que Windsor confirmó como creados, pero
+   * que al releer la cuenta real (justo después, en el mismo pedido) no
+   * aparecieron — ver la nota en `app/api/constructor/ejecutar/route.ts`.
+   * Vacío en el caso normal; ya viene descrito en `aviso`. */
+  campanasSinConfirmar?: Array<{ platform: string; nivel: string; id: string }>;
+  /** Si un paso hijo falló después de crear la campaña: qué quedó huérfano y
+   * si se pudo marcar en la plataforma real. Ya viene descrito en `aviso`. */
+  campanaIncompleta?: {
+    platform: string;
+    campaignId: string;
+    nombreOriginal: string;
+    marcada: boolean;
+  } | null;
   error?: string;
   /** "duplicado": ya se publicó algo igual hace poco (respuesta 409). */
   codigo?: string;
@@ -167,9 +187,72 @@ export type ConstructorAttachTo = {
   adsetName?: string;
 };
 
+/**
+ * Convierte lo que se tipeó en un campo numérico opcional, sin dejar pasar
+ * `NaN` al estado. `Number(e.target.value)` a secas (el patrón que ya usaban
+ * presupuesto diario y tope de CPC) deja `NaN` en el draft si se tipea algo
+ * no numérico — y como `NaN ?? ""` no cae en el `??` (`NaN` no es nullish),
+ * el campo controlado queda mostrando literalmente "NaN" en pantalla, sin
+ * forma de corregirlo tecleando encima.
+ */
+function numeroOVacio(texto: string): number | null {
+  if (!texto.trim()) return null;
+  const valor = Number(texto);
+  return Number.isFinite(valor) ? valor : null;
+}
+
+/**
+ * Campo de dinero: `type="number"` traía las flechas nativas del navegador
+ * para subir o bajar de a uno —inútiles en montos de miles de pesos— y
+ * mostraba el número pelado, sin puntos de miles, hasta que se hacía la
+ * cuenta a mano. Este es `type="text"` por dentro (sin flechas posible) y
+ * formatea con puntos de miles y el signo "$" en cada tecleo, guardando en
+ * el draft solo el número.
+ */
+function CampoDinero({
+  value,
+  onChange,
+  placeholder = "0",
+  className,
+  moneda,
+}: {
+  value: number | null;
+  onChange: (value: number | null) => void;
+  placeholder?: string;
+  className?: string;
+  /**
+   * Código real de la cuenta elegida (CLP, USD, PEN…) — nunca se infiere del
+   * país: Truecaller Colombia, por ejemplo, factura en USD. `null` cuando
+   * todavía no se puede resolver una sola cuenta (ninguna elegida y la
+   * plataforma tiene varias) — ahí se cae al "$" genérico de antes.
+   */
+  moneda?: string | null;
+}) {
+  const prefijo = moneda ?? "$";
+  return (
+    <div className={cn("relative", className)}>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-foreground/40">
+        {prefijo}
+      </span>
+      <Input
+        type="text"
+        inputMode="numeric"
+        value={value === null ? "" : value.toLocaleString("es-CL")}
+        onChange={(e) => {
+          const digitos = e.target.value.replace(/[^\d]/g, "");
+          onChange(digitos === "" ? null : Number(digitos));
+        }}
+        placeholder={placeholder}
+        className="bg-field/60 pl-12"
+      />
+    </div>
+  );
+}
+
 function borradorInicial(
   attachTo?: ConstructorAttachTo,
   clienteGlobal?: string | null,
+  semilla?: SemillaDeCampana,
 ): CampaignDraft {
   // "Crear campaña para este cliente" llega con portfolioId pero sin
   // campaignId: ahí solo se precarga el cliente, no se adjunta a nada — una
@@ -180,27 +263,40 @@ function borradorInicial(
     // preferencia—; sin eso, se parte del cliente marcado en el selector del
     // navbar, para no pedir elegirlo de nuevo acá adentro.
     portfolioId: attachTo?.portfolioId ?? clienteGlobal ?? "",
-    platforms: attachTo ? [attachTo.platform] : ["google"],
+    // `attachTo` de "nueva campaña" también llega con un `platform` fijo
+    // (placeholder), así que lo que de verdad distingue un destino real es
+    // `adjuntando` — solo ahí el `platform` de `attachTo` es información y
+    // no un relleno.
+    platforms: adjuntando
+      ? [attachTo!.platform]
+      : semilla?.platforms.length
+        ? semilla.platforms
+        : ["google"],
     accountByPlatform:
       attachTo?.accountId ? { [attachTo.platform]: attachTo.accountId } : {},
-    name: "",
-    details: "",
-    objective: "trafico",
+    metaPixelId: null,
+    name: semilla?.name ?? "",
+    details: semilla?.details ?? "",
+    objective: semilla?.objective ?? "trafico",
+    metaObjective: null,
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
     dailyBudget: null,
     budgetByPlatform: {},
     budgetMode: "diaria",
     endDate: null,
-    landingUrl: "",
-    headlines: [],
-    descriptions: [],
+    landingUrl: semilla?.landingUrl ?? "",
+    headlines: semilla?.headlines ?? [],
+    descriptions: semilla?.descriptions ?? [],
     pathDisplay1: "",
     pathDisplay2: "",
-    keywords: [],
-    message: "",
-    metaHeadline: "",
-    metaDescription: "",
+    keywords: semilla?.keywords ?? [],
+    negativeKeywords: [],
+    cpcCeiling: null,
+    targetLanguages: semilla?.targetLanguages ?? [],
+    message: semilla?.metaMessage ?? "",
+    metaHeadline: semilla?.metaHeadline ?? "",
+    metaDescription: semilla?.metaDescription ?? "",
     metaBudgetLevel: "campana",
     mediaUrl: "",
     mediaType: "none",
@@ -212,7 +308,8 @@ function borradorInicial(
     metaPlacements: [],
     metaSurfaces: [],
     metaInterests: [],
-    targetCountries: [],
+    targetCountries: semilla?.targetCountries ?? [],
+    targetPlaces: semilla?.targetPlaces ?? [],
     geoRadius: null,
     excludedCountries: [],
     callToAction: "LEARN_MORE",
@@ -230,6 +327,10 @@ function borradorInicial(
       adjuntando && attachTo?.adsetId && attachTo.adsetName
         ? { adsetId: attachTo.adsetId, adsetName: attachTo.adsetName }
         : null,
+    // Default true: el ahorro de pasos vale para campaña nueva. En modo
+    // "adjuntar" no tiene efecto de todos modos (ver `buildPlan`), pero
+    // dejarlo en true igual es más simple que bifurcar acá.
+    activarConjuntoYAnuncio: true,
   };
 }
 
@@ -249,6 +350,7 @@ export function ConstructorView({
   clienteGlobal,
   onCambiarClienteGlobal,
   onPublicado,
+  semillaIA,
 }: {
   attachTo?: ConstructorAttachTo;
   /** Se llama cuando algo llegó a crearse, para que el resto de la app
@@ -260,6 +362,10 @@ export function ConstructorView({
   /** Sin esto, elegir otro cliente acá adentro no se reflejaba en el navbar
    * ni en el resto de la app — cada uno vivía su propia selección. */
   onCambiarClienteGlobal?: (portfolioId: string) => void;
+  /** Con qué precargar una campaña nueva, cuando se llega desde una
+   * propuesta del asistente de IA. Se ignora si `attachTo` ya trae un
+   * destino concreto — ahí manda lo que se está adjuntando, no la sugerencia. */
+  semillaIA?: SemillaDeCampana;
 } = {}) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -267,9 +373,14 @@ export function ConstructorView({
     attachTo?.adsetId ? "anuncio" : attachTo?.campaignId ? "conjunto" : "campana",
   );
   const [draft, setDraft] = useState<CampaignDraft>(() =>
-    borradorInicial(attachTo, clienteGlobal),
+    borradorInicial(attachTo, clienteGlobal, semillaIA),
   );
   const [plan, setPlan] = useState<Plan | null>(null);
+  // Con qué borrador se armó `plan` — si `draft` cambió desde entonces (se
+  // tocó el presupuesto, la segmentación, etc.), el plan queda desactualizado
+  // y no hay que confiar en su lista de bloqueantes ni mostrar "Publicar"
+  // con un estado que ya no es el real.
+  const [planDraftJson, setPlanDraftJson] = useState<string | null>(null);
   const [publicando, setPublicando] = useState(false);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [duplicado, setDuplicado] = useState<{ creado: string[]; hace: number } | null>(null);
@@ -333,6 +444,20 @@ export function ConstructorView({
     setDraft((actual) => ({ ...actual, ...cambios }));
   }
 
+  /**
+   * Aplica la sugerencia de una plataforma puntual, nunca el total: dos
+   * plataformas casi nunca gastan lo mismo, así que un botón que rellenara un
+   * único presupuesto compartido terminaría siendo tan engañoso como el
+   * número general que reemplaza.
+   */
+  function usarPresupuestoSugerido(platform: Platform, monto: number) {
+    if (draft.platforms.length > 1) {
+      actualizar({ budgetByPlatform: { ...draft.budgetByPlatform, [platform]: monto } });
+    } else {
+      actualizar({ dailyBudget: monto });
+    }
+  }
+
   function alternarPlataforma(value: Platform) {
     setDraft((actual) => ({
       ...actual,
@@ -356,9 +481,7 @@ export function ConstructorView({
       const body = (await response.json()) as Plan & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "No se pudo armar");
       setPlan(body);
-      if (body.budget.suggested !== null && draft.dailyBudget === null) {
-        actualizar({ dailyBudget: body.budget.suggested });
-      }
+      setPlanDraftJson(JSON.stringify(draft));
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "No se pudo armar");
     } finally {
@@ -399,17 +522,14 @@ export function ConstructorView({
     }
   }
 
-  const bloqueantes = plan?.issues.filter((i) => i.blocking) ?? [];
-  const avisos = plan?.issues.filter((i) => !i.blocking) ?? [];
+  const planVigente = plan !== null && planDraftJson === JSON.stringify(draft);
+  const bloqueantes = planVigente ? (plan?.issues.filter((i) => i.blocking) ?? []) : [];
+  const avisos = planVigente ? (plan?.issues.filter((i) => !i.blocking) ?? []) : [];
   const indiceFase = FASES.findIndex((f) => f.id === fase);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Sparkles className="size-3 text-brand" />
-          Creador de campañas · se revisa antes de publicar
-        </p>
         <h2 className="neo-section-title">
           {draft.existingAdset
             ? "Añade un anuncio, revísalo antes de publicar"
@@ -498,6 +618,7 @@ export function ConstructorView({
           {fase === "conjunto" && (
             <FaseConjunto
               draft={draft}
+              cuentas={cuentas}
               onChange={actualizar}
               plataformasElegidas={plataformasElegidas}
               plataformaActiva={plataformaActiva}
@@ -513,6 +634,26 @@ export function ConstructorView({
               plataformaActiva={plataformaActiva}
               onPlataformaActiva={setPlataformaActiva}
             />
+          )}
+
+          {indiceFase === FASES.length - 1 && !draft.existingCampaign && (
+            <label className="mt-6 flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
+              <Checkbox
+                checked={draft.activarConjuntoYAnuncio}
+                onCheckedChange={(checked) =>
+                  actualizar({ activarConjuntoYAnuncio: checked === true })
+                }
+                className="mt-0.5"
+              />
+              <span className="text-xs leading-5 text-foreground/70">
+                <span className="font-bold text-foreground">
+                  Conjunto y anuncio nacen activos.
+                </span>{" "}
+                No entregan nada mientras la campaña siga pausada — al
+                activarla más tarde, corren solos, sin un paso extra. La
+                campaña en sí siempre nace pausada, sin excepción.
+              </span>
+            </label>
           )}
 
           <div className="mt-6 flex items-center justify-between border-t border-foreground/10 pt-4">
@@ -560,23 +701,63 @@ export function ConstructorView({
 
           {plan && (
             <>
-              {plan.budget.basis && (
-                <Surface className="p-4">
-                  <p className="font-micro text-[0.6rem] text-foreground/45">
-                    PRESUPUESTO SUGERIDO
+              {!planVigente && (
+                <Surface className="border-warn-deep/25 bg-warn-deep/[0.06] p-4">
+                  <p className="text-sm font-bold text-foreground">
+                    Cambiaste algo después de revisar el plan
                   </p>
-                  <p className="metric-number mt-1 text-2xl font-bold text-foreground">
-                    {plan.budget.suggested === null
-                      ? "Sin dato"
-                      : `${plan.budget.currency ?? ""} ${plan.budget.suggested.toLocaleString("es-CL")}`}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-foreground/50">
-                    {plan.budget.basis}
+                  <p className="mt-1 text-xs leading-5 text-foreground/60">
+                    Lo de abajo quedó desactualizado. Tocá &quot;Revisar el
+                    plan&quot; de nuevo para ver el estado real antes de
+                    publicar.
                   </p>
                 </Surface>
               )}
 
-              {bloqueantes.length > 0 && (
+              {planVigente && Object.keys(plan.budgets).length > 0 && (
+                <Surface className="divide-y divide-foreground/8 p-0">
+                  <p className="font-micro px-4 pt-3.5 text-[0.6rem] text-foreground/45">
+                    PRESUPUESTO SUGERIDO
+                  </p>
+                  {draft.platforms.map((platform) => {
+                    const advice = plan.budgets[platform];
+                    if (!advice) return null;
+                    return (
+                      <div
+                        key={platform}
+                        className="flex items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-micro text-[0.6rem] text-foreground/45">
+                            {platformLabel(platform).toUpperCase()}
+                          </p>
+                          <p className="metric-number mt-0.5 text-xl font-bold text-foreground">
+                            {advice.suggested === null
+                              ? "Sin dato"
+                              : `${advice.currency ?? ""} ${advice.suggested.toLocaleString("es-CL")}`}
+                          </p>
+                          <p className="mt-0.5 text-[0.68rem] leading-4 text-foreground/50">
+                            {advice.basis}
+                          </p>
+                        </div>
+                        {advice.suggested !== null && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => usarPresupuestoSugerido(platform, advice.suggested as number)}
+                            className="shrink-0"
+                          >
+                            Usar
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </Surface>
+              )}
+
+              {planVigente && bloqueantes.length > 0 && (
                 <Surface className="border-danger-deep/25 bg-danger-deep/[0.06] p-4">
                   <p className="text-sm font-bold text-foreground">
                     Falta resolver {bloqueantes.length}
@@ -595,7 +776,7 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              {avisos.length > 0 && (
+              {planVigente && avisos.length > 0 && (
                 <Surface className="border-warn-deep/25 bg-warn-deep/[0.06] p-4">
                   <ul className="space-y-1.5">
                     {avisos.map((issue, index) => (
@@ -611,87 +792,97 @@ export function ConstructorView({
                 </Surface>
               )}
 
-              <Surface className="overflow-hidden">
-                <div className="border-b border-foreground/10 px-4 py-3">
-                  <h3 className="font-bold text-foreground">
-                    Lo que se ejecutaría
-                  </h3>
-                  <p className="mt-1 text-xs text-foreground/50">
-                    {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
-                    {resultado ? "ya ejecutado" : "todavía sin enviar"}
-                  </p>
-                </div>
-                <ol className="divide-y divide-foreground/8">
-                  {plan.steps.map((step, index) => (
-                    <li key={index} className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
-                          {platformLabel(step.platform).toUpperCase()}
-                        </span>
-                        <span className="text-sm font-bold text-foreground">
-                          {step.label}
-                        </span>
-                        {step.informativo && (
-                          <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[0.52rem] text-brand">
-                            INFORMATIVO
-                          </span>
-                        )}
-                      </div>
-                      <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
-                        {JSON.stringify(step.params, null, 2)}
-                      </pre>
-                    </li>
-                  ))}
-                </ol>
-
-                {/*
-                  El único punto del sistema que cambia algo fuera de acá.
-                  Aparece solo cuando no queda nada bloqueante, y lo que se
-                  ejecuta es este mismo plan: el servidor lo vuelve a armar
-                  con el borrador, no confía en lo que mande el navegador.
-                */}
-                {bloqueantes.length === 0 && !resultado && (
-                  <div className="border-t border-foreground/10 p-4">
-                    <Button
-                      type="button"
-                      onClick={() => void publicar(false)}
-                      disabled={publicando}
-                      className="w-full font-extrabold"
-                    >
-                      {publicando ? (
-                        <OrbeDeBoton />
-                      ) : (
-                        <Rocket />
-                      )}
-                      Publicar pausado en{" "}
-                      {draft.platforms.map(platformLabel).join(" y ")}
-                    </Button>
-                    <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
-                      Se crea de verdad en la cuenta del cliente, en estado
-                      pausado. No empieza a gastar hasta que lo actives en la
-                      plataforma.
+              {planVigente && (
+                <Surface className="overflow-hidden">
+                  <div className="border-b border-foreground/10 px-4 py-3">
+                    <h3 className="font-bold text-foreground">
+                      Lo que se ejecutaría
+                    </h3>
+                    <p className="mt-1 text-xs text-foreground/50">
+                      {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
+                      {resultado ? "ya ejecutado" : "todavía sin enviar"}
                     </p>
                   </div>
-                )}
-              </Surface>
+                  <ol className="divide-y divide-foreground/8">
+                    {plan.steps.map((step, index) => (
+                      <li key={index} className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/50">
+                            {platformLabel(step.platform).toUpperCase()}
+                          </span>
+                          <span className="text-sm font-bold text-foreground">
+                            {step.label}
+                          </span>
+                          {step.informativo && (
+                            <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-1.5 py-0.5 text-[0.52rem] text-brand">
+                              INFORMATIVO
+                            </span>
+                          )}
+                        </div>
+                        <pre className="metric-number mt-2 overflow-x-auto rounded-lg bg-field/70 p-2.5 text-[0.68rem] leading-5 text-foreground/62">
+                          {JSON.stringify(step.params, null, 2)}
+                        </pre>
+                      </li>
+                    ))}
+                  </ol>
 
-              {resultado && (
+                  {/*
+                    El único punto del sistema que cambia algo fuera de acá.
+                    Aparece solo cuando no queda nada bloqueante, y lo que se
+                    ejecuta es este mismo plan: el servidor lo vuelve a armar
+                    con el borrador, no confía en lo que mande el navegador.
+                  */}
+                  {bloqueantes.length === 0 && !resultado && (
+                    <div className="border-t border-foreground/10 p-4">
+                      <Button
+                        type="button"
+                        onClick={() => void publicar(false)}
+                        disabled={publicando}
+                        className="w-full font-extrabold"
+                      >
+                        {publicando ? (
+                          <OrbeDeBoton />
+                        ) : (
+                          <Rocket />
+                        )}
+                        Publicar pausado en{" "}
+                        {draft.platforms.map(platformLabel).join(" y ")}
+                      </Button>
+                      <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
+                        Se crea de verdad en la cuenta del cliente, en estado
+                        pausado. No empieza a gastar hasta que lo actives en la
+                        plataforma.
+                      </p>
+                    </div>
+                  )}
+                </Surface>
+              )}
+
+              {resultado && (() => {
+                const sinConfirmar = Boolean(
+                  resultado.ok && resultado.campanasSinConfirmar?.length,
+                );
+                return (
                 <Surface
                   className={cn(
                     "overflow-hidden",
-                    resultado.ok
-                      ? "border-[#3BFF00]/25 bg-[#3BFF00]/[0.05]"
-                      : "border-danger-deep/25 bg-danger-deep/[0.06]",
+                    !resultado.ok
+                      ? "border-danger-deep/25 bg-danger-deep/[0.06]"
+                      : sinConfirmar
+                        ? "border-warn-deep/30 bg-warn-deep/[0.06]"
+                        : "border-[#3BFF00]/25 bg-[#3BFF00]/[0.05]",
                   )}
                 >
                   <div className="border-b border-foreground/10 px-4 py-3">
                     <h3 className="flex items-center gap-2 font-bold text-foreground">
-                      {resultado.ok ? (
-                        <Check className="size-4 text-brand" />
-                      ) : (
+                      {!resultado.ok ? (
                         <AlertCircle className="size-4 text-danger" />
+                      ) : sinConfirmar ? (
+                        <AlertCircle className="size-4 text-warn" />
+                      ) : (
+                        <Check className="size-4 text-brand" />
                       )}
-                      {resultado.ok ? "Creado" : "Se detuvo"}
+                      {resultado.ok ? (sinConfirmar ? "Creado — sin confirmar" : "Creado") : "Se detuvo"}
                     </h3>
                     <p className="mt-1 text-xs leading-5 text-foreground/62">
                       {resultado.error ?? resultado.aviso}
@@ -733,7 +924,8 @@ export function ConstructorView({
                     </div>
                   )}
                 </Surface>
-              )}
+                );
+              })()}
             </>
           )}
         </div>
@@ -1030,6 +1222,58 @@ function SelectorCuenta({
   );
 }
 
+/**
+ * Selector de píxel de Meta, solo cuando hace falta: la cuenta elegida tiene
+ * más de un píxel (MGC: Converse y Coliseum en la misma cuenta) y el
+ * objetivo de verdad necesita uno (leads o ventas con destino sitio web —
+ * ver `necesitaPixel` en `lib/constructor.ts`). Con exactamente uno no hay
+ * nada que elegir: se usa directo, sin mostrar este selector.
+ */
+function SelectorPixel({
+  cuentas,
+  draft,
+  onChange,
+}: {
+  cuentas: Cuenta[];
+  draft: CampaignDraft;
+  onChange: (cambios: Partial<CampaignDraft>) => void;
+}) {
+  const necesitaPixel =
+    (draft.objective === "leads" || draft.objective === "ventas") &&
+    draft.conversionLocation !== "mensajes";
+  if (!necesitaPixel) return null;
+
+  const cuentasMeta = cuentas.filter((c) => c.provider === "meta");
+  const cuentaMeta =
+    cuentasMeta.length === 1
+      ? cuentasMeta[0]
+      : draft.accountByPlatform.meta
+        ? cuentasMeta.find((c) => c.externalId === draft.accountByPlatform.meta)
+        : undefined;
+  const pixeles = cuentaMeta?.pixels ?? [];
+  if (pixeles.length <= 1) return null;
+
+  return (
+    <Campo etiqueta="PÍXEL DE META A USAR" className="mt-2">
+      <Select
+        value={draft.metaPixelId ?? ""}
+        onValueChange={(value) => onChange({ metaPixelId: value })}
+      >
+        <SelectTrigger className="w-full bg-field/60">
+          <SelectValue placeholder={`Elige entre ${pixeles.length} píxeles`} />
+        </SelectTrigger>
+        <SelectContent>
+          {pixeles.map((pixel) => (
+            <SelectItem key={pixel.id} value={pixel.pixelId}>
+              {pixel.label ? `${pixel.label} · ${pixel.pixelId}` : pixel.pixelId}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Campo>
+  );
+}
+
 function FaseCampana({
   draft,
   clientes,
@@ -1189,6 +1433,9 @@ function FaseCampana({
               onChange={onChange}
             />
           ))}
+        {draft.portfolioId && draft.platforms.includes("meta") && (
+          <SelectorPixel cuentas={cuentas} draft={draft} onChange={onChange} />
+        )}
       </Seccion>
 
       <Seccion titulo="Nombre">
@@ -1222,14 +1469,18 @@ function FaseCampana({
         </div>
       </Seccion>
 
-      <Seccion titulo="Detalles">
+      <Seccion titulo="Detalles (nota interna)">
         <Textarea
           value={draft.details}
           onChange={(e) => onChange({ details: e.target.value })}
           rows={2}
-          placeholder="Nota interna para el equipo — no se envía a ninguna plataforma"
+          placeholder="Ej. a quién apunta, contexto de la oferta, algo a tener en cuenta al revisar"
           className="bg-field/60"
         />
+        <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+          Solo la ve el equipo acá adentro — no se publica ni se envía a
+          ninguna plataforma. Es para dejar contexto, no un campo obligatorio.
+        </p>
       </Seccion>
 
       <Seccion titulo="Categoría" soloPlataforma="meta">
@@ -1257,18 +1508,53 @@ function FaseCampana({
           segmentación distintas en Meta. Google no tiene este concepto.
         </p>
       </Seccion>
+
+      <Seccion titulo="Objetivo de Meta" soloPlataforma="meta">
+        <Select
+          value={draft.metaObjective ?? "default"}
+          onValueChange={(value) =>
+            onChange({
+              metaObjective: value === "default" ? null : (value as MetaObjectiveOverride),
+            })
+          }
+        >
+          <SelectTrigger className="w-full bg-field/60 sm:w-72">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">
+              Automático — {OBJECTIVES[draft.objective].label}
+            </SelectItem>
+            {(Object.keys(META_OBJECTIVE_LABELS) as MetaObjectiveOverride[]).map((key) => (
+              <SelectItem key={key} value={key}>
+                {META_OBJECTIVE_LABELS[key]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+          &quot;Automático&quot; ya traduce el objetivo de arriba a uno de
+          estos cinco por su cuenta — acá solo hace falta elegir uno a mano
+          si el que corresponde de verdad no es el que esa traducción asume
+          (por ejemplo, una campaña de &quot;Tráfico&quot; pensada en
+          realidad para Interacción). No cambia nada en Google: ese concepto
+          no existe ahí, es puramente de Meta.
+        </p>
+      </Seccion>
     </>
   );
 }
 
 function FaseConjunto({
   draft,
+  cuentas,
   onChange,
   plataformasElegidas,
   plataformaActiva,
   onPlataformaActiva,
 }: {
   draft: CampaignDraft;
+  cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
   plataformasElegidas: Platform[];
   plataformaActiva: Platform;
@@ -1310,7 +1596,7 @@ function FaseConjunto({
         abajo y se ve sin importar cuál pestaña esté activa.
       */}
       <Seccion titulo="Presupuesto y calendario">
-        <PresupuestoPorPlataforma draft={draft} onChange={onChange} />
+        <PresupuestoPorPlataforma draft={draft} cuentas={cuentas} onChange={onChange} />
       </Seccion>
 
       {/*
@@ -1325,6 +1611,8 @@ function FaseConjunto({
           onTargetCountriesChange={(targetCountries) =>
             onChange({ targetCountries })
           }
+          targetPlaces={draft.targetPlaces}
+          onTargetPlacesChange={(targetPlaces) => onChange({ targetPlaces })}
           geoRadius={draft.geoRadius}
           onGeoRadiusChange={(geoRadius) => onChange({ geoRadius })}
           excludedCountries={draft.excludedCountries}
@@ -1502,10 +1790,13 @@ function FaseConjunto({
           </Seccion>
 
           <Seccion titulo="Ubicaciones">
-            <p className="font-micro mb-1.5 text-[0.58rem] text-foreground/45">
-              VACÍO ES AUTOMÁTICAS
+            <p className="text-xs leading-5 text-foreground/55">
+              Sin marcar nada acá, Meta reparte el anuncio solo entre
+              Facebook, Instagram, Messenger y Audience Network — es la
+              ubicación automática de Meta (Advantage+), no que falte
+              elegir. Marcá una o más solo si querés limitarlo a esas.
             </p>
-            <div className="flex flex-wrap gap-4">
+            <div className="mt-2 flex flex-wrap gap-4">
               {Object.entries(META_PLACEMENTS).map(([id, label]) => (
                 <label
                   key={id}
@@ -1526,8 +1817,9 @@ function FaseConjunto({
                 </label>
               ))}
             </div>
-            <p className="font-micro mb-1.5 mt-4 text-[0.58rem] text-foreground/45">
-              FORMATO DE ENTREGA · VACÍO ES AUTOMÁTICO
+            <p className="mt-4 text-xs leading-5 text-foreground/55">
+              Igual con el formato — sin marcar nada, Meta usa Feed,
+              Historias y Reels según cuál rinda mejor para cada persona.
             </p>
             <div className="flex flex-wrap gap-4">
               {Object.entries(META_SURFACES).map(([id, item]) => (
@@ -1608,20 +1900,85 @@ function FaseConjunto({
         <Seccion titulo="Palabras clave">
           <Textarea
             value={draft.keywords.join("\n")}
-            onChange={(e) =>
-              onChange({
-                keywords: e.target.value.split("\n").filter((line) => line.trim()),
-              })
-            }
+            onChange={(e) => onChange({ keywords: e.target.value.split("\n") })}
             rows={4}
             placeholder={'zapatillas running\n"zapatillas running mujer"\n[comprar zapatillas running]'}
-            className="bg-field/60"
+            className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
           />
           <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
             Una por línea, con la sintaxis de Google Ads: <code>palabra</code>{" "}
             es concordancia amplia, <code>&quot;palabra&quot;</code> de frase,{" "}
             <code>[palabra]</code> exacta. Sin al menos una, el grupo de
             anuncios no tiene qué lo dispare.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && draft.googleChannel === "search" && (
+        <Seccion titulo="Palabras clave negativas">
+          <Textarea
+            value={draft.negativeKeywords.join("\n")}
+            onChange={(e) => onChange({ negativeKeywords: e.target.value.split("\n") })}
+            rows={3}
+            placeholder={"boleta\ntrabajo\nenel"}
+            className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
+          />
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Opcional, misma sintaxis que las palabras clave de arriba. Van a
+            nivel de campaña — evitan que el anuncio salga en búsquedas de
+            soporte, empleo o de la competencia que nadie pidió pautar.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && OBJECTIVES[draft.objective].google !== "maximize_conversions" && (
+        <Seccion titulo="Tope de CPC">
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={draft.cpcCeiling ?? ""}
+            onChange={(e) => onChange({ cpcCeiling: numeroOVacio(e.target.value) })}
+            placeholder="Sin tope"
+            className="bg-field/60 sm:w-40"
+          />
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Opcional. Con Maximizar clics, Google puede pujar caro por pocos
+            clics y agotar el presupuesto del día — esto le pone un techo por
+            clic. Vacío deja la puja sin tope, como hasta ahora.
+          </p>
+        </Seccion>
+      )}
+
+      {conGoogle && (
+        <Seccion titulo="Idiomas">
+          <div className="flex flex-wrap gap-4">
+            {(
+              [
+                ["es", "Español"],
+                ["en", "Inglés"],
+                ["pt", "Portugués"],
+              ] as const
+            ).map(([codigo, etiqueta]) => (
+              <label key={codigo} className="flex items-center gap-2 text-sm text-foreground/80">
+                <Checkbox
+                  checked={draft.targetLanguages.includes(codigo)}
+                  onCheckedChange={(checked) =>
+                    onChange({
+                      targetLanguages: checked
+                        ? [...draft.targetLanguages, codigo]
+                        : draft.targetLanguages.filter((l) => l !== codigo),
+                    })
+                  }
+                  className="border-foreground/30"
+                />
+                {etiqueta}
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+            Vacío es el default real de Google: todos los idiomas. Marcar
+            uno o más restringe a esos — útil en Chile porque hay
+            navegadores configurados en inglés que igual buscan en español.
           </p>
         </Seccion>
       )}
@@ -1637,61 +1994,79 @@ function FaseConjunto({
  */
 function PresupuestoPorPlataforma({
   draft,
+  cuentas,
   onChange,
 }: {
   draft: CampaignDraft;
+  cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
 }) {
   const varias = draft.platforms.length > 1;
   const distinto = Object.keys(draft.budgetByPlatform).length > 0;
 
+  // Misma cuenta que ya resuelven FaseAnuncio y VistaPrevia: la elegida a
+  // mano, o la única que tiene esa plataforma si no hay más que una — nunca
+  // se infiere del país, siempre es la moneda real de la cuenta.
+  function monedaDe(platform: Platform): string | null {
+    const cuenta = cuentas.find(
+      (c) =>
+        c.provider === platform &&
+        (draft.accountByPlatform[platform]
+          ? c.externalId === draft.accountByPlatform[platform]
+          : cuentas.filter((x) => x.provider === platform).length === 1),
+    );
+    return cuenta?.currency ?? null;
+  }
+
   if (!varias) {
     return (
       <Campo etiqueta="PRESUPUESTO DIARIO" className="sm:w-60">
-        <Input
-          value={draft.dailyBudget ?? ""}
-          onChange={(e) =>
-            onChange({ dailyBudget: e.target.value ? Number(e.target.value) : null })
-          }
-          inputMode="numeric"
-          placeholder="0"
-          className="bg-field/60"
+        <CampoDinero
+          value={draft.dailyBudget}
+          moneda={monedaDe(draft.platforms[0])}
+          onChange={(valor) => onChange({ dailyBudget: valor })}
         />
       </Campo>
     );
   }
 
+  const monedasCompartido = new Set(draft.platforms.map(monedaDe).filter(Boolean));
+  const monedaCompartida = monedasCompartido.size === 1 ? [...monedasCompartido][0] : null;
+
   return (
     <div>
       {!distinto ? (
-        <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
-          <Input
-            value={draft.dailyBudget ?? ""}
-            onChange={(e) =>
-              onChange({ dailyBudget: e.target.value ? Number(e.target.value) : null })
-            }
-            inputMode="numeric"
-            placeholder="0"
-            className="bg-field/60"
-          />
-        </Campo>
+        <>
+          <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
+            <CampoDinero
+              value={draft.dailyBudget}
+              moneda={monedaCompartida}
+              onChange={(valor) => onChange({ dailyBudget: valor })}
+            />
+          </Campo>
+          {monedasCompartido.size > 1 && (
+            <p className="mt-2 flex items-start gap-2 text-xs leading-5 text-warn">
+              <Info className="mt-0.5 size-3.5 shrink-0" />
+              Las cuentas elegidas usan monedas distintas ({[...monedasCompartido].join(" y ")}) —
+              usa "presupuesto distinto por plataforma" para no cargar el mismo número en dos monedas.
+            </p>
+          )}
+        </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {draft.platforms.map((platform) => (
             <Campo key={platform} etiqueta={`PRESUPUESTO DIARIO · ${platformLabel(platform).toUpperCase()}`}>
-              <Input
-                value={draft.budgetByPlatform[platform] ?? ""}
-                onChange={(e) =>
+              <CampoDinero
+                value={draft.budgetByPlatform[platform] ?? null}
+                moneda={monedaDe(platform)}
+                onChange={(valor) =>
                   onChange({
                     budgetByPlatform: {
                       ...draft.budgetByPlatform,
-                      [platform]: e.target.value ? Number(e.target.value) : undefined,
+                      [platform]: valor ?? undefined,
                     },
                   })
                 }
-                inputMode="numeric"
-                placeholder="0"
-                className="bg-field/60"
               />
             </Campo>
           ))}
@@ -1778,11 +2153,26 @@ function FaseAnuncio({
       {conMeta && (
         <>
           <Seccion titulo="Identidad">
-            <p className="text-sm text-foreground/75">
-              {cuentaMeta?.pageId
-                ? `Publica como la página ${cuentaMeta.pageId}.`
-                : "Elige la cuenta de Meta en el paso de Campaña para resolver su página."}
-            </p>
+            {cuentaMeta ? (
+              cuentaMeta.pageId ? (
+                <IdentidadMeta
+                  portfolioId={draft.portfolioId}
+                  accountId={cuentaMeta.externalId}
+                  pageId={cuentaMeta.pageId}
+                />
+              ) : (
+                <p className="text-sm text-foreground/75">
+                  Publica desde {cuentaMeta.name}.
+                </p>
+              )
+            ) : (
+              <SelectorCuenta
+                platform="meta"
+                cuentas={cuentas}
+                draft={draft}
+                onChange={onChange}
+              />
+            )}
           </Seccion>
 
           <Seccion titulo="Configuración del anuncio">
@@ -1853,6 +2243,20 @@ function FaseAnuncio({
                 />
               </Campo>
             </div>
+            <CopilotoDeCreativos
+              plataforma="meta"
+              portfolioId={draft.portfolioId}
+              objetivoLabel={OBJECTIVES[draft.objective].label}
+              nombreCampana={draft.name}
+              notaInterna={draft.details}
+              landingUrl={draft.landingUrl}
+              actual={{
+                textoPrincipal: draft.message,
+                titulo: draft.metaHeadline,
+                descripcion: draft.metaDescription,
+              }}
+              onAplicar={onChange}
+            />
             {draft.mediaType !== "none" && (
               <Campo etiqueta="URL PÚBLICA DE LA PIEZA" className="mt-3">
                 <div className="flex flex-wrap gap-2">
@@ -1899,6 +2303,13 @@ function FaseAnuncio({
                     recién subido no será alcanzable para Meta ni para Google —
                     solo se verá en esta vista previa.
                   </p>
+                )}
+                {draft.mediaType === "image" && draft.mediaUrl && (
+                  <GeneradorDeVariantes
+                    portfolioId={draft.portfolioId}
+                    mediaUrl={draft.mediaUrl}
+                    onUsar={(url) => onChange({ mediaUrl: url, boostPostId: null })}
+                  />
                 )}
               </Campo>
             )}
@@ -1949,15 +2360,15 @@ function FaseAnuncio({
               <Textarea
                 value={draft.headlines.join("\n")}
                 onChange={(e) =>
-                  onChange({
-                    headlines: e.target.value
-                      .split("\n")
-                      .filter((line) => line.trim()),
-                  })
+                  // Sin filtrar acá: filtrar la línea vacía que deja un Enter
+                  // recién apretado hacía que ese salto de línea desapareciera
+                  // al instante, y tipear Enter dejaba de funcionar. Lo vacío
+                  // se descarta recién al usar la lista (Contador, buildPlan).
+                  onChange({ headlines: e.target.value.split("\n") })
                 }
                 rows={4}
                 placeholder={"Envío gratis en 24 horas\nCompra directa\nGarantía de un año"}
-                className="bg-field/60"
+                className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
               />
               <Contador lineas={draft.headlines} limite={30} minimo={3} maximo={15} />
             </Campo>
@@ -1965,17 +2376,23 @@ function FaseAnuncio({
               <Textarea
                 value={draft.descriptions.join("\n")}
                 onChange={(e) =>
-                  onChange({
-                    descriptions: e.target.value
-                      .split("\n")
-                      .filter((line) => line.trim()),
-                  })
+                  onChange({ descriptions: e.target.value.split("\n") })
                 }
                 rows={3}
-                className="bg-field/60"
+                className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
               />
               <Contador lineas={draft.descriptions} limite={90} minimo={2} maximo={4} />
             </Campo>
+            <CopilotoDeCreativos
+              plataforma="google"
+              portfolioId={draft.portfolioId}
+              objetivoLabel={OBJECTIVES[draft.objective].label}
+              nombreCampana={draft.name}
+              notaInterna={draft.details}
+              landingUrl={draft.landingUrl}
+              actual={{ titulos: draft.headlines, descripciones: draft.descriptions }}
+              onAplicar={onChange}
+            />
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Campo etiqueta="RUTA 1 (OPCIONAL) · MÁX 15 CARACTERES">
                 <Input
@@ -2019,6 +2436,60 @@ function FaseAnuncio({
  * Google o Meta si el sitio está publicado en un dominio real — en
  * `localhost` sirve para previsualizar, no para publicar de verdad.
  */
+/**
+ * El nombre real de la página de Facebook (y de la cuenta de Instagram, si
+ * el cliente tiene una) detrás del `pageId` numérico — en vez de mostrar
+ * solo el id crudo. Reutiliza `/api/creatividades`: ya resuelve pageId e
+ * instagramId del lado del servidor y ahora también trae el nombre
+ * (`fetchIdentidadMeta`, cacheado 7 días — un nombre de página no cambia
+ * casi nunca). Sin nombre encontrado (cuenta sin ninguna publicación
+ * orgánica todavía), se cae de vuelta al id crudo — nunca se inventa uno.
+ */
+function IdentidadMeta({
+  portfolioId,
+  accountId,
+  pageId,
+}: {
+  portfolioId: string;
+  accountId: string;
+  pageId: string;
+}) {
+  const [identidad, setIdentidad] = useState<{
+    pageName: string | null;
+    instagramName: string | null;
+    instagramUsername: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a resolver al cambiar de cuenta
+    setIdentidad(null);
+    const params = new URLSearchParams({ portfolioId, accountId });
+    fetch(`/api/creatividades?${params}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((body: { identidad?: typeof identidad }) => {
+        if (!cancelado) setIdentidad(body.identidad ?? null);
+      })
+      .catch(() => {
+        // Sin nombre, queda el id crudo — no es un dato crítico para publicar.
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [portfolioId, accountId]);
+
+  const partes: string[] = [];
+  if (identidad?.pageName) partes.push(`la página ${identidad.pageName}`);
+  else partes.push(`la página ${pageId}`);
+  if (identidad?.instagramUsername) partes.push(`@${identidad.instagramUsername} en Instagram`);
+
+  return (
+    <p className="text-sm text-foreground/75">
+      Publica como {partes.join(" y ")}.
+    </p>
+  );
+}
+
 function SubidaDeArchivo({
   portfolioId,
   onSubido,

@@ -29,6 +29,13 @@ export type Portfolio = {
   pageId: string | null;
   instagramId: string | null;
   countries: string[];
+  /**
+   * URL base real del cliente (ej. "https://colbun.cl"), no por cuenta —
+   * un cliente tiene un solo sitio. `lib/asistente.ts` la usa para completar
+   * `landing_url` sola cuando nadie da una URL explícita al pedir una
+   * campaña nueva.
+   */
+  website: string | null;
   contactEmail: string | null;
   /** true cuando el dato lo dedujo el sistema y nadie lo confirmó. */
   needsReview: boolean;
@@ -51,6 +58,22 @@ export type Portfolio = {
    * `external_id` tal como está en `accountIds`.
    */
   accountPages: Record<string, string | null>;
+  /**
+   * Píxeles de Meta por cuenta de Meta, no por cliente — y puede haber más
+   * de uno por cuenta: MGC factura Converse y Coliseum desde la misma
+   * cuenta publicitaria, cada marca con su propio píxel. Forzar un solo
+   * valor por cuenta dejaba sin forma de guardar el segundo sin pisar el
+   * primero.
+   *
+   * Necesario para que un conjunto de anuncios pueda optimizar a
+   * conversiones fuera de Meta (leads, ventas): verificado contra
+   * `create_adset` real en Windsor, que exige `promoted_object.pixel_id`
+   * para esos objetivos. Sin ninguno, `lib/constructor.ts` avisa que solo
+   * puede optimizar a clics; con más de uno, exige que la persona elija cuál
+   * usar en esa campaña en vez de adivinar. Claves con el `external_id`,
+   * igual que `accountPages`.
+   */
+  accountPixels: Record<string, Array<{ id: string; pixelId: string; label: string | null }>>;
   /**
    * Países de segmentación por cuenta, no por cliente.
    *
@@ -76,6 +99,7 @@ type PortfolioRow = {
   page_id: string | null;
   instagram_id: string | null;
   countries: string;
+  website: string | null;
   contact_email: string | null;
   needs_review: number;
   review_note: string | null;
@@ -153,10 +177,10 @@ export async function ensureSeed(): Promise<void> {
 export async function listPortfolios(): Promise<Portfolio[]> {
   await ensureSeed();
   const db = getRawDb();
-  const [rows, links] = await Promise.all([
+  const [rows, links, pixelRows] = await Promise.all([
     db
       .prepare(
-        `SELECT id, name, page_id, instagram_id, countries, contact_email,
+        `SELECT id, name, page_id, instagram_id, countries, website, contact_email,
                 needs_review, review_note, notes, target_cpa_micros, target_roas_bp
          FROM portfolios ORDER BY name COLLATE NOCASE`,
       )
@@ -172,10 +196,30 @@ export async function listPortfolios(): Promise<Portfolio[]> {
         page_id: string | null;
         countries: string | null;
       }>(),
+    // Vive en su propia tabla, no en `portfolio_accounts`: una cuenta puede
+    // tener más de un píxel (ver `accountPixels` más abajo), algo que una
+    // sola columna nunca pudo guardar.
+    db
+      .prepare("SELECT id, external_id, pixel_id, label FROM account_pixels ORDER BY created_at")
+      .all<{ id: string; external_id: string; pixel_id: string; label: string | null }>(),
   ]);
+
+  const pixelesPorExternalId = new Map<
+    string,
+    Array<{ id: string; pixelId: string; label: string | null }>
+  >();
+  for (const row of pixelRows.results) {
+    const lista = pixelesPorExternalId.get(row.external_id) ?? [];
+    lista.push({ id: row.id, pixelId: row.pixel_id, label: row.label });
+    pixelesPorExternalId.set(row.external_id, lista);
+  }
 
   const byPortfolio = new Map<string, string[]>();
   const pagesByPortfolio = new Map<string, Record<string, string | null>>();
+  const pixelsByPortfolio = new Map<
+    string,
+    Record<string, Array<{ id: string; pixelId: string; label: string | null }>>
+  >();
   const countriesByPortfolio = new Map<string, Record<string, string[]>>();
   const providersByPortfolio = new Map<string, Record<string, string | null>>();
   for (const link of links.results) {
@@ -186,6 +230,9 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     const paginas = pagesByPortfolio.get(link.portfolio_id) ?? {};
     paginas[link.external_id] = link.page_id;
     pagesByPortfolio.set(link.portfolio_id, paginas);
+    const pixeles = pixelsByPortfolio.get(link.portfolio_id) ?? {};
+    pixeles[link.external_id] = pixelesPorExternalId.get(link.external_id) ?? [];
+    pixelsByPortfolio.set(link.portfolio_id, pixeles);
     const paises = countriesByPortfolio.get(link.portfolio_id) ?? {};
     paises[link.external_id] = link.countries
       ? link.countries.split(",").filter(Boolean)
@@ -202,6 +249,7 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     pageId: row.page_id,
     instagramId: row.instagram_id,
     countries: row.countries ? row.countries.split(",").filter(Boolean) : [],
+    website: row.website,
     contactEmail: row.contact_email,
     needsReview: Boolean(row.needs_review),
     reviewNote: row.review_note,
@@ -210,6 +258,7 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     targetRoas: row.target_roas_bp === null ? null : row.target_roas_bp / 100,
     accountIds: byPortfolio.get(row.id) ?? [],
     accountPages: pagesByPortfolio.get(row.id) ?? {},
+    accountPixels: pixelsByPortfolio.get(row.id) ?? {},
     accountCountries: countriesByPortfolio.get(row.id) ?? {},
     accountProviders: providersByPortfolio.get(row.id) ?? {},
   }));
@@ -231,6 +280,7 @@ export type PortfolioInput = {
   pageId?: string | null;
   instagramId?: string | null;
   countries?: string[];
+  website?: string | null;
   contactEmail?: string | null;
   needsReview?: boolean;
   notes?: string | null;
@@ -312,6 +362,14 @@ export async function updatePortfolio(
     campos.push("countries = ?");
     valores.push(input.countries.map((c) => c.trim().toUpperCase()).join(","));
   }
+  if (input.website !== undefined) {
+    const sitio = clean(input.website);
+    if (sitio && !/^https?:\/\//i.test(sitio)) {
+      throw new PortafolioError("El sitio web debe empezar con http:// o https://");
+    }
+    campos.push("website = ?");
+    valores.push(sitio);
+  }
   if (input.contactEmail !== undefined) {
     campos.push("contact_email = ?");
     valores.push(clean(input.contactEmail));
@@ -370,10 +428,12 @@ async function replaceAccounts(
   const db = getRawDb();
   const limpias = [...new Set(accountIds.map((a) => a.trim()).filter(Boolean))];
 
-  // La página de cada cuenta se guarda por separado (ver `page_id` en el
-  // esquema) y no viaja en esta lista de ids: si no se rescata antes de borrar,
-  // reordenar o retocar las cuentas de un cliente le borraría también sus
-  // páginas de Meta ya cargadas.
+  // La página y los países de cada cuenta se guardan por separado (ver
+  // `page_id`/`countries` en el esquema) y no viajan en esta lista de ids:
+  // si no se rescatan antes de borrar, reordenar o retocar las cuentas de un
+  // cliente les borraría esos datos ya cargados. Los píxeles no necesitan
+  // este rescate: viven en `account_pixels`, aparte, con clave en
+  // `external_id` — el delete+reinsert de esta tabla no los toca.
   const previas = limpias.length
     ? await db
         .prepare(
@@ -451,6 +511,66 @@ export async function setAccountPageId(
   await db
     .prepare("UPDATE portfolio_accounts SET page_id = ? WHERE id = ?")
     .bind(clean(pageId), row.id)
+    .run();
+}
+
+/**
+ * Agrega (o actualiza la etiqueta de) un píxel de Meta de una cuenta
+ * puntual. Una cuenta puede tener más de uno —MGC factura Converse y
+ * Coliseum desde la misma cuenta, cada marca con su propio píxel— así que
+ * esto suma, no reemplaza: ver `removeAccountPixel` para quitar uno.
+ */
+export async function addAccountPixel(
+  actor: Actor,
+  portfolioId: string,
+  externalId: string,
+  pixelId: string,
+  label: string | null = null,
+): Promise<void> {
+  assertCanManage(actor);
+  const limpio = pixelId.trim();
+  if (!limpio) throw new PortafolioError("Falta el id del píxel");
+  const db = getRawDb();
+  const row = await db
+    .prepare(
+      "SELECT id FROM portfolio_accounts WHERE portfolio_id = ? AND external_id = ? LIMIT 1",
+    )
+    .bind(portfolioId, externalId)
+    .first<{ id: string }>();
+  if (!row) {
+    throw new PortafolioError("Esa cuenta no pertenece a este cliente", 404);
+  }
+  await db
+    .prepare(
+      `INSERT INTO account_pixels (id, external_id, pixel_id, label, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(external_id, pixel_id) DO UPDATE SET label = excluded.label`,
+    )
+    .bind(crypto.randomUUID(), externalId, limpio, clean(label), Date.now())
+    .run();
+}
+
+/** Quita un píxel de Meta de una cuenta puntual. Ver `addAccountPixel`. */
+export async function removeAccountPixel(
+  actor: Actor,
+  portfolioId: string,
+  externalId: string,
+  pixelRowId: string,
+): Promise<void> {
+  assertCanManage(actor);
+  const db = getRawDb();
+  const row = await db
+    .prepare(
+      "SELECT id FROM portfolio_accounts WHERE portfolio_id = ? AND external_id = ? LIMIT 1",
+    )
+    .bind(portfolioId, externalId)
+    .first<{ id: string }>();
+  if (!row) {
+    throw new PortafolioError("Esa cuenta no pertenece a este cliente", 404);
+  }
+  await db
+    .prepare("DELETE FROM account_pixels WHERE id = ? AND external_id = ?")
+    .bind(pixelRowId, externalId)
     .run();
 }
 

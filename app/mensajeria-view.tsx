@@ -63,18 +63,32 @@ function etiquetaEstado(estado: string | null): string {
  * con pausa y activación en bloque.
  *
  * Lo que esta pantalla NO hace, y por qué: mostrar ni cambiar el número de
- * WhatsApp de cada anuncio. Se verificó contra Windsor: para estos anuncios el
- * destino (`link_url`) llega vacío y no existe ninguna acción que edite el
- * número del botón ni del conjunto — el número vive en la cuenta de WhatsApp
- * Business, que Windsor no expone. Lo que sí entrega es el tipo de botón de
- * cada anuncio, y con eso se encuentran y se manejan en bloque.
+ * WhatsApp de cada anuncio, ni el contenido de las conversaciones. Se
+ * verificó contra Windsor: para estos anuncios el destino (`link_url`) llega
+ * vacío — probado también en anuncios sin botón de mensajería, no solo en
+ * los de WhatsApp — y no existe ninguna acción que edite el número del botón
+ * ni del conjunto; el número vive en la cuenta de WhatsApp Business, que
+ * Windsor no expone, y lo mismo pasa con el texto de lo que se escribió y se
+ * contestó. Lo que sí entrega, verificado con datos reales: el tipo de
+ * botón de cada anuncio (para encontrarlos y manejarlos en bloque), la
+ * miniatura real de la pieza (`thumbnail_url`, tabla "Ad") y cuántas
+ * conversaciones de mensajería se iniciaron por cuenta en el rango.
  */
 export function MensajeriaView({
   ads,
   puedeAprobar,
+  conversacionesPorCuenta,
 }: {
   ads: AdSummary[];
   puedeAprobar: boolean;
+  /**
+   * Conversaciones de mensajería iniciadas en el rango (Meta, ventana de 7
+   * días), por cuenta — no por anuncio: Windsor solo la entrega a ese nivel.
+   * Es un conteo, no el contenido: cuántas personas escribieron, no qué
+   * dijeron ni qué se les contestó — eso vive en WhatsApp Business / Meta y
+   * esta pantalla no tiene forma de leerlo.
+   */
+  conversacionesPorCuenta: Map<string, number | null>;
 }) {
   const [tipo, setTipo] = useState<Tipo | "todos">("todos");
   const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
@@ -103,13 +117,17 @@ export function MensajeriaView({
   const grupos = useMemo(() => {
     const porCampana = new Map<
       string,
-      { cuenta: string; conjuntos: Map<string, typeof visibles> }
+      { cuenta: string; accountKey: string; conjuntos: Map<string, typeof visibles> }
     >();
     for (const item of visibles) {
       const clave = `${item.ad.accountId}::${item.ad.campaignName}`;
       const campana =
         porCampana.get(clave) ??
-        { cuenta: item.ad.accountName, conjuntos: new Map<string, typeof visibles>() };
+        {
+          cuenta: item.ad.accountName,
+          accountKey: item.ad.accountKey,
+          conjuntos: new Map<string, typeof visibles>(),
+        };
       const conjunto = item.ad.adsetName ?? "(sin conjunto)";
       campana.conjuntos.set(conjunto, [...(campana.conjuntos.get(conjunto) ?? []), item]);
       porCampana.set(clave, campana);
@@ -215,11 +233,14 @@ export function MensajeriaView({
         <p className="flex items-start gap-2 text-xs leading-5 text-foreground/55">
           <Info className="mt-0.5 size-3.5 shrink-0 text-brand" />
           <span>
-            Aquí se ven los anuncios por el <strong>tipo de botón</strong> y se
-            pausan o activan en bloque. El <strong>número de WhatsApp</strong> de
-            cada anuncio no se puede ver ni cambiar desde WiWO.ADS: Windsor no lo
-            entrega (el destino llega vacío) ni tiene una acción para editarlo.
-            Vive en la cuenta de WhatsApp Business de Meta.
+            Aquí se ven los anuncios por el <strong>tipo de botón</strong>, con
+            la pieza real de cada uno, y se pausan o activan en bloque. El{" "}
+            <strong>número de WhatsApp</strong> de cada anuncio no se puede ver
+            ni cambiar desde WiWO.ADS: Windsor no lo entrega (el destino llega
+            vacío) ni tiene una acción para editarlo. Vive en la cuenta de
+            WhatsApp Business de Meta — igual que las conversaciones: el
+            contador que ves es real, pero el contenido de lo que se escribió
+            y se contestó no está disponible desde acá.
           </span>
         </p>
       </Surface>
@@ -291,12 +312,24 @@ export function MensajeriaView({
       ) : (
         grupos.map(([clave, campana]) => {
           const nombre = clave.split("::").slice(1).join("::");
+          const conversaciones = conversacionesPorCuenta.get(campana.accountKey);
           return (
             <Surface key={clave} className="overflow-hidden">
               <div className="border-b border-foreground/10 px-4 py-3">
                 <h3 className="text-sm font-bold text-foreground">{nombre}</h3>
-                <p className="mt-0.5 text-[0.65rem] text-foreground/40">
-                  Meta Ads · {campana.cuenta}
+                <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[0.65rem] text-foreground/40">
+                  <span>
+                    Meta Ads · {campana.cuenta}
+                  </span>
+                  {conversaciones !== undefined && conversaciones !== null && conversaciones > 0 && (
+                    <span
+                      className="rounded-full bg-brand/10 px-2 py-0.5 font-semibold text-brand"
+                      title="Conversaciones de mensajería iniciadas en la cuenta durante el rango — no el contenido, Windsor no lo entrega"
+                    >
+                      {conversaciones} conversación{conversaciones === 1 ? "" : "es"} iniciada
+                      {conversaciones === 1 ? "" : "s"} en la cuenta
+                    </span>
+                  )}
                 </p>
               </div>
               {[...campana.conjuntos.entries()].map(([conjunto, items]) => {
@@ -326,6 +359,16 @@ export function MensajeriaView({
                               onCheckedChange={(marcado) => alternar([ad.adId!], Boolean(marcado))}
                               className="border-foreground/30"
                             />
+                          )}
+                          {ad.thumbnailUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- viene de Meta CDN, con firma y expiración: no es un asset local que Next pueda optimizar/cachear
+                            <img
+                              src={ad.thumbnailUrl}
+                              alt=""
+                              className="size-8 shrink-0 rounded-md object-cover"
+                            />
+                          ) : (
+                            <span className="size-8 shrink-0 rounded-md bg-foreground/8" />
                           )}
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground/82">
                             {ad.adName ?? ad.adId}

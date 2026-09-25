@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Building2,
   ChevronDown,
   ChevronLeft,
   ChevronUp,
@@ -14,6 +13,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { summarizeObjectives } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
@@ -22,6 +22,7 @@ import {
   type AttachToCampana,
   type AttachToConjunto,
 } from "./anuncios-view";
+import { TarjetaResumenCliente } from "./resumen-cliente";
 import { OrbeDeBoton, Surface } from "./ui";
 
 type CuentaVinculada = {
@@ -39,6 +40,15 @@ type CuentaVinculada = {
    */
   pageId: string | null;
   /**
+   * Píxeles de Meta de esta cuenta puntual, para que el conjunto de anuncios
+   * pueda optimizar a leads o ventas en vez de solo a clics — Meta lo exige
+   * (`promoted_object.pixel_id`) y sin ninguno rechaza la creación del
+   * conjunto. Puede haber más de uno (MGC: Converse y Coliseum en la misma
+   * cuenta) — con más de uno, el Constructor exige elegir cuál usar en cada
+   * campaña.
+   */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
+  /**
    * Países de segmentación de esta cuenta puntual, no del cliente entero.
    *
    * ALO Group lo exige: seis cuentas de Google, una por país. Un solo campo
@@ -50,6 +60,8 @@ type CuentaVinculada = {
 /** Lo que puede guardarse desde la ficha de un cliente. */
 type CambiosPortfolio = Partial<Portfolio> & {
   accountPageId?: { externalId: string; pageId: string | null };
+  accountPixelAdd?: { externalId: string; pixelId: string; label?: string | null };
+  accountPixelRemove?: { externalId: string; pixelRowId: string };
   accountCountries?: { externalId: string; countries: string[] };
 };
 
@@ -59,6 +71,7 @@ type Portfolio = {
   pageId: string | null;
   instagramId: string | null;
   countries: string[];
+  website: string | null;
   contactEmail: string | null;
   needsReview: boolean;
   reviewNote: string | null;
@@ -247,6 +260,16 @@ export function ClientesView({
 
   const portfolios = data?.portfolios ?? [];
   const seleccionadoObj = portfolios.find((p) => p.id === seleccionado) ?? null;
+  const performanceDelSeleccionado =
+    performance.portfolios.find((p) => p.id === seleccionado) ?? null;
+  const cuentasDelSeleccionado = new Set(
+    performanceDelSeleccionado?.accounts.map((a) => a.id) ?? [],
+  );
+  const objetivosDelSeleccionado = performanceDelSeleccionado
+    ? summarizeObjectives(
+        performance.campaigns.filter((c) => cuentasDelSeleccionado.has(c.accountKey)),
+      )
+    : [];
   const pendientes = portfolios.filter((p) => faltantesDe(p).lista.length > 0);
   const porRevisar = portfolios.filter((p) => p.needsReview);
 
@@ -254,17 +277,22 @@ export function ClientesView({
     id: item.id,
     name: item.name,
     accountKeys: item.accounts.map((a) => a.id),
+    // Clientes como SQM facturan desde varias cuentas de la misma
+    // plataforma, una por país o mercado (SQM España, SQM SPN…). Sin esto,
+    // AnunciosView solo podía sumarlas todas o separarlas por plataforma —
+    // nunca ver "solo la cuenta de España".
+    cuentas: item.accounts.map((a) => ({
+      key: a.id,
+      name: a.name,
+      provider: a.provider,
+    })),
   }));
 
   return (
     <div className="mx-auto w-full max-w-[1700px] p-4 md:p-6">
       <div className="mb-5">
-        <p className="font-micro mb-3 inline-flex items-center gap-2 text-[0.62rem] text-foreground/50">
-          <Building2 className="size-3 text-brand" />
-          Cartera · clientes y sus anuncios
-        </p>
         <h2 className="neo-section-title">
-          Clientes
+          Cliente
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Usa el selector de cliente de la barra superior para abrir uno y ver
@@ -425,10 +453,27 @@ export function ClientesView({
         </div>
       ) : null}
 
+      {seleccionadoObj && performanceDelSeleccionado && (
+        <TarjetaResumenCliente
+          portfolio={performanceDelSeleccionado}
+          periodo={{
+            desde: performance.rangeStart,
+            hasta: performance.rangeEnd,
+            enCurso: performance.rango.enCurso,
+          }}
+          objetivos={objetivosDelSeleccionado}
+        />
+      )}
+
       <div className="space-y-4">
         {seleccionadoObj && verFicha && (
           <Ficha
-            key={seleccionadoObj.id}
+            // Prefijado para no colisionar con la key de <AnunciosView> de
+            // abajo: las dos usaban el mismo id de cliente como key y, al
+            // ser hijos del mismo div, React las trataba como la misma
+            // entrada — "two children with the same key" — y terminaba
+            // duplicando la Ficha en vez de reemplazarla al cerrar/abrir.
+            key={`ficha-${seleccionadoObj.id}`}
             portfolio={seleccionadoObj}
             editable={Boolean(data?.canManage)}
             guardando={saving === seleccionadoObj.id}
@@ -444,7 +489,7 @@ export function ClientesView({
           // reinicia el filtro interno de la tabla: `useState` solo lee
           // `portfolioIdFijo` en el primer montaje, así que el segundo
           // cliente elegido seguía mostrando las campañas del primero.
-          key={seleccionadoObj?.id ?? "todos"}
+          key={`anuncios-${seleccionadoObj?.id ?? "todos"}`}
           performance={performance}
           portfolios={anunciosPortfolios}
           portfolioIdFijo={seleccionadoObj?.id}
@@ -472,6 +517,7 @@ function Ficha({
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
   const [pageId, setPageId] = useState(portfolio.pageId ?? "");
   const [countries, setCountries] = useState(portfolio.countries.join(", "));
+  const [website, setWebsite] = useState(portfolio.website ?? "");
   const [email, setEmail] = useState(portfolio.contactEmail ?? "");
   const [metaCpa, setMetaCpa] = useState(
     portfolio.targetCpaMicros !== null
@@ -484,6 +530,7 @@ function Ficha({
   const cambiado =
     pageId !== (portfolio.pageId ?? "") ||
     countries !== portfolio.countries.join(", ") ||
+    website !== (portfolio.website ?? "") ||
     email !== (portfolio.contactEmail ?? "") ||
     metaCpa !== (portfolio.targetCpaMicros !== null ? String(portfolio.targetCpaMicros / 1_000_000) : "") ||
     metaRoas !== (portfolio.targetRoas !== null ? String(portfolio.targetRoas) : "");
@@ -614,6 +661,29 @@ function Ficha({
                       }
                     />
                   )}
+                  {cuenta.provider === "meta" && (
+                    <PixelesDeCuenta
+                      cuenta={cuenta}
+                      editable={editable}
+                      onAgregar={(pixelId, label) =>
+                        onGuardar({
+                          accountPixelAdd: {
+                            externalId: cuenta.externalId,
+                            pixelId,
+                            label,
+                          },
+                        })
+                      }
+                      onQuitar={(pixelRowId) =>
+                        onGuardar({
+                          accountPixelRemove: {
+                            externalId: cuenta.externalId,
+                            pixelRowId,
+                          },
+                        })
+                      }
+                    />
+                  )}
                   {necesitaDesglosePorPais && cuenta.provider && (
                     <PaisesDeCuenta
                       cuenta={cuenta}
@@ -634,6 +704,22 @@ function Ficha({
           </ul>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+                SITIO WEB
+              </label>
+              <Input
+                value={website}
+                disabled={!editable}
+                onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://ejemplo.cl"
+                className="h-9 bg-field/60 text-xs"
+              />
+              <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+                El Orb la usa como URL de destino por defecto al proponer una
+                campaña nueva, si nadie da una explícita.
+              </p>
+            </div>
             <div>
               <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
                 CORREO DE CONTACTO
@@ -753,6 +839,7 @@ function Ficha({
               onClick={() =>
                 onGuardar({
                   pageId: pageId.trim() || null,
+                  website: website.trim() || null,
                   contactEmail: email.trim() || null,
                   countries: countries
                     .split(",")
@@ -816,6 +903,92 @@ function PaginaDeCuenta({
         >
           Guardar
         </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Píxeles de Meta de una cuenta puntual, con su propio guardado.
+ *
+ * A diferencia de la página, no tiene un campo de respaldo a nivel cliente
+ * —nunca existió uno— así que se muestra siempre para cada cuenta de Meta,
+ * no solo cuando el cliente tiene más de una. Puede haber más de un píxel
+ * (MGC: Converse y Coliseum en la misma cuenta) — de ahí la lista en vez de
+ * un solo campo.
+ */
+function PixelesDeCuenta({
+  cuenta,
+  editable,
+  onAgregar,
+  onQuitar,
+}: {
+  cuenta: CuentaVinculada;
+  editable: boolean;
+  onAgregar: (pixelId: string, label: string | null) => void;
+  onQuitar: (pixelRowId: string) => void;
+}) {
+  const [nuevoId, setNuevoId] = useState("");
+  const [nuevaEtiqueta, setNuevaEtiqueta] = useState("");
+
+  return (
+    <div className="mt-2 pl-1">
+      <span className="font-micro block text-[0.55rem] text-foreground/40">
+        PÍXELES
+      </span>
+      {cuenta.pixels.length === 0 && (
+        <p className="mt-1 text-[0.65rem] text-foreground/40">
+          Sin píxel: no se puede publicar leads/ventas en esta cuenta.
+        </p>
+      )}
+      {cuenta.pixels.length > 0 && (
+        <ul className="mt-1 space-y-1">
+          {cuenta.pixels.map((pixel) => (
+            <li key={pixel.id} className="flex items-center gap-2">
+              <span className="metric-number min-w-0 flex-1 truncate text-[0.68rem] text-foreground/70">
+                {pixel.label ? `${pixel.label} · ${pixel.pixelId}` : pixel.pixelId}
+              </span>
+              {editable && (
+                <button
+                  type="button"
+                  onClick={() => onQuitar(pixel.id)}
+                  className="shrink-0 text-[0.62rem] font-semibold text-foreground/40 hover:text-danger"
+                >
+                  Quitar
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <Input
+            value={nuevoId}
+            onChange={(e) => setNuevoId(e.target.value)}
+            placeholder="Id del píxel"
+            className="h-7 bg-field/60 text-[0.68rem]"
+          />
+          <Input
+            value={nuevaEtiqueta}
+            onChange={(e) => setNuevaEtiqueta(e.target.value)}
+            placeholder="Etiqueta (ej. Converse)"
+            className="h-7 bg-field/60 text-[0.68rem]"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!nuevoId.trim()}
+            onClick={() => {
+              onAgregar(nuevoId.trim(), nuevaEtiqueta.trim() || null);
+              setNuevoId("");
+              setNuevaEtiqueta("");
+            }}
+            className="h-7 shrink-0 border-foreground/12 bg-transparent px-2.5 text-[0.62rem] text-foreground/70"
+          >
+            Agregar
+          </Button>
+        </div>
       )}
     </div>
   );

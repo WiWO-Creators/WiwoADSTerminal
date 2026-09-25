@@ -153,6 +153,11 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "impressions",
       "clicks",
       "conversions",
+      // Verificados con datos reales (get_data) el 24-09-2026: cobertura alta,
+      // valores creíbles y variados. Alimentan "Interacciones" (unificado con
+      // Meta) y "Puntuación de optimización".
+      "engagements",
+      "campaign_optimization_score",
     ],
     unidadPresupuesto: "micros",
   },
@@ -230,6 +235,11 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       // que permite encontrar los anuncios de mensajería de un vistazo.
       // Verificado contra get_fields de Windsor, tabla "Ad".
       "call_to_action_type",
+      // Miniatura real de la pieza. Verificado contra get_fields (tabla "Ad")
+      // y contra datos reales de una cuenta activa: viene poblada de forma
+      // consistente, a diferencia de `link_url` (el destino), que llega
+      // vacío incluso en anuncios sin botón de mensajería.
+      "thumbnail_url",
     ],
     camposAnuncio: [
       "account_id",
@@ -243,6 +253,17 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "ad_name",
       "effective_status",
       "call_to_action_type",
+      "thumbnail_url",
+      // Contenido real de la pieza, para poder precargarlo al editar en vez
+      // de mostrar un formulario en blanco — verificado con datos reales de
+      // Colbún (2026-09-24, get_data): `body` y `link` vienen poblados de
+      // forma consistente; `link_url` (el otro candidato para el destino)
+      // siempre viene vacío, igual que ya se sabía para `thumbnail_url` vs
+      // `link_url` más arriba. `title` viene null en piezas que reusan un
+      // post orgánico (no tienen título propio) — esperable, no un error.
+      "body",
+      "title",
+      "link",
       "spend",
       "impressions",
       "reach",
@@ -251,6 +272,20 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "actions_post_engagement",
       "actions_lead",
       "actions_omni_purchase",
+      // Verificados con datos reales (get_data) el 24-09-2026: cobertura alta,
+      // valores creíbles. `action_values_omni_purchase` es el valor de las
+      // compras (para derivar ROAS = valor/gasto, nunca se pide el ratio
+      // directo a Windsor porque no se puede sumar entre filas partidas).
+      "action_values_omni_purchase",
+      "actions_landing_page_view",
+      "video_thruplay_watched_actions_video_view",
+      "actions_video_view",
+      // Categóricos (ABOVE_AVERAGE / AVERAGE / BELOW_AVERAGE_xx / UNKNOWN).
+      // UNKNOWN domina en cuentas de bajo volumen (86-92% en la muestra
+      // verificada) — es esperable, no un error de mapeo.
+      "quality_ranking",
+      "engagement_rate_ranking",
+      "conversion_rate_ranking",
     ],
     unidadPresupuesto: "centavos",
   },

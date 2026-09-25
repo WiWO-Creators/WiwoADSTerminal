@@ -3,6 +3,7 @@ import { can, enAlcance } from "@/lib/permisos";
 import { listPortfolios } from "@/lib/portafolios-store";
 import {
   fetchFacebookPosts,
+  fetchIdentidadMeta,
   fetchInstagramMedia,
   WindsorError,
   type OrganicPost,
@@ -81,6 +82,10 @@ export async function GET(request: Request) {
         ? fetchInstagramMedia(cliente.instagramId, desde, hasta)
         : Promise.resolve<OrganicPost[]>([]),
     ]);
+    // Recién después: `fetchIdentidadMeta` solo lee lo que las dos llamadas
+    // de arriba acaban de guardar de paso (nunca golpea Windsor por su
+    // cuenta) — en paralelo con ellas todavía no habría nada que leer.
+    const identidad = await fetchIdentidadMeta(pageId, cliente.instagramId ?? null);
 
     const todo = [...posts, ...instagram].sort((a, b) =>
       (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
@@ -93,6 +98,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         posts: liviano,
+        identidad,
         aviso: cliente.instagramId
           ? null
           : "Este cliente no tiene una cuenta de Instagram declarada, así que solo se muestra Facebook.",

@@ -5,13 +5,15 @@ import {
   Building2,
   Cog,
   History,
+  Home,
   LineChart,
   Megaphone,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plug,
   RefreshCw,
   Search,
-  SlidersHorizontal,
   Sun,
   Target,
   type LucideIcon,
@@ -39,6 +41,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import type {
@@ -46,12 +49,10 @@ import type {
   PerformanceSnapshot,
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
-import {
-  RANGO_POR_DEFECTO,
-  esRangoNombrado,
-  type RangoId,
-} from "@/lib/rangos";
+import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
+import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
+import type { SemillaDeCampana } from "@/lib/constructor";
 import { type HealthCheck, type ViewKey } from "./data";
 import type { AttachToCampana, AttachToConjunto } from "./anuncios-view";
 import { ClientesView } from "./clientes-view";
@@ -68,13 +69,10 @@ import {
   HealthView,
   type ModuloInicio,
 } from "./secondary-views";
-import {
-  DEFAULT_RANGO_STORAGE_KEY,
-  DEFAULT_VIEW_STORAGE_KEY,
-  SettingsView,
-} from "./settings-view";
+import { BotonDeAlertas } from "./alertas";
 import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
+import { PuertaDeCliente } from "./puerta-cliente";
 import { SelectorDeFechas } from "./selector-fechas";
 import { ThinkingOrb } from "./ui";
 
@@ -89,15 +87,30 @@ type ItemDeMenu = {
    *  Viven acá para que renombrar un módulo sea un cambio en un solo lugar. */
   icono?: LucideIcon;
   resumen?: string;
+  /**
+   * Sigue visible en el menú (a propósito: no se quita, para no dar la
+   * sensación de que el módulo dejó de existir), pero no se puede entrar.
+   * Se excluye también de las tarjetas de Inicio, ver `modulosDeInicio`.
+   */
+  bloqueado?: boolean;
 };
 
 const navItems: ItemDeMenu[] = [
-  { key: "control", label: "Inicio" },
+  { key: "control", label: "Inicio", icono: Home },
+  {
+    key: "health",
+    label: "Dashboard C-Level",
+    icono: LineChart,
+    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+  },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
     // trae su tabla de anuncios embebida, así que es una sola entrada.
     key: "clients",
-    label: "Clientes",
+    // Singular a propósito: adentro siempre es la ficha, las cuentas y las
+    // campañas de UN cliente — la lista de arriba es solo el punto de
+    // entrada, no lo que define la pantalla.
+    label: "Cliente",
     roles: ["admin", "lead", "buyer"],
     icono: Building2,
     resumen: "Ficha de cada cliente, sus cuentas y sus anuncios en vivo.",
@@ -115,12 +128,7 @@ const navItems: ItemDeMenu[] = [
     roles: ["admin", "lead", "buyer"],
     icono: Target,
     resumen: "Segmentos y cobertura geográfica por cuenta.",
-  },
-  {
-    key: "health",
-    label: "Dashboard C-Level",
-    icono: LineChart,
-    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+    bloqueado: true,
   },
 ];
 
@@ -139,12 +147,6 @@ const navItemsGestion: ItemDeMenu[] = [
     label: "Cuentas",
     icono: Plug,
     resumen: "Conecta Google y Meta, y elige qué cuentas se leen.",
-  },
-  {
-    key: "settings",
-    label: "Ajustes",
-    icono: SlidersHorizontal,
-    resumen: "Periodo por defecto, tema y preferencias del panel.",
   },
 ];
 
@@ -169,9 +171,17 @@ const itemEquipo: ItemDeMenu = {
  * las entradas sin icono, que son las que todavía no se pensaron para acá.
  */
 function modulosDeInicio(role: string): ModuloInicio[] {
-  return [...navItems, ...navItemsGestion, itemEquipo]
-    .filter((item) => item.key !== "control" && puedeVerItem(item, role))
-    .flatMap((item) =>
+  const conGrupo = [
+    ...navItems.map((item) => ({ item, grupo: "principal" as const })),
+    ...navItemsGestion.map((item) => ({ item, grupo: "gestion" as const })),
+    { item: itemEquipo, grupo: "gestion" as const },
+  ];
+  return conGrupo
+    .filter(
+      ({ item }) =>
+        item.key !== "control" && !item.bloqueado && puedeVerItem(item, role),
+    )
+    .flatMap(({ item, grupo }) =>
       item.icono && item.resumen
         ? [
             {
@@ -179,6 +189,7 @@ function modulosDeInicio(role: string): ModuloInicio[] {
               label: item.label,
               icono: item.icono,
               resumen: item.resumen,
+              grupo,
             },
           ]
         : [],
@@ -188,17 +199,11 @@ function modulosDeInicio(role: string): ModuloInicio[] {
 /** Radix Select no admite value="" — un id de portafolio real nunca vale esto. */
 const TODOS_LOS_CLIENTES = "__todos__";
 
-/** "hace 5 min", "hace 3 h", "hace 2 días" — para decir de cuándo es un dato. */
-function haceTiempo(desde: number): string {
-  const minutos = Math.max(0, Math.round((Date.now() - desde) / 60_000));
-  if (minutos < 1) return "hace un momento";
-  if (minutos < 60) return `hace ${minutos} min`;
-  const horas = Math.round(minutos / 60);
-  if (horas < 24) return `hace ${horas} h`;
-  const dias = Math.round(horas / 24);
-  return `hace ${dias} ${dias === 1 ? "día" : "días"}`;
-}
+/** Marca de que ya se eligió cliente en la puerta de entrada, esta sesión de
+ * navegador (ver `PuertaDeCliente` más abajo). */
+const PUERTA_CLIENTE_STORAGE_KEY = "wiwo-ads-puerta-cliente-resuelta";
 
+/** "hace 5 min", "hace 3 h", "hace 2 días" — para decir de cuándo es un dato. */
 const roleLabels: Record<string, string> = {
   direction: "Dirección",
   lead: "Lead",
@@ -213,9 +218,10 @@ export type DashboardIdentity = {
   role: string;
 };
 
-/** A qué abrir el Constructor cuando se navega hacia él desde Clientes. */
+/** A qué abrir el Constructor cuando se navega hacia él desde Clientes o
+ * desde una propuesta del asistente de IA. */
 type BuilderContexto =
-  | { modo: "nueva"; portfolioId: string }
+  | { modo: "nueva"; portfolioId: string; semilla?: SemillaDeCampana }
   | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto };
 
 /**
@@ -229,7 +235,15 @@ function builderConstructorKey(
   clienteGlobal: string | null,
 ): string {
   if (!contexto) return `nuevo:${clienteGlobal ?? ""}`;
-  if (contexto.modo === "nueva") return contexto.portfolioId;
+  // El id de la propuesta manda cuando existe: dos propuestas seguidas del
+  // asistente para el mismo cliente pueden llegar con el mismo nombre (o sin
+  // nombre todavía), y ahí el nombre solo no alcanza para forzar un
+  // Constructor nuevo — se seguía editando el borrador de la propuesta
+  // anterior sin darse cuenta. Sin propuesta (desde "Clientes"), el nombre
+  // sigue siendo la única pista real.
+  if (contexto.modo === "nueva") {
+    return `${contexto.portfolioId}:${contexto.semilla?.propuestaId ?? contexto.semilla?.name ?? ""}`;
+  }
   const attachTo = contexto.attachTo;
   const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";
   return `${attachTo.campaignId}:${adsetId}`;
@@ -290,7 +304,7 @@ export default function WiwoDashboard({
   /** null: todavía no se consultó. `puedeActualizar` sale del servidor. */
   const [estadoDatos, setEstadoDatos] = useState<{
     construidoEn: number | null;
-    tocaSemanal: boolean;
+    tocaAutoActualizar: boolean;
     puedeActualizar: boolean;
   } | null>(null);
   // Cuenta la petición de rango más reciente: si dos llegan a destiempo, solo
@@ -301,6 +315,27 @@ export default function WiwoDashboard({
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [builderContexto, setBuilderContexto] = useState<BuilderContexto | null>(null);
 
+  // Solo los clientes declarados tienen sentido para elegir acá — una cuenta
+  // suelta sin cliente asignado no es algo que alguien "elija" al entrar.
+  const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
+  const [mostrarPuertaCliente, setMostrarPuertaCliente] = useState(false);
+  useEffect(() => {
+    // Una vez por sesión de navegador (no en cada recarga dentro de la misma
+    // pestaña): si ya se eligió, la marca queda en sessionStorage y no
+    // vuelve a interrumpir hasta que se cierre la pestaña o se cierre sesión
+    // y se abra otra. Arranca en `false` a propósito (ver la nota del tema,
+    // arriba): así la mayoría de las cargas —donde ya se eligió antes— no
+    // parpadean con la puerta encima.
+    if (
+      clientesDeclarados.length > 0 &&
+      window.sessionStorage.getItem(PUERTA_CLIENTE_STORAGE_KEY) !== "1"
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
+      setMostrarPuertaCliente(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
+  }, []);
+
   useEffect(() => {
     // A propósito en un efecto y no en el inicializador de useState: leer
     // localStorage durante el render rompería la hidratación (el servidor
@@ -308,35 +343,6 @@ export default function WiwoDashboard({
     const savedTheme = window.localStorage.getItem("wiwo-ads-theme");
     // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
     if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme);
-  }, []);
-
-  useEffect(() => {
-    // Solo se aplica la vista de inicio guardada cuando en verdad se llegó a
-    // la portada genérica. Si `initialView` ya trae algo específico (por
-    // ejemplo `?view=integrations` al volver de conectar una cuenta), esa
-    // intención manda por sobre la preferencia guardada.
-    if (initialView !== "control") return;
-    const vistaGuardada = window.localStorage.getItem(
-      DEFAULT_VIEW_STORAGE_KEY,
-    ) as ViewKey | null;
-    if (
-      vistaGuardada &&
-      vistaGuardada !== "control" &&
-      ["control", "clients", "builder", "health"].includes(vistaGuardada)
-    ) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ver nota de arriba
-      setView(vistaGuardada);
-    }
-
-    const rangoGuardado = window.localStorage.getItem(
-      DEFAULT_RANGO_STORAGE_KEY,
-    );
-    // Solo un periodo con nombre puede ser el predeterminado: uno a mano
-    // ("1 sep – 21 sep") sería otro mes distinto cada vez que se abre la app.
-    if (rangoGuardado && esRangoNombrado(rangoGuardado)) {
-      void cambiarRango(rangoGuardado);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
   }, []);
 
   // Los diálogos y menús se pintan fuera de este árbol (portales): el tema
@@ -408,32 +414,55 @@ export default function WiwoDashboard({
 
   /**
    * Relee todo desde Windsor: borra el caché de métricas, reconstruye el
-   * catálogo de campañas (lo único que conoce lo recién creado y lo pausado) y
-   * vuelve a pedir el tablero. Es lo que hace el botón "Actualizar" y, sola,
-   * la actualización semanal.
+   * catálogo de campañas (lo único que nota lo recién creado, lo pausado y lo
+   * borrado de verdad en la plataforma) y vuelve a pedir el tablero. Es lo
+   * que hace el botón "Actualizar" y, sola, la actualización automática
+   * (cada 2 h como mucho, ver `INTERVALO_AUTOACTUALIZACION_MS`).
    */
   async function actualizarDatos(automatica = false) {
     if (actualizando) return;
     setActualizando(true);
     const aviso = toast.loading(
-      automatica ? "Actualización semanal de datos…" : "Actualizando datos…",
-      { description: "Lee Windsor de nuevo; puede tardar un par de minutos." },
+      automatica ? "Actualización automática de datos…" : "Actualizando datos…",
+      { description: "Lee Windsor de nuevo; puede tardar unos segundos." },
     );
     try {
       const response = await fetch("/api/actualizar", { method: "POST" });
-      const body = (await response.json()) as {
+      let body: {
         error?: string;
         construidoEn?: number | null;
         campanas?: number;
         anuncios?: number;
         fallos?: string[];
+        /** Alguien más (otra pestaña, otra persona) ya está en medio del
+         * mismo barrido completo — ver el candado en app/api/actualizar. */
+        yaEnCurso?: boolean;
       };
+      try {
+        body = await response.json();
+      } catch {
+        // Reconstruir el catálogo completo puede tardar varios minutos —
+        // si la plataforma corta la conexión a mitad de camino, el cuerpo
+        // llega vacío y `.json()` explota con un mensaje de navegador que no
+        // dice nada útil. Esto no significa que nada se haya leído: solo que
+        // no llegó a tiempo la respuesta.
+        throw new Error(
+          "La actualización tardó demasiado y se cortó la conexión. Intenta de nuevo — puede que solo falte volver a pedirla.",
+        );
+      }
       if (!response.ok) throw new Error(body.error ?? "No se pudo actualizar");
+      if (body.yaEnCurso) {
+        toast.info("Ya se estaba actualizando", {
+          id: aviso,
+          description: "Alguien más lo pidió hace un momento — esperá a que termine.",
+        });
+        return;
+      }
       await refreshOperationalData();
       setEstadoDatos((actual) => ({
         puedeActualizar: actual?.puedeActualizar ?? true,
         construidoEn: body.construidoEn ?? Date.now(),
-        tocaSemanal: false,
+        tocaAutoActualizar: false,
       }));
       if (body.fallos && body.fallos.length > 0) {
         toast.warning("Datos actualizados, con avisos", {
@@ -464,20 +493,21 @@ export default function WiwoDashboard({
         if (!response.ok) return;
         const estado = (await response.json()) as {
           construidoEn: number | null;
-          tocaSemanal: boolean;
+          tocaAutoActualizar: boolean;
           puedeActualizar: boolean;
         };
         if (cancelado) return;
         setEstadoDatos(estado);
-        // Actualización semanal: no hay cron en este hosting, así que la hace
-        // la primera sesión con permiso que abre la app pasada la semana. Un
-        // intento por sesión-día como mucho, para que un fallo no la relance
-        // cada vez que alguien recarga la página.
-        if (estado.puedeActualizar && estado.tocaSemanal) {
+        // No hay cron en este hosting, así que la dispara la primera sesión
+        // con permiso que abre la app pasado el intervalo (2 h, ver
+        // INTERVALO_AUTOACTUALIZACION_MS en app/api/actualizar/route.ts). Acá
+        // se suma un tope de 1 intento por hora por navegador, para que un
+        // fallo no la relance cada vez que alguien recarga la página.
+        if (estado.puedeActualizar && estado.tocaAutoActualizar) {
           const ultimo = Number(
             window.localStorage.getItem("wiwo-ads-ultima-actualizacion-auto") ?? 0,
           );
-          if (Date.now() - ultimo > 6 * 60 * 60 * 1000) {
+          if (Date.now() - ultimo > 60 * 60 * 1000) {
             window.localStorage.setItem(
               "wiwo-ads-ultima-actualizacion-auto",
               String(Date.now()),
@@ -527,6 +557,16 @@ export default function WiwoDashboard({
 
   return (
     <div className="theme-shell" data-theme={theme}>
+    {mostrarPuertaCliente && (
+      <PuertaDeCliente
+        clientes={clientesDeclarados}
+        onElegir={(portfolioId) => {
+          setClienteSeleccionado(portfolioId);
+          window.sessionStorage.setItem(PUERTA_CLIENTE_STORAGE_KEY, "1");
+          setMostrarPuertaCliente(false);
+        }}
+      />
+    )}
     <SidebarProvider>
       <AppSidebar
         view={view}
@@ -536,6 +576,15 @@ export default function WiwoDashboard({
         onThemeChange={changeTheme}
         onNavigate={setView}
         onBuscar={() => setPaletaAbierta(true)}
+        clienteId={clienteSeleccionado}
+        clienteNombre={
+          performance.portfolios.find((item) => item.id === clienteSeleccionado)?.name ?? null
+        }
+        rango={rango}
+        puedeAprobar={
+          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+        }
+        onCambioAplicado={() => void refreshOperationalData()}
       />
       <PaletaDeComandos
         open={paletaAbierta}
@@ -582,7 +631,7 @@ export default function WiwoDashboard({
           {view === "health" && (
             <HealthView
               client={clienteSeleccionado}
-              portfolios={performance.portfolios}
+              performance={performance}
               onOpenIntegrations={() => setView("integrations")}
               checks={healthChecks}
               okCount={healthOk}
@@ -590,6 +639,9 @@ export default function WiwoDashboard({
               score={healthScore}
               critical={healthCritical}
               warnings={healthWarnings}
+              puedeVerResumen={
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+              }
             />
           )}
           {view === "clients" && (
@@ -618,6 +670,9 @@ export default function WiwoDashboard({
               // arrastrar lo que se había escrito para otra cosa.
               key={builderConstructorKey(builderContexto, clienteSeleccionado)}
               attachTo={builderConstructorAttachTo(builderContexto)}
+              semillaIA={
+                builderContexto?.modo === "nueva" ? builderContexto.semilla : undefined
+              }
               clienteGlobal={clienteSeleccionado}
               onCambiarClienteGlobal={setClienteSeleccionado}
               onPublicado={() => void refreshOperationalData()}
@@ -637,15 +692,7 @@ export default function WiwoDashboard({
               currentUser={initialSnapshot.user}
               signOutPath={signOutPath}
               onPerformanceUpdated={() => void refreshOperationalData()}
-            />
-          )}
-          {view === "settings" && (
-            <SettingsView
-              rango={rango}
-              cambiandoRango={cambiandoRango}
-              onRangoChange={(valor) => void cambiarRango(valor)}
-              theme={theme}
-              onThemeChange={changeTheme}
+              portfolios={performance.portfolios}
             />
           )}
           {view === "audiencias" && (
@@ -670,9 +717,9 @@ export default function WiwoDashboard({
         puedeAprobar={
           initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
         }
-        onAbrirConstructor={(portfolioId) => {
+        onAbrirConstructor={(portfolioId, semilla) => {
           setClienteSeleccionado(portfolioId);
-          setBuilderContexto({ modo: "nueva", portfolioId });
+          setBuilderContexto({ modo: "nueva", portfolioId, semilla });
           setView("builder");
         }}
         onCambioAplicado={() => void refreshOperationalData()}
@@ -691,6 +738,14 @@ function puedeVerItem(item: ItemDeMenu, role: string): boolean {
 }
 
 /**
+ * Nombre de la acción del interruptor de tema: describe a dónde va, no dónde
+ * está. Lo usan `aria-label` y `title` del botón compacto.
+ */
+function etiquetaCambioDeTema(theme: "dark" | "light") {
+  return theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro";
+}
+
+/**
  * Barra lateral al estilo MetriQ: logo, búsqueda, lista plana de secciones con
  * la activa marcada por una pastilla, y al pie la sesión y el tema.
  */
@@ -702,6 +757,11 @@ function AppSidebar({
   onThemeChange,
   onNavigate,
   onBuscar,
+  clienteId,
+  clienteNombre,
+  rango,
+  puedeAprobar,
+  onCambioAplicado,
 }: {
   view: ViewKey;
   currentUser: DashboardIdentity;
@@ -710,7 +770,20 @@ function AppSidebar({
   onThemeChange: (checked: boolean) => void;
   onNavigate: (view: ViewKey) => void;
   onBuscar: () => void;
+  clienteId: string | null;
+  clienteNombre: string | null;
+  rango: string;
+  puedeAprobar: boolean;
+  onCambioAplicado: () => void;
 }) {
+  // En pantalla chica la barra se abre como panel completo (`Sheet`), pero
+  // `state` sigue reflejando el ancho del escritorio: sin mirar `isMobile`
+  // el panel del celular mostraría el tema compactado aunque haya lugar de
+  // sobra. Es la misma condición que aplican las clases
+  // `group-data-[collapsible=icon]:` del resto del pie.
+  const { isMobile, state, toggleSidebar } = useSidebar();
+  const menuCompacto = !isMobile && state === "collapsed";
+
   function grupo(titulo: string | null, items: ItemDeMenu[]) {
     const visibles = items.filter((item) => puedeVerItem(item, currentUser.role));
     if (visibles.length === 0) return null;
@@ -729,19 +802,39 @@ function AppSidebar({
                 <SidebarMenuItem key={item.key}>
                   <SidebarMenuButton
                     isActive={activo}
-                    onClick={() => onNavigate(item.key)}
+                    disabled={item.bloqueado}
+                    onClick={item.bloqueado ? undefined : () => onNavigate(item.key)}
+                    tooltip={item.bloqueado ? `${item.label} · Próximamente` : item.label}
                     className={cn(
                       "h-11 gap-2.5 rounded-full px-4 text-[0.95rem] font-medium text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:font-bold data-[active=true]:text-foreground",
+                      "group-data-[collapsible=icon]:justify-center",
                     )}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        activo ? "bg-primary" : "bg-transparent",
-                      )}
-                    />
-                    <span>{item.label}</span>
+                    {item.icono ? (
+                      <item.icono
+                        aria-hidden="true"
+                        className={cn(
+                          "size-4 shrink-0",
+                          activo ? "text-primary" : "",
+                        )}
+                      />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          activo ? "bg-primary" : "bg-transparent",
+                        )}
+                      />
+                    )}
+                    <span className="flex-1 group-data-[collapsible=icon]:hidden">
+                      {item.label}
+                    </span>
+                    {item.bloqueado && (
+                      <span className="font-micro shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.6rem] text-muted-foreground group-data-[collapsible=icon]:hidden">
+                        Pronto
+                      </span>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );
@@ -753,25 +846,62 @@ function AppSidebar({
   }
 
   return (
-    <Sidebar collapsible="offcanvas" className="border-sidebar-border">
-      <SidebarHeader className="gap-4 px-4 pt-5 pb-2">
-        {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
-        <img
-          src={theme === "light" ? "/wiwo-ads-electric.png" : "/wiwo-ads-lime.png"}
-          alt="WiWO.ADS"
-          className="h-9 w-auto max-w-full self-start object-contain object-left"
-        />
+    <Sidebar collapsible="icon" className="border-sidebar-border">
+      <SidebarHeader className="gap-4 px-4 pt-5 pb-2 group-data-[collapsible=icon]:px-2">
+        <div className="flex items-center gap-2 group-data-[collapsible=icon]:flex-col">
+          {/* eslint-disable-next-line @next/next/no-img-element -- logo fijo, el proyecto todavía no usa next/image en ningún lado */}
+          <img
+            src={theme === "light" ? "/wiwo-ads-electric.png" : "/wiwo-ads-lime.png"}
+            alt="WiWO.ADS"
+            className="h-9 w-auto min-w-0 flex-1 object-contain object-left group-data-[collapsible=icon]:hidden"
+          />
+          {/* La marca cuando no hay ancho para el logotipo. `aria-hidden`
+              porque el nombre del producto ya lo dice el <title> de la
+              página: repetirlo acá solo agrega ruido al lector de pantalla. */}
+          <span
+            aria-hidden="true"
+            className="marca-w hidden text-[1.6rem] leading-none group-data-[collapsible=icon]:block"
+          >
+            W
+          </span>
+          {/* El botón de compactar vive adentro del menú, no en la barra de
+              arriba: es un control del menú y se busca donde está la cosa
+              que controla. No usa `SidebarTrigger` porque ese trae el panel
+              sin flecha, y acá la flecha de adentro tiene que apuntar a
+              donde se va a mover la barra. */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label={menuCompacto ? "Expandir menú" : "Compactar menú"}
+            title={menuCompacto ? "Expandir menú" : "Compactar menú"}
+            aria-expanded={!menuCompacto}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {menuCompacto ? (
+              <PanelLeftOpen className="size-4" aria-hidden="true" />
+            ) : (
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        </div>
         <button
           type="button"
           onClick={onBuscar}
-          className="flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title="Buscar"
+          className="flex h-11 w-full items-center gap-2.5 rounded-full border border-border bg-field px-4 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:self-center group-data-[collapsible=icon]:p-0"
         >
-          <Search className="size-4" />
-          <span className="flex-1 text-left">Buscar…</span>
-          <kbd className="rounded-md bg-sidebar-accent px-1.5 py-0.5 text-[0.65rem] font-semibold text-muted-foreground">
-            ⌘K
-          </kbd>
+          <Search className="size-4 shrink-0" />
+          <span className="flex-1 text-left group-data-[collapsible=icon]:hidden">
+            Buscar…
+          </span>
         </button>
+        <BotonDeAlertas
+          clienteId={clienteId}
+          clienteNombre={clienteNombre}
+          rango={rango}
+          puedeAprobar={puedeAprobar}
+          onCambioAplicado={onCambioAplicado}
+        />
       </SidebarHeader>
 
       <SidebarContent className="gap-2 py-3">
@@ -779,71 +909,105 @@ function AppSidebar({
         {grupo("Gestión", navItemsGestion)}
       </SidebarContent>
 
-      <SidebarFooter className="gap-3 border-t border-sidebar-border px-4 py-4">
-        {puedeVerItem(itemEquipo, currentUser.role) && (
-          // Solo el engranaje. Sin texto visible, el nombre lo llevan
-          // `aria-label` (lectores de pantalla) y `title` (pista al pasar el
-          // mouse): un icono suelto sin ninguno de los dos es un botón que
-          // nadie sabe qué hace hasta que lo aprieta.
-          <button
-            type="button"
-            onClick={() => onNavigate(itemEquipo.key)}
-            aria-label={itemEquipo.label}
-            title={itemEquipo.label}
-            aria-current={view === itemEquipo.key ? "page" : undefined}
-            className={cn(
-              "flex size-10 shrink-0 items-center justify-center self-start rounded-full transition-colors",
-              view === itemEquipo.key
-                ? "bg-sidebar-accent text-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
-            )}
-          >
-            <Cog className="size-5" aria-hidden="true" />
-          </button>
-        )}
-        <div className="min-w-0">
-          <p className="truncate text-[0.95rem] font-bold text-foreground">
+      <SidebarFooter className="gap-3 border-t border-sidebar-border px-4 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
+        <div className="min-w-0 group-data-[collapsible=icon]:contents">
+          <p className="truncate text-[0.95rem] font-bold text-foreground group-data-[collapsible=icon]:hidden">
             {currentUser.displayName}
           </p>
-          <p className="truncate text-xs text-muted-foreground">{currentUser.email}</p>
-          <span className="mt-2 inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase">
-            {roleLabels[currentUser.role] ?? currentUser.role}
-          </span>
+          <p className="truncate text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            {currentUser.email}
+          </p>
+          <div className="mt-2 flex items-center gap-2 group-data-[collapsible=icon]:mt-0">
+            <span className="inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase group-data-[collapsible=icon]:hidden">
+              {roleLabels[currentUser.role] ?? currentUser.role}
+            </span>
+            {puedeVerItem(itemEquipo, currentUser.role) && (
+              // Solo el engranaje, al lado del rol: las dos cosas hablan de
+              // permisos, y ahí es donde se las busca. Sin texto visible, el
+              // nombre lo llevan `aria-label` (lectores de pantalla) y
+              // `title` (pista al pasar el mouse): un icono suelto sin
+              // ninguno de los dos es un botón que nadie sabe qué hace hasta
+              // que lo aprieta.
+              <button
+                type="button"
+                onClick={() => onNavigate(itemEquipo.key)}
+                aria-label={itemEquipo.label}
+                title={itemEquipo.label}
+                aria-current={view === itemEquipo.key ? "page" : undefined}
+                className={cn(
+                  "flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+                  view === itemEquipo.key
+                    ? "bg-sidebar-accent text-foreground"
+                    : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground",
+                )}
+              >
+                <Cog className="size-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
         <a
           href={signOutPath}
-          className="w-fit rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-danger"
+          onClick={() => {
+            // Para que la próxima persona que entre en esta misma pestaña
+            // (u otra sesión) vuelva a pasar por la puerta de cliente, en
+            // vez de heredar en silencio la marca de que "ya se eligió".
+            window.sessionStorage.removeItem(PUERTA_CLIENTE_STORAGE_KEY);
+          }}
+          title="Cerrar sesión"
+          className="w-fit rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-danger group-data-[collapsible=icon]:hidden"
         >
           Cerrar sesion
         </a>
-        <div
-          role="group"
-          aria-label="Tema de la interfaz"
-          className="flex w-fit items-center gap-0.5 rounded-full border border-border bg-field p-1"
-        >
-          {(
-            [
-              { id: "light" as const, label: "Light", Icono: Sun },
-              { id: "dark" as const, label: "Dark", Icono: Moon },
-            ]
-          ).map(({ id, label, Icono }) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={theme === id}
-              onClick={() => onThemeChange(id === "light")}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
-                theme === id
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icono className="size-3.5" aria-hidden="true" />
-              {label}
-            </button>
-          ))}
-        </div>
+        {menuCompacto ? (
+          // Compactado no entran las dos opciones con su texto, así que el
+          // par pasa a ser un interruptor: muestra el tema puesto y al
+          // apretarlo salta al otro. Qué hace el botón lo dicen `aria-label`
+          // y `title`, porque el icono solo cuenta dónde estás parado, no
+          // qué pasa si lo tocas.
+          <button
+            type="button"
+            onClick={() => onThemeChange(theme === "dark")}
+            aria-label={etiquetaCambioDeTema(theme)}
+            title={etiquetaCambioDeTema(theme)}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-field text-[var(--acento-tema)] transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {theme === "dark" ? (
+              <Moon className="size-4" aria-hidden="true" />
+            ) : (
+              <Sun className="size-4" aria-hidden="true" />
+            )}
+          </button>
+        ) : (
+          <div
+            role="group"
+            aria-label="Tema de la interfaz"
+            className="flex w-fit items-center gap-0.5 rounded-full border border-border bg-field p-1"
+          >
+            {(
+              [
+                { id: "light" as const, label: "Light", Icono: Sun },
+                { id: "dark" as const, label: "Dark", Icono: Moon },
+              ]
+            ).map(({ id, label, Icono }) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={theme === id}
+                onClick={() => onThemeChange(id === "light")}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
+                  theme === id
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icono className="size-3.5" aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );
@@ -892,7 +1056,7 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-3 bg-canvas/90 px-4 backdrop-blur-xl md:px-6">
       <div className="flex min-w-0 items-center gap-3">
-        <SidebarTrigger className="size-9 rounded-full text-muted-foreground hover:bg-sidebar-accent" />
+        <SidebarTrigger className="size-9 rounded-full text-muted-foreground hover:bg-sidebar-accent md:hidden" />
         {clientesDeclarados.length > 0 && (
           <Select
             value={clienteSeleccionado ?? TODOS_LOS_CLIENTES}
@@ -922,22 +1086,19 @@ function AppHeader({
               cargando={cambiandoRango}
               disabled={cambiandoRango}
             />
-            <span
-              className={cn(
-                "hidden whitespace-nowrap text-[0.68rem] font-semibold 2xl:inline",
-                cambiandoRango ? "text-brand" : "text-muted-foreground",
+            {/* El botón ya muestra el rango elegido (con su propio ícono de
+                carga mientras cambia) — acá solo se agrega lo que ese botón
+                no dice: que el periodo sigue abierto. Un periodo abierto se
+                marca porque compararlo con uno cerrado y leer una caída es
+                el error clásico. Si el nombre del rango ya lo dice solo
+                ("Mes en curso"), no hace falta repetirlo al lado. */}
+            {!cambiandoRango &&
+              performance.rango?.enCurso &&
+              !performance.rango.label.toLowerCase().includes("en curso") && (
+                <span className="hidden whitespace-nowrap text-[0.68rem] font-semibold text-muted-foreground 2xl:inline">
+                  En curso
+                </span>
               )}
-            >
-              {cambiandoRango ? (
-                "Leyendo Windsor…"
-              ) : (
-                <>
-                  {performance.rangeStart} a {performance.rangeEnd}
-                  {/* Un periodo abierto se marca: compararlo con uno cerrado y leer una caída es el error clásico. */}
-                  {performance.rango?.enCurso ? " · en curso" : ""}
-                </>
-              )}
-            </span>
           </div>
         )}
         {puedeActualizar && (

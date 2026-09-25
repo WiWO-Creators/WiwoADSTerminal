@@ -117,6 +117,32 @@ export const SPECIAL_AD_CATEGORIES: Record<
   },
 };
 
+/**
+ * Objetivo real de Meta (ODAX), para cuando el objetivo de negocio elegido
+ * arriba (tráfico/leads/ventas/alcance → `OBJECTIVES[x].meta`) no es lo
+ * bastante preciso y se quiere el objetivo real de Meta tal cual.
+ *
+ * Los 5 valores están verificados contra campañas reales de clientes ya
+ * corriendo en Meta (`campaign_objective`, vía Windsor) — no es una lista
+ * copiada de la documentación de Meta sin confirmar contra datos reales.
+ * Deliberadamente no incluye `OUTCOME_APP_PROMOTION`: ningún cliente lo usa
+ * hoy, así que no hay con qué confirmarlo contra un dato real.
+ */
+export type MetaObjectiveOverride =
+  | "OUTCOME_AWARENESS"
+  | "OUTCOME_TRAFFIC"
+  | "OUTCOME_ENGAGEMENT"
+  | "OUTCOME_LEADS"
+  | "OUTCOME_SALES";
+
+export const META_OBJECTIVE_LABELS: Record<MetaObjectiveOverride, string> = {
+  OUTCOME_AWARENESS: "Reconocimiento (Awareness)",
+  OUTCOME_TRAFFIC: "Tráfico",
+  OUTCOME_ENGAGEMENT: "Interacción (Engagement)",
+  OUTCOME_LEADS: "Leads",
+  OUTCOME_SALES: "Ventas",
+};
+
 export type Gender = "todos" | "hombres" | "mujeres";
 
 /**
@@ -192,31 +218,234 @@ export type GoogleChannel = "search" | "display";
  * la tabla pública de geotargets de Google, solo a nivel país). Sin esto, la
  * segmentación geográfica de Google —que va en una acción aparte,
  * `set_campaign_geo_targeting`— no tiene forma de traducir "CL" a lo que la
- * API realmente espera. Cubre los países que hoy aparecen en la cartera; un
- * país fuera de esta lista se marca como no traducible en vez de inventarle
- * un id.
+ * API realmente espera.
+ *
+ * Los 219 países activos de la tabla oficial completa de Google
+ * (developers.google.com/google-ads/api/data/geotargets, descargada y
+ * cruzada contra ISO 3166-1 — nada inventado, cada id sale de esa fuente).
+ * Un país fuera de esta lista (no debería quedar ninguno activo afuera) se
+ * marca como no traducible en vez de inventarle un id.
  */
 export const GOOGLE_GEO_TARGET_IDS: Record<string, string> = {
-  CL: "2152",
+  AD: "2020",
+  AE: "2784",
+  AF: "2004",
+  AG: "2028",
+  AL: "2008",
+  AM: "2051",
+  AO: "2024",
+  AQ: "2010",
   AR: "2032",
-  PE: "2604",
-  CO: "2170",
-  EC: "2218",
-  PA: "2591",
-  MX: "2484",
-  ES: "2724",
-  US: "2840",
-  BR: "2076",
-  UY: "2858",
-  PY: "2600",
+  AS: "2016",
+  AT: "2040",
+  AU: "2036",
+  AZ: "2031",
+  BA: "2070",
+  BB: "2052",
+  BD: "2050",
+  BE: "2056",
+  BF: "2854",
+  BG: "2100",
+  BH: "2048",
+  BI: "2108",
+  BJ: "2204",
+  BL: "2652",
+  BN: "2096",
   BO: "2068",
-  VE: "2862",
+  BQ: "2535",
+  BR: "2076",
+  BS: "2044",
+  BT: "2064",
+  BW: "2072",
+  BY: "2112",
+  BZ: "2084",
+  CA: "2124",
+  CC: "2166",
+  CD: "2180",
+  CF: "2140",
+  CG: "2178",
+  CH: "2756",
+  CI: "2384",
+  CK: "2184",
+  CL: "2152",
+  CM: "2120",
+  CN: "2156",
+  CO: "2170",
   CR: "2188",
-  GT: "2320",
-  HN: "2340",
-  SV: "2222",
-  NI: "2558",
+  CV: "2132",
+  CW: "2531",
+  CX: "2162",
+  CY: "2196",
+  CZ: "2203",
+  DE: "2276",
+  DJ: "2262",
+  DK: "2208",
+  DM: "2212",
   DO: "2214",
+  DZ: "2012",
+  EC: "2218",
+  EE: "2233",
+  EG: "2818",
+  ER: "2232",
+  ES: "2724",
+  ET: "2231",
+  FI: "2246",
+  FJ: "2242",
+  FM: "2583",
+  FR: "2250",
+  GA: "2266",
+  GB: "2826",
+  GD: "2308",
+  GE: "2268",
+  GG: "2831",
+  GH: "2288",
+  GM: "2270",
+  GN: "2324",
+  GQ: "2226",
+  GR: "2300",
+  GS: "2239",
+  GT: "2320",
+  GU: "2316",
+  GW: "2624",
+  GY: "2328",
+  HM: "2334",
+  HN: "2340",
+  HR: "2191",
+  HT: "2332",
+  HU: "2348",
+  ID: "2360",
+  IE: "2372",
+  IL: "2376",
+  IM: "2833",
+  IN: "2356",
+  IQ: "2368",
+  IS: "2352",
+  IT: "2380",
+  JE: "2832",
+  JM: "2388",
+  JO: "2400",
+  JP: "2392",
+  KE: "2404",
+  KG: "2417",
+  KH: "2116",
+  KI: "2296",
+  KM: "2174",
+  KN: "2659",
+  KR: "2410",
+  KW: "2414",
+  KZ: "2398",
+  LA: "2418",
+  LB: "2422",
+  LC: "2662",
+  LI: "2438",
+  LK: "2144",
+  LR: "2430",
+  LS: "2426",
+  LT: "2440",
+  LU: "2442",
+  LV: "2428",
+  LY: "2434",
+  MA: "2504",
+  MC: "2492",
+  MD: "2498",
+  ME: "2499",
+  MF: "2663",
+  MG: "2450",
+  MH: "2584",
+  MK: "2807",
+  ML: "2466",
+  MM: "2104",
+  MN: "2496",
+  MP: "2580",
+  MR: "2478",
+  MT: "2470",
+  MU: "2480",
+  MV: "2462",
+  MW: "2454",
+  MX: "2484",
+  MY: "2458",
+  MZ: "2508",
+  NA: "2516",
+  NC: "2540",
+  NE: "2562",
+  NF: "2574",
+  NG: "2566",
+  NI: "2558",
+  NL: "2528",
+  NO: "2578",
+  NP: "2524",
+  NR: "2520",
+  NU: "2570",
+  NZ: "2554",
+  OM: "2512",
+  PA: "2591",
+  PE: "2604",
+  PF: "2258",
+  PG: "2598",
+  PH: "2608",
+  PK: "2586",
+  PL: "2616",
+  PM: "2666",
+  PN: "2612",
+  PT: "2620",
+  PW: "2585",
+  PY: "2600",
+  QA: "2634",
+  RO: "2642",
+  RS: "2688",
+  RU: "2643",
+  RW: "2646",
+  SA: "2682",
+  SB: "2090",
+  SC: "2690",
+  SD: "2736",
+  SE: "2752",
+  SG: "2702",
+  SH: "2654",
+  SI: "2705",
+  SK: "2703",
+  SL: "2694",
+  SM: "2674",
+  SN: "2686",
+  SO: "2706",
+  SR: "2740",
+  SS: "2728",
+  ST: "2678",
+  SV: "2222",
+  SX: "2534",
+  SY: "2760",
+  SZ: "2748",
+  TD: "2148",
+  TF: "2260",
+  TG: "2768",
+  TH: "2764",
+  TJ: "2762",
+  TK: "2772",
+  TL: "2626",
+  TM: "2795",
+  TN: "2788",
+  TO: "2776",
+  TR: "2792",
+  TT: "2780",
+  TV: "2798",
+  TZ: "2834",
+  UA: "2804",
+  UG: "2800",
+  UM: "2581",
+  US: "2840",
+  UY: "2858",
+  UZ: "2860",
+  VA: "2336",
+  VC: "2670",
+  VE: "2862",
+  VN: "2704",
+  VU: "2548",
+  WF: "2876",
+  WS: "2882",
+  YE: "2887",
+  ZA: "2710",
+  ZM: "2894",
+  ZW: "2716",
 };
 
 /**
@@ -226,6 +455,74 @@ export const GOOGLE_GEO_TARGET_IDS: Record<string, string> = {
  */
 export const RADIO_MINIMO_KM = 1;
 export const RADIO_MAXIMO_KM = 80;
+
+/**
+ * Base con la que el asistente de IA puede precargar una campaña nueva
+ * (ver `abrir_constructor` en `lib/asistente.ts`). Deliberadamente no trae
+ * presupuesto: eso se elige recién dentro del Constructor, una vez que se
+ * sabe la cuenta real y su moneda. La segmentación por región/ciudad sí
+ * puede venir precargada (`targetPlaces`) porque su id de Google es global,
+ * no depende de la cuenta — así una campaña pedida "para Santiago y
+ * Valparaíso" no se queda solo en el texto del resumen.
+ */
+export type SemillaDeCampana = {
+  /** Id de la propuesta del asistente que originó esta semilla (`Propuesta.id`
+   * en `lib/asistente.ts`) — no el nombre de la campaña. Dos propuestas
+   * seguidas pueden compartir nombre (o llegar sin nombre todavía) y
+   * confundir a `builderConstructorKey`, que usa esto para decidir si debe
+   * reiniciar el Constructor; el id de la propuesta nunca se repite. */
+  propuestaId?: string;
+  name: string;
+  objective: Objective;
+  platforms: Platform[];
+  /** Nota interna visible en "Detalles" — nunca se envía a ninguna plataforma. */
+  details: string;
+  targetCountries: string[];
+  /** Regiones/ciudades ya resueltas a un id real de Google (ver `LugarSegmentable`
+   * más abajo) — el asistente las busca con `buscarGeoTargets` antes de proponer,
+   * nunca inventa un id. */
+  targetPlaces?: LugarSegmentable[];
+  /** Solo cuando la persona pidió explícitamente restringir el idioma. Ver
+   * `Propuesta["targetLanguages"]` en `lib/asistente.ts`. */
+  targetLanguages?: Array<"es" | "en" | "pt">;
+  /**
+   * Contenido sugerido para el anuncio — el asistente de IA lo escribe
+   * cuando ya sabe qué se promociona, con la sintaxis real de cada campo
+   * (palabras clave con `""`/`[]` cuando corresponde, sin repetir el
+   * objetivo en el texto). Todo opcional y editable: llega como borrador
+   * dentro del Constructor, nunca se publica solo. `landingUrl` puede venir
+   * vacío — nunca inventado — y queda para que la persona lo complete.
+   */
+  landingUrl?: string;
+  headlines?: string[];
+  descriptions?: string[];
+  keywords?: string[];
+  metaMessage?: string;
+  metaHeadline?: string;
+  metaDescription?: string;
+};
+
+/** Una región/estado/provincia o ciudad/comuna real, tal como la devuelve
+ * `/api/geo-targets` — `id` es el geo_target_constant_id real de Google.
+ *
+ * `lat`/`lng`/`radiusKm` son la resolución de ese mismo lugar contra
+ * Nominatim (`lib/geocoding.ts`), para que Meta —que no tiene su propio id de
+ * región/ciudad vía Windsor— lo pueda segmentar igual, con un círculo real en
+ * vez de quedarse en todo el país. `undefined` si la geocodificación falló o
+ * todavía no se intentó: ahí el lugar sigue segmentando a Google como
+ * siempre, pero no aporta nada a Meta. `aproximado` avisa cuando el lugar
+ * real es más grande que el radio máximo que Meta acepta (80 km) — el
+ * círculo cubre el centro, no todo el área. */
+export type LugarSegmentable = {
+  id: string;
+  nombre: string;
+  countryCode: string;
+  tier: "region" | "city";
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  aproximado?: boolean;
+};
 
 export type CampaignDraft = {
   portfolioId: string;
@@ -239,10 +536,24 @@ export type CampaignDraft = {
    * hace falta elegir.
    */
   accountByPlatform: Partial<Record<Platform, string>>;
+  /**
+   * Qué píxel de Meta usar, cuando la cuenta elegida tiene más de uno (ver
+   * `CuentaCliente.pixels`). `null` cuando la cuenta solo tiene uno: ahí no
+   * hace falta elegir, se usa directo.
+   */
+  metaPixelId: string | null;
   name: string;
   /** Nota interna del equipo. No se envía a ninguna plataforma. */
   details: string;
   objective: Objective;
+  /**
+   * Objetivo real de Meta, cuando se quiere ser más preciso que el objetivo
+   * de negocio de arriba (que ya trae uno mapeado por defecto en
+   * `OBJECTIVES[x].meta`). `null` usa ese default — nunca hace falta
+   * tocar esto para publicar. Solo aplica a Meta; Google no tiene este
+   * concepto de todos modos, ver `googleChannel`.
+   */
+  metaObjective: MetaObjectiveOverride | null;
   /** Solo aplica a Meta; Google no tiene este concepto. */
   specialAdCategory: SpecialAdCategory;
   /**
@@ -290,6 +601,29 @@ export type CampaignDraft = {
    * interpreta al armar el plan, no acá.
    */
   keywords: string[];
+  /**
+   * Google: palabras clave negativas a nivel de campaña — misma sintaxis y
+   * mismo parser que `keywords` (`push_negative_keywords`, verificada en
+   * `list_actions` sobre `google_ads`). Evita que el anuncio aparezca en
+   * búsquedas de soporte, empleo o de la competencia que nadie pidió pautar.
+   */
+  negativeKeywords: string[];
+  /**
+   * Google: tope de CPC (moneda de la cuenta, no micros — se convierte al
+   * armar el plan). Solo tiene efecto real cuando la puja de la campaña es
+   * Maximizar clics (`target_spend`): la acción real `set_cpc_bid_ceiling`
+   * documenta que las demás estrategias tratan el tope como algo de cartera,
+   * no ajustable por campaña. `null` deja la puja sin techo, como hasta ahora.
+   */
+  cpcCeiling: number | null;
+  /**
+   * Google: idiomas a segmentar (`set_campaign_language_targeting`, acción
+   * real verificada en `list_actions`). Vacío es el default real de
+   * Google: todos los idiomas — así queda hoy sin tocar este campo. Solo
+   * los tres que de verdad usa la agencia hoy: no hace falta el selector de
+   * 51 idiomas que expone Google Ads para tener esto operativo.
+   */
+  targetLanguages: Array<"es" | "en" | "pt">;
   /** Meta: texto principal del anuncio. */
   message: string;
   /**
@@ -354,6 +688,16 @@ export type CampaignDraft = {
    */
   targetCountries: string[];
   /**
+   * Regiones/estados/provincias y ciudades/comunas reales, elegidas por
+   * búsqueda (`/api/geo-targets`, tabla `geo_targets` sembrada desde la misma
+   * fuente oficial que `GOOGLE_GEO_TARGET_IDS`). Solo las usa Google: Meta no
+   * expone, a través de Windsor, una forma de buscar sus propios ids de
+   * región/ciudad —son un sistema de ids completamente distinto—, así que
+   * elegir un lugar acá no segmenta la campaña de Meta, que sigue por país o
+   * por radio.
+   */
+  targetPlaces: LugarSegmentable[];
+  /**
    * Segmentación por radio — el círculo que se dibuja en el mapa—, además o
    * en vez de países. A diferencia de intereses o ciudades, esto NO exige
    * buscar un id en ninguna plataforma: Meta acepta lat/lng/radio tal cual
@@ -402,6 +746,19 @@ export type CampaignDraft = {
    * `existingCampaign`.
    */
   existingAdset: { adsetId: string; adsetName: string } | null;
+  /**
+   * Solo tiene efecto cuando se crea una campaña 100% nueva (`existingCampaign`
+   * es `null`): el conjunto y el anuncio nacen activos en vez de pausados,
+   * para no tener que activarlos a mano después de activar la campaña. Seguro
+   * porque la campaña en sí SIEMPRE nace pausada (ver `buildPlan`) — nada
+   * entrega mientras esa pausa siga puesta, sin importar el estado del hijo.
+   *
+   * Al adjuntar a una campaña o conjunto que YA existe (y que puede estar
+   * corriendo de verdad), esto no aplica nunca: ahí el conjunto/anuncio nuevo
+   * sigue naciendo pausado sin excepción — no hay una campaña recién creada
+   * y pausada que sirva de freno.
+   */
+  activarConjuntoYAnuncio: boolean;
 };
 
 /** Cuenta de un cliente, tal como la expone `/api/clientes`. */
@@ -411,6 +768,14 @@ export type CuentaCliente = {
   provider: string;
   currency: string | null;
   pageId: string | null;
+  /**
+   * Píxeles de Meta de esta cuenta — puede haber más de uno (ej. MGC: un
+   * píxel de Converse y otro de Coliseum en la misma cuenta publicitaria).
+   * Ver el porqué en `portafolios-store.ts`. Con exactamente uno, se usa
+   * solo; con más de uno, la persona tiene que elegir cuál (`metaPixelId` en
+   * el draft) — nunca se adivina cuál corresponde a esta campaña.
+   */
+  pixels: Array<{ id: string; pixelId: string; label: string | null }>;
   countries: string[];
 };
 
@@ -434,7 +799,15 @@ export type PlanStep = {
 
 export type BuildResult = {
   issues: Issue[];
-  budget: BudgetAdvice;
+  /**
+   * Una sugerencia por cada plataforma elegida, no un solo número general.
+   * Antes era un `BudgetAdvice` único calculado sobre "la plataforma
+   * principal" (Google si estaba, si no Meta) y se mostraba como si fuera el
+   * total de la campaña — con dos plataformas elegidas, el número sugerido
+   * correspondía a una sola y el bloqueante de "falta presupuesto" seguía
+   * listando la otra sin dar pista de cuánto ponerle.
+   */
+  budgets: Partial<Record<Platform, BudgetAdvice>>;
   steps: PlanStep[];
   /** Siempre true en esta fase: nada de esto se ejecuta todavía. */
   simulation: true;
@@ -443,15 +816,34 @@ export type BuildResult = {
 /**
  * Sugiere un presupuesto diario a partir de lo que el cliente ya invierte.
  *
- * No se inventa un número: se toma el gasto real del mes en esa plataforma y
- * se divide por los días transcurridos. Si el cliente no tiene historia en la
- * plataforma, se devuelve null y la interfaz lo dice, en vez de proponer una
- * cifra sin fundamento.
+ * No se inventa un número: nunca propone una cifra que no salga de datos
+ * reales de este cliente. Dos fuentes, en orden:
+ *
+ * 1. Gasto real del periodo en curso, en campañas con actividad — la más
+ *    confiable, porque es inversión efectiva, no solo declarada.
+ * 2. Si no hay gasto este periodo (cuenta pausada, recién conectada, en
+ *    pausa temporal — el caso real de Skydive Andes, 2026-09-25: 24 días sin
+ *    gasto pero con campañas ya configuradas), el presupuesto DIARIO
+ *    CONFIGURADO de sus campañas (activas primero; si no hay ninguna activa,
+ *    las que existan) — no es gasto, pero es lo que el cliente ya definió
+ *    como normal para ese tipo de campaña, mejor referencia que un $0 que no
+ *    dice nada. Se distingue siempre en `basis` cuál de las dos se usó, para
+ *    no confundir "esto se gastó" con "esto se configuró".
+ *
+ * Sin ninguna de las dos, se devuelve null y la interfaz lo dice.
+ *
+ * Trabaja a nivel de campaña (no la cuenta agregada) justamente para poder
+ * excluir `excluirCampanas`: campañas de prueba creadas por este mismo
+ * sistema momentos antes no son "historia" del cliente — confirmado con
+ * Colbún (2026-09-24), donde campañas de prueba de la sesión, sin gasto real,
+ * se citaron como si fueran inversión histórica al sugerir presupuesto. Ver
+ * `nombresDeCampanasRecientes` en `lib/constructor-ejecutar.ts`.
  */
 export function recommendBudget(
   portfolio: PortfolioSummary | null,
   platform: Platform,
   snapshot: PerformanceSnapshot,
+  excluirCampanas: ReadonlySet<string> = new Set(),
 ): BudgetAdvice {
   if (!portfolio) {
     // Pasa tanto si no se eligió cliente como si el elegido no tiene
@@ -465,34 +857,67 @@ export function recommendBudget(
     };
   }
 
-  const provider = portfolio.byProvider.find(
-    (item) => item.provider === platform,
+  const cuentasDelCliente = new Set(portfolio.accounts.map((a) => a.id));
+  const todasLasCampanas = snapshot.campaigns.filter(
+    (c) =>
+      c.provider === platform &&
+      cuentasDelCliente.has(c.accountKey) &&
+      !excluirCampanas.has(c.name),
   );
-  const totals = provider?.currencyTotals ?? [];
 
-  if (totals.length === 0) {
+  if (todasLasCampanas.length === 0) {
     return {
       suggested: null,
       currency: null,
-      basis: `${portfolio.name} no tiene inversión registrada en ${platformLabel(platform)} este mes`,
+      basis: `${portfolio.name} no tiene ninguna campaña registrada en ${platformLabel(platform)}: define el presupuesto a mano`,
     };
   }
-  if (totals.length > 1) {
+  const monedas = new Set(todasLasCampanas.map((c) => c.currency).filter(Boolean));
+  if (monedas.size > 1) {
     return {
       suggested: null,
       currency: null,
       basis: "El cliente factura en varias monedas: define el presupuesto a mano",
     };
   }
+  const currency = todasLasCampanas.find((c) => c.currency)?.currency ?? null;
 
-  const total = totals[0];
-  const days = daysElapsed(snapshot.rangeStart, snapshot.rangeEnd);
-  const daily = total.spendMicros / 1_000_000 / Math.max(days, 1);
+  const conGasto = todasLasCampanas.filter((c) => c.conActividad);
+  const spendMicros = conGasto.reduce((sum, c) => sum + c.spendMicros, 0);
+  if (spendMicros > 0) {
+    const days = daysElapsed(snapshot.rangeStart, snapshot.rangeEnd);
+    const daily = spendMicros / 1_000_000 / Math.max(days, 1);
+    return {
+      suggested: Math.round(daily),
+      currency,
+      basis: `Promedio diario de ${portfolio.name} en el mes: ${days} ${days === 1 ? "día" : "días"} de inversión real`,
+    };
+  }
+
+  const activa = (status: string | null) => status === "ENABLED" || status === "ACTIVE";
+  const conPresupuestoActivas = todasLasCampanas.filter(
+    (c) => c.dailyBudgetMicros !== null && activa(c.status),
+  );
+  const candidatas =
+    conPresupuestoActivas.length > 0
+      ? conPresupuestoActivas
+      : todasLasCampanas.filter((c) => c.dailyBudgetMicros !== null);
+  if (candidatas.length > 0) {
+    const promedioMicros =
+      candidatas.reduce((sum, c) => sum + (c.dailyBudgetMicros ?? 0), 0) / candidatas.length;
+    return {
+      suggested: Math.round(promedioMicros / 1_000_000),
+      currency,
+      basis: `Presupuesto diario ya configurado en las campañas ${
+        candidatas === conPresupuestoActivas ? "activas" : "existentes"
+      } de ${portfolio.name} en ${platformLabel(platform)} — sin gasto real este periodo`,
+    };
+  }
 
   return {
-    suggested: Math.round(daily),
-    currency: total.currency,
-    basis: `Promedio diario de ${portfolio.name} en el mes: ${days} ${days === 1 ? "día" : "días"} de inversión real`,
+    suggested: null,
+    currency: null,
+    basis: `${portfolio.name} no tiene inversión ni presupuesto configurado en ${platformLabel(platform)} este mes`,
   };
 }
 
@@ -513,16 +938,34 @@ function cuentaElegida(
 /**
  * Países efectivos para segmentar: los elegidos a mano en el mapa
  * (`targetCountries`), o si no se tocó nada, los que la cuenta ya trae
- * declarados — el comportamiento de siempre, ahora como valor por defecto en
- * vez de la única opción.
+ * declarados — pero solo cuando tampoco hay una segmentación más fina
+ * (comunas/regiones o un radio en el mapa).
+ *
+ * Antes el fallback a los países de la cuenta se aplicaba siempre que
+ * `targetCountries` viniera vacío, sin mirar si ya había comunas elegidas.
+ * `set_campaign_geo_targeting` (Google) y `geo_locations` (Meta) sirven cada
+ * ubicación en la lista por separado — es una unión, no una intersección —
+ * así que agregar el país junto a las comunas no las acota: las vuelve
+ * irrelevantes, porque el país ya cubre todo lo que las comunas cubrían y
+ * más. Auditado en vivo contra la cuenta real de Colbún (2026-09-23,
+ * "Plan Hogar"): con Chile + 4 comunas, Google Ads mostró la campaña
+ * segmentada a los 18,7 M de habitantes del país, no a las comunas pedidas —
+ * en las dos plataformas, con el mismo origen.
+ *
+ * El guardia solo cubría el fallback (`targetCountries` vacío); con un país
+ * elegido a mano (o pasado por el Orb) a la vez que comunas/regiones, el
+ * mismo problema volvía a pasar — confirmado otra vez con Colbún
+ * (2026-09-24, campaña "Región del Maule" que terminó segmentando Chile
+ * entero). El chequeo aplica ahora sin importar de dónde salió el país.
  */
 function paisesEfectivos(
   draft: CampaignDraft,
   cuenta: CuentaCliente | null,
 ): string[] {
-  return draft.targetCountries.length > 0
-    ? draft.targetCountries
-    : (cuenta?.countries ?? []);
+  const yaSegmentadoMasFino = draft.targetPlaces.length > 0 || draft.geoRadius !== null;
+  if (yaSegmentadoMasFino) return [];
+  if (draft.targetCountries.length > 0) return draft.targetCountries;
+  return cuenta?.countries ?? [];
 }
 
 /**
@@ -533,7 +976,7 @@ function paisesEfectivos(
  * formato, pero Meta no puede descargarla, y descubrirlo recién al ejecutar
  * dejaría una campaña y un conjunto ya creados sin anuncio.
  */
-function problemaDeUrlPublica(valor: string): string | null {
+export function problemaDeUrlPublica(valor: string): string | null {
   const texto = valor.trim();
   if (!texto) {
     return "Falta la URL de la pieza: pega una dirección que empiece con https:// (o sube el archivo)";
@@ -634,6 +1077,17 @@ export function validateDraft(
   if (draft.platforms.includes("google") && !url) {
     add("landingUrl", "Google Ads exige una URL de destino");
   }
+  // Meta no la exige cuando el destino de conversión es mensajes (no hay
+  // sitio al que llevar), pero con un destino de sitio web publicar sin
+  // link crea un anuncio sin URL — antes esto pasaba la validación y
+  // solo se notaba al fallar (o al quedar roto) ya en la plataforma.
+  if (
+    draft.platforms.includes("meta") &&
+    draft.conversionLocation !== "mensajes" &&
+    !url
+  ) {
+    add("landingUrl", "Meta Ads exige una URL de destino (o cambia el destino de conversión a mensajes)");
+  }
   if (url && !/^https?:\/\//i.test(url)) {
     add("landingUrl", "La URL debe empezar con http:// o https://");
   }
@@ -677,6 +1131,22 @@ export function validateDraft(
         false,
       );
     }
+    // Verificado contra `list_actions` real de Windsor para `google_ads`
+    // (2026-09-23): la única acción que crea un anuncio es
+    // `create_responsive_search_ad` — texto puro, para un grupo de anuncios
+    // de Búsqueda. No existe ninguna acción de escritura para un anuncio de
+    // Display con imagen (`create_ad_asset` solo crea extensiones: sitelink,
+    // callout, snippet estructurado, llamada — no una pieza creativa). Elegir
+    // "Red de Display" igual crearía la campaña, pero el anuncio de texto que
+    // este sistema arma después fallaría contra la API real de Google (un RSA
+    // no es válido en un grupo de Display). Se bloquea acá, antes de publicar
+    // algo que se rompe a mitad de camino.
+    if (draft.googleChannel === "display") {
+      add(
+        "googleChannel",
+        "Google Ads en Red de Display no se puede publicar por esta vía: Windsor no tiene ninguna acción para crear un anuncio de Display con imagen. Usa Red de búsqueda, o crea la campaña de Display directo en Google Ads.",
+      );
+    }
     // Solo en Búsqueda: en Display las palabras clave no son la segmentación
     // principal, y exigirlas ahí bloquearía un caso válido sin necesidad.
     if (draft.googleChannel === "search" && draft.keywords.filter((k) => k.trim()).length === 0) {
@@ -687,6 +1157,16 @@ export function validateDraft(
     }
     if (draft.pathDisplay2.trim() && !draft.pathDisplay1.trim()) {
       add("pathDisplay1", "La segunda ruta de la URL exige la primera");
+    }
+    // Lugares del respaldo por mapa (`osm:...`) no tienen id real de Google
+    // — el filtro real vive en el paso de ubicaciones, esto solo avisa.
+    const soloMetaEnGoogle = draft.targetPlaces.filter((lugar) => !/^\d+$/.test(lugar.id));
+    if (soloMetaEnGoogle.length > 0) {
+      add(
+        "targetPlaces",
+        `${soloMetaEnGoogle.map((l) => l.nombre).join(", ")} no está en la lista de Google: solo segmenta la campaña de Meta.`,
+        false,
+      );
     }
     if (draft.pathDisplay1.length > 15 || draft.pathDisplay2.length > 15) {
       add("pathDisplay1", "Cada ruta de la URL visible admite hasta 15 caracteres");
@@ -707,6 +1187,30 @@ export function validateDraft(
 
   if (draft.platforms.includes("meta")) {
     const cuentaMeta = cuentaElegida(draft, cuentas, "meta");
+    // Meta no tiene su propio id de región/ciudad vía Windsor: un lugar solo
+    // segmenta la campaña de Meta si ya se resolvió a un círculo real
+    // (lat/lng/radio, ver `lib/geocoding.ts`) — si eso falló, avisa en vez de
+    // dejar que la persona crea que quedó cubierto y no.
+    const sinGeocodificar = draft.targetPlaces.filter(
+      (lugar) => lugar.lat === undefined || lugar.lng === undefined || !lugar.radiusKm,
+    );
+    if (sinGeocodificar.length > 0) {
+      add(
+        "targetPlaces",
+        `Meta no pudo ubicar ${sinGeocodificar.map((l) => l.nombre).join(", ")} en el mapa: esos lugares solo segmentan la campaña de Google, la de Meta sigue por país o por radio.`,
+        false,
+      );
+    }
+    const aproximados = draft.targetPlaces.filter(
+      (lugar) => lugar.aproximado && lugar.lat !== undefined,
+    );
+    if (aproximados.length > 0) {
+      add(
+        "targetPlaces",
+        `${aproximados.map((l) => l.nombre).join(", ")} es más grande que el radio máximo que Meta acepta (80 km): la campaña de Meta cubre un círculo alrededor del centro, no el área completa.`,
+        false,
+      );
+    }
     // Meta publica en nombre de una página: sin ella el anuncio no existe.
     if (!cuentaMeta?.pageId) {
       add(
@@ -715,7 +1219,14 @@ export function validateDraft(
       );
     }
     const paisesMeta = paisesEfectivos(draft, cuentaMeta);
-    if (paisesMeta.length === 0 && !draft.geoRadius) {
+    // Una comuna o región ya geocodificada (círculo lat/lng/radio real, ver
+    // más abajo en buildPlan) segmenta la campaña de Meta tan bien como un
+    // país — cuenta acá para no pedir un país de más cuando `paisesEfectivos`
+    // ya lo dejó vacío a propósito por haber una segmentación más fina.
+    const hayLugaresGeocodificados = draft.targetPlaces.some(
+      (lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm,
+    );
+    if (paisesMeta.length === 0 && !draft.geoRadius && !hayLugaresGeocodificados) {
       add(
         "accountByPlatform",
         "Falta un país o una zona por radio para segmentar: la cuenta de Meta no trae países declarados y no se eligió ninguno en el mapa",
@@ -761,6 +1272,7 @@ export function buildPlan(
   portfolio: PortfolioSummary | null,
   cuentas: CuentaCliente[],
   snapshot: PerformanceSnapshot,
+  excluirCampanasDePresupuesto: ReadonlySet<string> = new Set(),
 ): BuildResult {
   const issues = validateDraft(draft, cuentas);
   const steps: PlanStep[] = [];
@@ -774,6 +1286,13 @@ export function buildPlan(
   const enCampanaExistente =
     draft.existingCampaign?.platform === "google" ? draft.existingCampaign : null;
   const enConjuntoExistente = enCampanaExistente ? draft.existingAdset : null;
+  // Solo aplica cuando la campaña es 100% nueva: la campaña recién creada es
+  // la que queda pausada como freno (ver el paso create_campaign más abajo,
+  // siempre "paused"). Adjuntar a algo que ya existe (y que puede estar
+  // corriendo) nunca activa el hijo de entrada.
+  const statusHijoGoogle: "enabled" | "paused" =
+    !enCampanaExistente && draft.activarConjuntoYAnuncio ? "enabled" : "paused";
+  const etiquetaEstadoGoogle = statusHijoGoogle === "enabled" ? "activo" : "pausado";
 
   if (draft.platforms.includes("google")) {
     const cuenta = cuentaElegida(draft, cuentas, "google");
@@ -807,11 +1326,11 @@ export function buildPlan(
         platform: "google",
         action: "create_ad_group",
         label: enCampanaExistente
-          ? `Crear grupo de anuncios en «${enCampanaExistente.campaignName}» (pausado)`
-          : "Crear grupo de anuncios (pausado)",
+          ? `Crear grupo de anuncios en «${enCampanaExistente.campaignName}» (${etiquetaEstadoGoogle})`
+          : `Crear grupo de anuncios (${etiquetaEstadoGoogle})`,
         params: {
           name: enCampanaExistente ? draft.name : `${draft.name} · principal`,
-          status: "paused",
+          status: statusHijoGoogle,
           ...(enCampanaExistente
             ? { campaign_id: enCampanaExistente.campaignId }
             : {}),
@@ -823,8 +1342,8 @@ export function buildPlan(
       platform: "google",
       action: "create_responsive_search_ad",
       label: enConjuntoExistente
-        ? `Crear anuncio en «${enConjuntoExistente.adsetName}» (pausado)`
-        : "Crear anuncio de búsqueda responsivo (pausado)",
+        ? `Crear anuncio en «${enConjuntoExistente.adsetName}» (${etiquetaEstadoGoogle})`
+        : `Crear anuncio de búsqueda responsivo (${etiquetaEstadoGoogle})`,
       params: {
         // Igual que el video_id de Meta más abajo: si el grupo se crea en
         // este mismo plan, su id real solo existe después de ejecutar el
@@ -833,7 +1352,7 @@ export function buildPlan(
         headlines: draft.headlines.filter((t) => t.trim()),
         descriptions: draft.descriptions.filter((d) => d.trim()),
         final_url: draft.landingUrl.trim(),
-        status: "paused",
+        status: statusHijoGoogle,
         ...(draft.pathDisplay1.trim() ? { path1: draft.pathDisplay1.trim() } : {}),
         ...(draft.pathDisplay2.trim() ? { path2: draft.pathDisplay2.trim() } : {}),
       },
@@ -860,6 +1379,58 @@ export function buildPlan(
       });
     }
 
+    // Negativas: a nivel de campaña, no del grupo — mismo parser que las
+    // palabras clave positivas, misma sintaxis real de Google Ads.
+    const palabrasNegativas = draft.negativeKeywords
+      .map((linea) => linea.trim())
+      .filter(Boolean)
+      .map(parsearPalabraClave);
+    if (palabrasNegativas.length > 0) {
+      steps.push({
+        platform: "google",
+        action: "push_negative_keywords",
+        label: "Añadir palabras clave negativas",
+        params: {
+          level: "campaign",
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          keywords: palabrasNegativas,
+        },
+      });
+    }
+
+    // Tope de CPC: solo aplica de verdad con Maximizar clics — con otra
+    // estrategia la acción real lo trata como algo de cartera y no de
+    // campaña, así que ahí no se envía (ver doc de `cpcCeiling` más arriba).
+    if (
+      draft.cpcCeiling !== null &&
+      draft.cpcCeiling > 0 &&
+      objective.google !== "maximize_conversions"
+    ) {
+      steps.push({
+        platform: "google",
+        action: "set_cpc_bid_ceiling",
+        label: "Definir tope de CPC",
+        params: {
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          amount_micros: Math.round(draft.cpcCeiling * 1_000_000),
+        },
+      });
+    }
+
+    // Idiomas: vacío es el default real de Google (todos), así que solo se
+    // envía el paso cuando de verdad se restringió a algo.
+    if (draft.targetLanguages.length > 0) {
+      steps.push({
+        platform: "google",
+        action: "set_campaign_language_targeting",
+        label: "Definir idiomas",
+        params: {
+          campaign_id: enCampanaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          languages: draft.targetLanguages,
+        },
+      });
+    }
+
     // Ubicaciones: acción aparte de Google, no un campo de create_campaign.
     // Solo se define para una campaña nueva — una que ya existe puede tener
     // una segmentación deliberada, y este plan no la toca.
@@ -869,6 +1440,16 @@ export function buildPlan(
         ...paises
           .filter((p) => GOOGLE_GEO_TARGET_IDS[p])
           .map((p) => ({ geo_target_constant_id: GOOGLE_GEO_TARGET_IDS[p] })),
+        // Regiones y ciudades elegidas por búsqueda: mismo campo que país,
+        // solo que el id ya viene resuelto desde `geo_targets` en vez de la
+        // tabla estática de 219 países. Los que vienen del respaldo por mapa
+        // (`osm:...`, ver `lib/geocoding.ts`) no tienen id real de Google —
+        // se filtran acá para no mandarle a Google un id que no es suyo.
+        ...draft.targetPlaces
+          .filter((lugar) => /^\d+$/.test(lugar.id))
+          .map((lugar) => ({
+            geo_target_constant_id: lugar.id,
+          })),
         // Exclusiones: mismo campo, con `negative: true` — el flag real que
         // expone la acción para dejar un país fuera a propósito.
         ...draft.excludedCountries
@@ -918,6 +1499,12 @@ export function buildPlan(
   // el boost — ahí se arma un anuncio nuevo con la imagen, como antes.
   const boosteando =
     Boolean(draft.boostPostId) && !enCampanaMetaExistente && !enConjuntoMetaExistente;
+  // Mismo criterio que statusHijoGoogle: solo activo de entrada cuando la
+  // campaña de Meta es 100% nueva en este plan — la campaña pausada es el
+  // freno, nunca el conjunto o el anuncio adjuntados a algo que ya existe.
+  const statusHijoMeta: "active" | "paused" =
+    !enCampanaMetaExistente && draft.activarConjuntoYAnuncio ? "active" : "paused";
+  const etiquetaEstadoMeta = statusHijoMeta === "active" ? "activo" : "pausado";
 
   if (draft.platforms.includes("meta")) {
     const cuenta = cuentaElegida(draft, cuentas, "meta");
@@ -939,16 +1526,26 @@ export function buildPlan(
           : "Crear campaña (pausada)",
         params: {
           name: nombreCompuesto(objective.sigla, "meta", draft.name),
-          // Boostear exige una campaña de interacción — el objetivo elegido
-          // en el paso de Campaña no aplica acá, igual que en Meta Ads
+          // Boostear exige una campaña de interacción — ni el objetivo de
+          // negocio ni el override de acá aplican, igual que en Meta Ads
           // Manager al usar "Impulsar publicación".
-          objective: boosteando ? "OUTCOME_ENGAGEMENT" : objective.meta,
+          objective: boosteando
+            ? "OUTCOME_ENGAGEMENT"
+            : (draft.metaObjective ?? objective.meta),
           special_ad_categories: categoria ? [categoria] : [],
           // Meta trabaja en la unidad menor: 5000 = 50,00.
           ...(conCBO
-            ? draft.budgetMode === "total"
-              ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
-              : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+            ? {
+                ...(draft.budgetMode === "total"
+                  ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
+                  : { daily_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }),
+                // El presupuesto vive en la campaña (CBO), así que la puja
+                // también va acá. "Sin límite" es el default real de Meta
+                // Ads Manager — no pide bid_amount, a diferencia de "con
+                // límite de puja" o "costo objetivo", que sí lo exigen y que
+                // nadie puede inventar sin conocer la cuenta.
+                bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+              }
             : // Sin presupuesto de campaña, Windsor avisa que algunas cuentas
               // exigen declarar esto explícito: que el gasto NO se comparte
               // entre conjuntos, porque cada uno trae el suyo propio.
@@ -963,19 +1560,33 @@ export function buildPlan(
     const paisesMetaPlan = paisesEfectivos(draft, cuenta);
     const geoLocations: Record<string, unknown> = {};
     if (paisesMetaPlan.length > 0) geoLocations.countries = paisesMetaPlan;
-    if (draft.geoRadius) {
-      // Círculo del mapa: campo real y documentado de la Marketing API de
-      // Meta (`geo_locations.custom_locations`), no una acción aparte — no
-      // exige buscar ningún id, a diferencia de región o ciudad.
-      geoLocations.custom_locations = [
-        {
-          latitude: draft.geoRadius.lat,
-          longitude: draft.geoRadius.lng,
-          radius: draft.geoRadius.radiusKm,
-          distance_unit: "kilometer",
-        },
-      ];
-    }
+    // Círculo del mapa y regiones/ciudades geocodificadas van al mismo campo
+    // real de la Marketing API de Meta (`geo_locations.custom_locations`):
+    // Meta no tiene su propio id de región/ciudad vía Windsor, así que un
+    // lugar elegido en "Región / Ciudad" solo llega acá si ya se resolvió a
+    // lat/lng/radio real contra Nominatim (`lib/geocoding.ts`) — nunca con un
+    // centro o un radio inventado.
+    const circulos = [
+      ...(draft.geoRadius
+        ? [
+            {
+              latitude: draft.geoRadius.lat,
+              longitude: draft.geoRadius.lng,
+              radius: draft.geoRadius.radiusKm,
+              distance_unit: "kilometer" as const,
+            },
+          ]
+        : []),
+      ...draft.targetPlaces
+        .filter((lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm)
+        .map((lugar) => ({
+          latitude: lugar.lat!,
+          longitude: lugar.lng!,
+          radius: lugar.radiusKm!,
+          distance_unit: "kilometer" as const,
+        })),
+    ];
+    if (circulos.length > 0) geoLocations.custom_locations = circulos;
     const targeting: Record<string, unknown> = {
       geo_locations: geoLocations,
       age_min: draft.ageMin,
@@ -1022,13 +1633,57 @@ export function buildPlan(
     }
 
     const aMensajes = draft.conversionLocation === "mensajes";
+    // Meta exige un `custom_event_type` por objetivo, no un "conversión"
+    // genérico: LEAD para pedir datos de contacto, PURCHASE para venta.
+    // "Alcance" (OUTCOME_AWARENESS) nunca fue una conversión — optimizaba mal
+    // desde antes de esta corrección, cayendo en el mismo OFFSITE_CONVERSIONS
+    // que leads y ventas — así que pasa a REACH, que no exige píxel.
+    const eventoDeConversion: "LEAD" | "PURCHASE" | null =
+      draft.objective === "leads" ? "LEAD" : draft.objective === "ventas" ? "PURCHASE" : null;
+    // OFFSITE_CONVERSIONS exige `promoted_object` (pixel_id +
+    // custom_event_type): verificado contra `create_adset` real en Windsor
+    // ("some optimization goals require promoted_object ... for
+    // conversions"). Sin píxel configurado en la cuenta, Meta rechaza el
+    // conjunto de anuncios — confirmado en vivo contra Colbún (2026-09-23,
+    // "Plan Hogar"): 0 conjuntos, 0 anuncios, sin ningún aviso. Ahora se
+    // bloquea antes de publicar algo condenado a fallar, en vez de dejarlo
+    // pasar y enterarse por la cuenta real.
+    const necesitaPixel =
+      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes;
+    const pixelesDeLaCuenta = cuenta?.pixels ?? [];
+    // Una cuenta puede tener más de un píxel (MGC: Converse y Coliseum en la
+    // misma cuenta) — con exactamente uno no hay nada que elegir, con más de
+    // uno la persona tiene que decidir cuál corresponde a esta campaña, nunca
+    // se adivina.
+    const pixelElegido =
+      draft.metaPixelId && pixelesDeLaCuenta.some((p) => p.pixelId === draft.metaPixelId)
+        ? draft.metaPixelId
+        : pixelesDeLaCuenta.length === 1
+          ? pixelesDeLaCuenta[0].pixelId
+          : null;
+    const faltaPixel = necesitaPixel && pixelesDeLaCuenta.length === 0;
+    const pixelAmbiguo = necesitaPixel && pixelesDeLaCuenta.length > 1 && !pixelElegido;
+    if (faltaPixel) {
+      issues.push({
+        field: "accountByPlatform",
+        message: `Meta: para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"} hace falta el píxel de esta cuenta de Meta (configúralo en la ficha del cliente), o cambia el destino de conversión a Mensajes.`,
+        blocking: true,
+      });
+    }
+    if (pixelAmbiguo) {
+      issues.push({
+        field: "metaPixelId",
+        message: `Meta: esta cuenta tiene ${pixelesDeLaCuenta.length} píxeles configurados (${pixelesDeLaCuenta.map((p) => p.label ?? p.pixelId).join(", ")}) — elige cuál usar para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"}.`,
+        blocking: true,
+      });
+    }
     if (!enConjuntoMetaExistente) {
       steps.push({
         platform: "meta",
         action: "create_adset",
         label: enCampanaMetaExistente
-          ? `Crear conjunto de anuncios en «${enCampanaMetaExistente.campaignName}» (pausado)`
-          : "Crear conjunto de anuncios (pausado)",
+          ? `Crear conjunto de anuncios en «${enCampanaMetaExistente.campaignName}» (${etiquetaEstadoMeta})`
+          : `Crear conjunto de anuncios (${etiquetaEstadoMeta})`,
         params: {
           name: enCampanaMetaExistente ? draft.name : `${draft.name} · principal`,
           ...(enCampanaMetaExistente
@@ -1036,17 +1691,46 @@ export function buildPlan(
             : {}),
           optimization_goal: boosteando
             ? "POST_ENGAGEMENT"
-            : aMensajes
-              ? "CONVERSATIONS"
-              : draft.objective === "trafico"
+            : aMensajes && draft.objective === "leads"
+              ? // Verificado en vivo contra Colbún (2026-09-24): "CONVERSATIONS"
+                // lo rechaza Meta acá con "el objetivo de rendimiento no está
+                // disponible" (code 100, subcode 2490408), a pesar de que la
+                // documentación de la acción lo lista como válido para
+                // OUTCOME_LEADS. El valor real que Meta acepta es
+                // "LEAD_GENERATION" — probado con una escritura real, no
+                // supuesto de la documentación.
+                "LEAD_GENERATION"
+              : aMensajes
+                ? "CONVERSATIONS"
+                : draft.objective === "trafico"
                 ? "LINK_CLICKS"
-                : "OFFSITE_CONVERSIONS",
+                : draft.objective === "alcance"
+                  ? "REACH"
+                  : "OFFSITE_CONVERSIONS",
+          ...(eventoDeConversion !== null && !boosteando && !aMensajes && pixelElegido
+            ? {
+                promoted_object: {
+                  pixel_id: pixelElegido,
+                  custom_event_type: eventoDeConversion,
+                },
+              }
+            : {}),
           billing_event: "IMPRESSIONS",
-          status: "paused",
+          status: statusHijoMeta,
           // Con presupuesto de campaña se omiten los dos: Windsor lo pide
           // así — "omit both only when the campaign uses campaign budget
           // optimization" — y ponerlos igual haría que Meta rechace la
           // creación por tener presupuesto declarado en dos niveles a la vez.
+          //
+          // Sin CBO no hay forma de fijar la puja acá: el esquema real de
+          // `create_adset` en Windsor (`list_actions`, verificado) no tiene
+          // `bid_strategy` — solo `bid_amount`, un monto que nadie puede
+          // inventar. Un primer intento lo agregó igual y Windsor lo rechazó
+          // de plano ("Extra inputs are not permitted"). Con metaBudgetLevel
+          // "conjunto" queda expuesto al default de puja de la cuenta, el
+          // mismo problema original si ese default exige bid_amount — sin
+          // otra acción de Windsor que lo permita, no hay arreglo real acá
+          // todavía.
           ...(conCBO
             ? {}
             : draft.budgetMode === "total"
@@ -1055,9 +1739,28 @@ export function buildPlan(
           // ON_POST + POST_ENGAGEMENT: la forma simple de boostear que Meta
           // documenta sin exigir un botón de acción.
           ...(boosteando
-            ? { destination_type: "ON_POST" }
+            ? {
+                destination_type: "ON_POST",
+                // Windsor lo exige siempre para boost_post, con las dos
+                // formas de conjunto (ON_POST o FACEBOOK_PAGE): "the target
+                // ad set MUST belong to an engagement campaign and name the
+                // post's page in its promoted_object". Faltaba —encontrado
+                // releyendo la descripción real de la acción, no en una
+                // prueba en vivo— y habría hecho fallar cualquier boost
+                // igual que el anuncio de la demo.
+                promoted_object: { page_id: cuenta?.pageId ?? null },
+              }
             : aMensajes
-              ? { destination_type: "MESSENGER" }
+              ? {
+                  destination_type: "MESSENGER",
+                  // Meta lo exige siempre para un destino de mensajería
+                  // (Messenger, Instagram Direct, WhatsApp) — mismo caso que
+                  // boost_post arriba, encontrado en una publicación real
+                  // contra Colbún (2026-09-24): sin esto, Meta rechaza la
+                  // creación con "el objetivo de rendimiento no está
+                  // disponible", un mensaje que no menciona el motivo real.
+                  promoted_object: { page_id: cuenta?.pageId ?? null },
+                }
               : {}),
           ...(draft.budgetMode === "total" && draft.endDate
             ? { end_time: draft.endDate }
@@ -1073,7 +1776,7 @@ export function buildPlan(
       steps.push({
         platform: "meta",
         action: "boost_post",
-        label: "Boostear la publicación (pausado)",
+        label: `Boostear la publicación (${etiquetaEstadoMeta})`,
         params: {
           // El conjunto siempre se crea en este mismo plan cuando se boostea
           // (ver `boosteando` arriba), así que su id real solo existe
@@ -1081,7 +1784,7 @@ export function buildPlan(
           adset_id: MARCADOR_PASO_ANTERIOR,
           post_id: draft.boostPostId,
           name: draft.name,
-          status: "paused",
+          status: statusHijoMeta,
         },
       });
     } else {
@@ -1097,8 +1800,8 @@ export function buildPlan(
         platform: "meta",
         action: "create_ad",
         label: enConjuntoMetaExistente
-          ? `Crear anuncio en «${enConjuntoMetaExistente.adsetName}» (pausado)`
-          : "Crear anuncio (pausado)",
+          ? `Crear anuncio en «${enConjuntoMetaExistente.adsetName}» (${etiquetaEstadoMeta})`
+          : `Crear anuncio (${etiquetaEstadoMeta})`,
         params: {
           // Igual que video_id: si el conjunto se crea en este mismo plan, su
           // id real solo existe después de ejecutar el paso anterior.
@@ -1121,7 +1824,7 @@ export function buildPlan(
             : { link: draft.landingUrl.trim() || undefined }),
           call_to_action_type: draft.callToAction,
           page_id: cuenta?.pageId ?? null,
-          status: "paused",
+          status: statusHijoMeta,
         },
       });
     }
@@ -1151,13 +1854,14 @@ export function buildPlan(
     });
   }
 
-  const principal: Platform = draft.platforms.includes("google")
-    ? "google"
-    : "meta";
+  const budgets: Partial<Record<Platform, BudgetAdvice>> = {};
+  for (const plataforma of draft.platforms) {
+    budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot, excluirCampanasDePresupuesto);
+  }
 
   return {
     issues,
-    budget: recommendBudget(portfolio, principal, snapshot),
+    budgets,
     steps,
     simulation: true,
   };
@@ -1231,6 +1935,12 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     ? (body.specialAdCategory as CampaignDraft["specialAdCategory"])
     : "ninguna";
 
+  const metaObjective = (
+    ["OUTCOME_AWARENESS", "OUTCOME_TRAFFIC", "OUTCOME_ENGAGEMENT", "OUTCOME_LEADS", "OUTCOME_SALES"] as const
+  ).includes(body.metaObjective as MetaObjectiveOverride)
+    ? (body.metaObjective as MetaObjectiveOverride)
+    : null;
+
   const callToAction = (
     [
       "LEARN_MORE",
@@ -1261,9 +1971,14 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     portfolioId: String(body.portfolioId ?? ""),
     platforms,
     accountByPlatform,
+    metaPixelId:
+      typeof body.metaPixelId === "string" && body.metaPixelId.trim()
+        ? body.metaPixelId.trim()
+        : null,
     name: String(body.name ?? ""),
     details: String(body.details ?? ""),
     objective,
+    metaObjective,
     specialAdCategory,
     conversionLocation: body.conversionLocation === "mensajes" ? "mensajes" : "sitio_web",
     dailyBudget:
@@ -1284,6 +1999,16 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     pathDisplay1: String(body.pathDisplay1 ?? "").slice(0, 15),
     pathDisplay2: String(body.pathDisplay2 ?? "").slice(0, 15),
     keywords: (Array.isArray(body.keywords) ? body.keywords : []).map(String),
+    negativeKeywords: (Array.isArray(body.negativeKeywords) ? body.negativeKeywords : []).map(
+      String,
+    ),
+    cpcCeiling:
+      typeof body.cpcCeiling === "number" && Number.isFinite(body.cpcCeiling) && body.cpcCeiling > 0
+        ? body.cpcCeiling
+        : null,
+    targetLanguages: (Array.isArray(body.targetLanguages) ? body.targetLanguages : []).filter(
+      (l): l is "es" | "en" | "pt" => l === "es" || l === "en" || l === "pt",
+    ),
     message: String(body.message ?? ""),
     metaHeadline: String(body.metaHeadline ?? ""),
     metaDescription: String(body.metaDescription ?? ""),
@@ -1322,6 +2047,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
       .map(String)
       .map((code) => code.trim().toUpperCase())
       .filter((code) => GOOGLE_GEO_TARGET_IDS[code]),
+    targetPlaces: normalizeTargetPlaces(body.targetPlaces),
     excludedCountries: (Array.isArray(body.excludedCountries)
       ? body.excludedCountries
       : []
@@ -1337,6 +2063,9 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
         : "estandar",
     existingCampaign: normalizeExistingCampaign(body.existingCampaign),
     existingAdset: normalizeExistingAdset(body.existingAdset),
+    // Default true a propósito: es el ahorro de pasos que se pidió. Solo se
+    // desactiva si alguien lo destildó explícitamente en la pantalla.
+    activarConjuntoYAnuncio: body.activarConjuntoYAnuncio !== false,
   };
 }
 
@@ -1350,6 +2079,38 @@ function normalizeBudgetByPlatform(
     if (typeof monto === "number" && Number.isFinite(monto)) {
       salida[plataforma] = monto;
     }
+  }
+  return salida;
+}
+
+function normalizeTargetPlaces(value: unknown): LugarSegmentable[] {
+  if (!Array.isArray(value)) return [];
+  const salida: LugarSegmentable[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const { id, nombre, countryCode, tier, lat, lng, radiusKm, aproximado } =
+      item as Record<string, unknown>;
+    if (typeof id !== "string" || !id.trim()) continue;
+    if (typeof nombre !== "string" || !nombre.trim()) continue;
+    if (typeof countryCode !== "string" || !countryCode.trim()) continue;
+    if (tier !== "region" && tier !== "city") continue;
+    const tieneCoordenadas =
+      typeof lat === "number" &&
+      Number.isFinite(lat) &&
+      typeof lng === "number" &&
+      Number.isFinite(lng) &&
+      typeof radiusKm === "number" &&
+      Number.isFinite(radiusKm) &&
+      radiusKm > 0;
+    salida.push({
+      id: id.trim(),
+      nombre: nombre.trim(),
+      countryCode: countryCode.trim().toUpperCase(),
+      tier,
+      ...(tieneCoordenadas
+        ? { lat, lng, radiusKm, aproximado: aproximado === true }
+        : {}),
+    });
   }
   return salida;
 }

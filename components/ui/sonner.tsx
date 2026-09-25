@@ -18,6 +18,13 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // El lanzador de Thinking Orb vive fijo en bottom-4 right-4, size-16
+      // (64px) — el rincón por defecto de Sonner. Sin este offset, el primer
+      // aviso quedaba encima del orbe, tapándolo justo cuando más se necesita
+      // (por ejemplo mientras está "pensando"). 96px despeja el botón entero
+      // más el mismo margen de 16px que ya usa.
+      offset={{ bottom: 96, right: 16 }}
+      mobileOffset={{ bottom: 96, right: 16 }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
