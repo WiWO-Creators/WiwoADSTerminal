@@ -54,29 +54,9 @@ export default async function AccesoPage({
 
           <ThinkingOrb size="xl" state="thinking" label="" bare />
 
-          <div>
-            <h1 className="max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-[-0.04em] text-balance sm:text-5xl">
-              Sistema operativo de paid media
-            </h1>
-            <p className="mt-4 max-w-[46ch] text-base leading-7 text-[#F8FAD7]/70">
-              El equipo de MGC Global Group y WiWO gestiona campañas de Meta
-              Ads y Google Ads, sigue el pacing y la salud de medición de sus
-              clientes, todo en un solo lugar.
-            </p>
-          </div>
-
-          <ul className="flex flex-wrap gap-2 text-xs font-semibold text-[#F8FAD7]/80">
-            {["Meta Ads", "Google Ads", "Pacing", "Salud de medición"].map(
-              (tag) => (
-                <li
-                  key={tag}
-                  className="rounded-full border border-[#F8FAD7]/16 bg-[#F8FAD7]/[0.06] px-3 py-1.5"
-                >
-                  {tag}
-                </li>
-              ),
-            )}
-          </ul>
+          <h1 className="max-w-[14ch] text-4xl leading-[1.05] font-extrabold tracking-[-0.04em] text-balance sm:text-5xl">
+            Sistema operativo de paid media
+          </h1>
         </section>
 
         {/* ── Acceso ────────────────────────────────────────────────── */}
