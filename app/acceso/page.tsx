@@ -59,9 +59,44 @@ export default async function AccesoPage({
               Sistema operativo de paid media
             </h1>
             <p className="mt-4 max-w-[46ch] text-base leading-7 text-[#F8FAD7]/70">
-              Decisiones, pacing y salud de campañas. Un solo lugar.
+              WiWO.ADS es la herramienta interna con la que el equipo de MGC
+              Global Group y WiWO opera las cuentas publicitarias de sus
+              clientes: qué cambiar, cuándo y por qué, todo en un solo lugar.
             </p>
           </div>
+
+          <ul className="grid max-w-[46ch] gap-4 text-sm leading-6 text-[#F8FAD7]/78">
+            <li className="flex gap-3">
+              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
+                ●
+              </span>
+              <span>
+                <strong className="text-[#F8FAD7]">Gestión de campañas.</strong>{" "}
+                Crea y edita campañas, conjuntos de anuncios y creativos de
+                Meta Ads y Google Ads desde un mismo panel.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
+                ●
+              </span>
+              <span>
+                <strong className="text-[#F8FAD7]">Pacing y salud de medición.</strong>{" "}
+                Sigue gasto, ritmo de inversión y estado de píxeles y eventos
+                de conversión por cliente.
+              </span>
+            </li>
+            <li className="flex gap-3">
+              <span aria-hidden="true" className="mt-1 text-[#3BFF00]">
+                ●
+              </span>
+              <span>
+                <strong className="text-[#F8FAD7]">Cola de decisiones.</strong>{" "}
+                Prioriza qué cuenta necesita atención hoy, con contexto y
+                trazabilidad de cada cambio hecho por el equipo.
+              </span>
+            </li>
+          </ul>
         </section>
 
         {/* ── Acceso ────────────────────────────────────────────────── */}
