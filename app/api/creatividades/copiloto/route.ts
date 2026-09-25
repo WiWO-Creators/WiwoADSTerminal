@@ -1,4 +1,5 @@
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { asistenteConfigurado } from "@/lib/asistente";
 import { generarCopys, type EntradaCopiloto } from "@/lib/copiloto-creativos";
 import { can, enAlcance } from "@/lib/permisos";
@@ -32,8 +33,7 @@ export async function POST(request: Request) {
   if (!can(session.actor, "crear_campanas")) {
     return fail("Tu rol no puede crear campañas", 403);
   }
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
+  if (!mismoOrigen(request)) {
     return fail("Origen no permitido", 403);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
