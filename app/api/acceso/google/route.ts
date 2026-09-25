@@ -15,6 +15,17 @@ export function googleLoginConfigured(): boolean {
 }
 
 /**
+ * Origen público real del sitio, no el de la conexión interna. Detrás de un
+ * proxy que no reenvíe `X-Forwarded-Proto` correctamente, `url.origin` puede
+ * llegar como `http://` aunque el visitante entre por HTTPS — y Google exige
+ * que el `redirect_uri` coincida byte a byte con el registrado (`https://`
+ * incluido), o rechaza con `redirect_uri_mismatch`.
+ */
+export function origenPublico(url: URL): string {
+  return (env.APP_ORIGIN ?? url.origin).replace(/\/$/, "");
+}
+
+/**
  * La única puerta de entrada de la app. Prueba identidad real contra Google
  * —con PKCE, para que el código interceptado no le sirva a nadie más— y el
  * callback además exige el dominio de la empresa antes de dejar entrar.
@@ -37,7 +48,7 @@ export async function GET(request: Request) {
 
   const state = randomToken(32);
   const verifier = randomToken(64);
-  const redirectUri = `${url.origin}/api/acceso/google/callback`;
+  const redirectUri = `${origenPublico(url)}/api/acceso/google/callback`;
 
   const authorize = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   authorize.searchParams.set("client_id", env.GOOGLE_CLIENT_ID!);
