@@ -504,6 +504,13 @@ export type SemillaDeCampana = {
    * vacío — nunca inventado — y queda para que la persona lo complete.
    */
   landingUrl?: string;
+  /**
+   * Presupuesto diario, solo cuando la persona dio un monto explícito en
+   * pesos (o la moneda que sea) — nunca un estimado propio del modelo. La
+   * moneda la decide el campo real una vez elegida la cuenta, este número
+   * es agnóstico a eso.
+   */
+  dailyBudget?: number;
   headlines?: string[];
   descriptions?: string[];
   keywords?: string[];
