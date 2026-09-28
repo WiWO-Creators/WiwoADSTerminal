@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { detalleClientes } from "@/lib/clientes-detalle";
@@ -58,16 +59,16 @@ async function avisoDeLandingCaida(url: string): Promise<string | null> {
  */
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "crear_campanas")) {
-    return fail("Tu rol no puede construir campañas", 403);
+    return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   if (!mismoOrigen(request)) {
-    return fail("Origen no permitido", 403);
+    return fail("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-    return fail("Formato de solicitud no válido", 415);
+    return fail("Formato de solicitud no válido", 415, CODIGOS_ERROR.CONTENT_TYPE_INVALIDO);
   }
 
   try {
@@ -119,6 +120,3 @@ export async function POST(request: Request) {
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

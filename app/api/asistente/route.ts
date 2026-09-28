@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail as fallo } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import {
@@ -10,7 +11,6 @@ import { esRango } from "@/lib/rangos";
 
 export const dynamic = "force-dynamic";
 
-const NO_STORE = { "cache-control": "no-store" };
 const MAX_MENSAJES = 24;
 const MAX_LARGO_MENSAJE = 8_000;
 
@@ -22,10 +22,6 @@ type Cuerpo = {
   csv?: { nombre?: string; texto?: string } | null;
 };
 
-function fallo(mensaje: string, status: number) {
-  return Response.json({ error: mensaje }, { status, headers: NO_STORE });
-}
-
 /**
  * Conversación con el asistente, en streaming (SSE).
  *
@@ -35,12 +31,12 @@ function fallo(mensaje: string, status: number) {
  */
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fallo("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fallo("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!mismoOrigen(request)) {
-    return fallo("Origen no permitido", 403);
+    return fallo("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-    return fallo("Formato de solicitud no válido", 415);
+    return fallo("Formato de solicitud no válido", 415, CODIGOS_ERROR.CONTENT_TYPE_INVALIDO);
   }
   if (!asistenteConfigurado()) {
     return fallo("El asistente no está configurado (falta ANTHROPIC_API_KEY).", 503);

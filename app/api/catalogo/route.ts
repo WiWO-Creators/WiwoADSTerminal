@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { can } from "@/lib/permisos";
@@ -21,7 +22,7 @@ const NO_STORE = { "cache-control": "no-store" };
 
 export async function GET() {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
 
   const hoy = new Date().toISOString().slice(0, 10);
   const catalogo = await fetchWindsorCatalog(hoy);
@@ -30,14 +31,14 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   // Construirlo no cambia nada en las plataformas, pero consume cuota de
   // Windsor y tarda minutos: queda en manos de quien administra conexiones.
   if (!can(session.actor, "administrar_conexiones")) {
-    return fail("No tienes permiso para reconstruir el catálogo", 403);
+    return fail("No tienes permiso para reconstruir el catálogo", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
   if (!mismoOrigen(request)) {
-    return fail("Origen no permitido", 403);
+    return fail("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   if (!windsorConfigured()) return fail("Falta configurar WINDSOR_API_KEY", 503);
 
@@ -80,6 +81,3 @@ function resumen(catalogo: Awaited<ReturnType<typeof fetchWindsorCatalog>>) {
   };
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

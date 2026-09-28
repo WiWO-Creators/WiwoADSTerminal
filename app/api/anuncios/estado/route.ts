@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { can } from "@/lib/permisos";
@@ -73,16 +74,16 @@ const ACCION: Record<
 
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "aprobar_cambios")) {
-    return fail("Tu rol no puede pausar ni activar anuncios", 403);
+    return fail("Tu rol no puede pausar ni activar anuncios", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   if (!mismoOrigen(request)) {
-    return fail("Origen no permitido", 403);
+    return fail("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-    return fail("Formato de solicitud no válido", 415);
+    return fail("Formato de solicitud no válido", 415, CODIGOS_ERROR.CONTENT_TYPE_INVALIDO);
   }
 
   const body = (await request.json()) as {
@@ -145,6 +146,3 @@ export async function POST(request: Request) {
   return Response.json({ ok: true }, { headers: NO_STORE });
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}
