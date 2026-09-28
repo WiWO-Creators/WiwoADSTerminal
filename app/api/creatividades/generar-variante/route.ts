@@ -59,7 +59,7 @@ export async function POST(request: Request) {
   // (`problemaDeUrlPublica`): sin esto, cualquiera con permiso de crear
   // campañas podía pedirle a este Worker que hiciera un GET a una dirección
   // interna o de metadata en vez de una imagen pública real.
-  const problemaUrl = problemaDeUrlPublica(body.sourceUrl);
+  const problemaUrl = problemaDeUrlPublica(body.sourceUrl, "image");
   if (problemaUrl) return fail(problemaUrl, 400);
   if (!body.proporcion || !(body.proporcion in PROPORCIONES)) {
     return fail("Proporción no válida", 400);
