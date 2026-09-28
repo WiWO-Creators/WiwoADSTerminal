@@ -75,6 +75,7 @@ import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
 import { PuertaDeCliente } from "./puerta-cliente";
 import { SelectorDeFechas } from "./selector-fechas";
+import { MascotaSusu } from "./mascota-susu";
 import { ThinkingOrb } from "./ui";
 
 type ItemDeMenu = {
@@ -790,6 +791,7 @@ export default function WiwoDashboard({
         onCambioAplicado={() => void refreshOperationalData()}
       />
       <Toaster position="bottom-right" richColors />
+      <MascotaSusu />
     </SidebarProvider>
     </div>
   );
