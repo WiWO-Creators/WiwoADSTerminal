@@ -7,7 +7,7 @@ import {
   updateMember,
 } from "@/lib/equipo";
 import { mismoOrigen } from "@/lib/origen-publico";
-import { can } from "@/lib/permisos";
+import { can, puedeModificarMiembros, rolesAsignables } from "@/lib/permisos";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +16,20 @@ const NO_STORE = { "cache-control": "no-store" };
 export async function GET() {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
-  if (!can(session.actor, "administrar_equipo")) {
-    return fail("No tienes permiso para administrar el equipo", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
+  if (!can(session.actor, "ver_equipo")) {
+    return fail("No tienes permiso para ver el equipo", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   try {
     return Response.json(
-      { members: await listTeam(session.actor) },
+      {
+        members: await listTeam(session.actor),
+        // La pantalla decide qué ofrecer (roles del selector, si puede tocar
+        // a alguien ya existente) a partir de esto, no repitiendo la
+        // jerarquía de roles en el cliente.
+        rolesAsignables: rolesAsignables(session.actor),
+        puedeModificarMiembros: puedeModificarMiembros(session.actor),
+      },
       { headers: NO_STORE },
     );
   } catch (error) {

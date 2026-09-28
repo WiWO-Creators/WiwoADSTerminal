@@ -6,6 +6,9 @@ import {
   can,
   isRole,
   normalizeRole,
+  puedeModificarMiembros,
+  rolesAsignables,
+  ROLE_LABELS,
   type Actor,
   type Role,
 } from "@/lib/permisos";
@@ -178,7 +181,7 @@ async function portfoliosOf(userId: string): Promise<string[]> {
 }
 
 export async function listTeam(actor: Actor): Promise<TeamMember[]> {
-  assertCanManage(actor);
+  assertPuedeVerEquipo(actor);
   const db = getRawDb();
   const [users, links] = await Promise.all([
     db
@@ -217,12 +220,21 @@ export async function inviteMember(
   actor: Actor,
   input: { email: string; role: string; portfolioIds: string[] },
 ): Promise<void> {
-  assertCanManage(actor);
+  const asignables = rolesAsignables(actor);
+  if (asignables.length === 0) {
+    throw new EquipoError("No tienes permiso para agregar personas", 403);
+  }
   const email = input.email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new EquipoError("Ese correo no tiene un formato válido");
   }
   if (!isRole(input.role)) throw new EquipoError("Rol no reconocido");
+  if (!asignables.includes(input.role)) {
+    throw new EquipoError(
+      `No puedes agregar a alguien como ${ROLE_LABELS[input.role]}`,
+      403,
+    );
+  }
 
   const db = getRawDb();
   const existing = await db
@@ -256,7 +268,9 @@ export async function updateMember(
     portfolioIds?: string[];
   },
 ): Promise<void> {
-  assertCanManage(actor);
+  if (!puedeModificarMiembros(actor)) {
+    throw new EquipoError("No tienes permiso para modificar a alguien del equipo", 403);
+  }
   const db = getRawDb();
   const row = await db
     .prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
@@ -321,8 +335,8 @@ async function replacePortfolios(
   );
 }
 
-function assertCanManage(actor: Actor): void {
-  if (!can(actor, "administrar_equipo")) {
-    throw new EquipoError("No tienes permiso para administrar el equipo", 403);
+function assertPuedeVerEquipo(actor: Actor): void {
+  if (!can(actor, "ver_equipo")) {
+    throw new EquipoError("No tienes permiso para ver el equipo", 403);
   }
 }

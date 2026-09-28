@@ -68,6 +68,11 @@ export type DashboardUser = {
   email: string;
   displayName: string;
   role: string;
+  /** Portafolios asignados a esta persona. Sirve para preseleccionar el
+   * cliente al entrar (el primero de la lista), no solo para restringir
+   * el alcance de quien ya está acotado a `portfolioIds` — un rol que ve
+   * todos los clientes también puede tener uno preferido acá. */
+  portfolioIds: string[];
 };
 
 export type DashboardSnapshot = {
@@ -499,6 +504,7 @@ async function upsertUser(
     email: row.email,
     displayName: row.display_name,
     role: row.role,
+    portfolioIds: identity.portfolioIds,
   };
 }
 

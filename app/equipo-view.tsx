@@ -30,12 +30,27 @@ import { cn } from "@/lib/utils";
 import { roleCan, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
 import { PantallaDeCarga, Surface, OrbeDeBoton } from "./ui";
 
+type EquipoCargado = {
+  members: Member[];
+  rolesAsignables: Role[];
+  puedeModificarMiembros: boolean;
+};
+
 /** Trae el equipo sin tocar estado, para poder usarla dentro de un efecto. */
-async function fetchTeam(): Promise<Member[]> {
+async function fetchTeam(): Promise<EquipoCargado> {
   const response = await fetch("/api/equipo", { cache: "no-store" });
-  const body = (await response.json()) as { members?: Member[]; error?: string };
+  const body = (await response.json()) as {
+    members?: Member[];
+    rolesAsignables?: Role[];
+    puedeModificarMiembros?: boolean;
+    error?: string;
+  };
   if (!response.ok) throw new Error(body.error ?? "No se pudo cargar");
-  return body.members ?? [];
+  return {
+    members: body.members ?? [],
+    rolesAsignables: body.rolesAsignables ?? [],
+    puedeModificarMiembros: body.puedeModificarMiembros ?? false,
+  };
 }
 
 type Member = {
@@ -62,15 +77,27 @@ export function EquipoView({
   portfolios: Array<{ id: string; name: string }>;
 }) {
   const [members, setMembers] = useState<Member[]>([]);
+  const [rolesAsignables, setRolesAsignables] = useState<Role[]>([]);
+  const [puedeModificar, setPuedeModificar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("buyer");
+  const [role, setRole] = useState<Role | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setMembers(await fetchTeam());
+      const data = await fetchTeam();
+      setMembers(data.members);
+      setRolesAsignables(data.rolesAsignables);
+      setPuedeModificar(data.puedeModificarMiembros);
+      // El primer rol asignable como default: para un analista invitando,
+      // eso es directamente "client" (el único que puede dar de alta).
+      setRole((actual) =>
+        actual && data.rolesAsignables.includes(actual)
+          ? actual
+          : (data.rolesAsignables[0] ?? null),
+      );
       setError(null);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "No se pudo cargar");
@@ -87,7 +114,7 @@ export function EquipoView({
   }, [load]);
 
   async function invite() {
-    if (!email.trim()) return;
+    if (!email.trim() || !role) return;
     setSaving("invitar");
     try {
       const response = await fetch("/api/equipo", {
@@ -137,58 +164,71 @@ export function EquipoView({
         </p>
       </div>
 
-      <Surface className="mb-4 p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1">
-            <label
-              htmlFor="nuevo-correo"
-              className="font-micro block text-[0.62rem] text-foreground/55"
+      {rolesAsignables.length === 0 ? (
+        <Surface className="mb-4 p-4">
+          <p className="text-sm leading-6 text-foreground/55">
+            Tu rol no puede agregar personas al equipo.
+          </p>
+        </Surface>
+      ) : (
+        <Surface className="mb-4 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <label
+                htmlFor="nuevo-correo"
+                className="font-micro block text-[0.62rem] text-foreground/55"
+              >
+                CORREO
+              </label>
+              <Input
+                id="nuevo-correo"
+                type="email"
+                value={email}
+                placeholder="persona@empresa.com"
+                onChange={(event) => setEmail(event.target.value)}
+                className="mt-1.5 bg-field/60"
+              />
+            </div>
+            <div className="sm:w-52">
+              <label className="font-micro block text-[0.62rem] text-foreground/55">
+                ROL
+              </label>
+              <Select
+                value={role ?? undefined}
+                onValueChange={(value) => setRole(value as Role)}
+              >
+                <SelectTrigger className="mt-1.5 w-full bg-field/60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {rolesAsignables.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {ROLE_LABELS[item]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              onClick={() => void invite()}
+              disabled={saving === "invitar" || !email.trim() || !role}
+              className="h-10 font-extrabold"
             >
-              CORREO
-            </label>
-            <Input
-              id="nuevo-correo"
-              type="email"
-              value={email}
-              placeholder="persona@empresa.com"
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-1.5 bg-field/60"
-            />
+              {saving === "invitar" ? (
+                <OrbeDeBoton />
+              ) : (
+                <UserPlus />
+              )}
+              Agregar
+            </Button>
           </div>
-          <div className="sm:w-52">
-            <label className="font-micro block text-[0.62rem] text-foreground/55">
-              ROL
-            </label>
-            <Select value={role} onValueChange={(value) => setRole(value as Role)}>
-              <SelectTrigger className="mt-1.5 w-full bg-field/60">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLES.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {ROLE_LABELS[item]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            onClick={() => void invite()}
-            disabled={saving === "invitar" || !email.trim()}
-            className="h-10 font-extrabold"
-          >
-            {saving === "invitar" ? (
-              <OrbeDeBoton />
-            ) : (
-              <UserPlus />
-            )}
-            Agregar
-          </Button>
-        </div>
-        <p className="mt-2 text-xs leading-5 text-foreground/45">
-          {ROLE_DESCRIPTIONS[role]}
-        </p>
-      </Surface>
+          {role && (
+            <p className="mt-2 text-xs leading-5 text-foreground/45">
+              {ROLE_DESCRIPTIONS[role]}
+            </p>
+          )}
+        </Surface>
+      )}
 
       {error ? (
         <div className="rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">
@@ -233,7 +273,7 @@ export function EquipoView({
                       </span>
                     </TableCell>
                     <TableCell>
-                      {member.foundingAdmin ? (
+                      {member.foundingAdmin || !puedeModificar ? (
                         <span className="text-sm font-semibold text-foreground/74">
                           {ROLE_LABELS[member.role]}
                         </span>
@@ -265,14 +305,14 @@ export function EquipoView({
                         portfolios={portfolios}
                         selected={member.portfolioIds}
                         role={member.role}
-                        disabled={saving === member.id}
+                        disabled={saving === member.id || !puedeModificar}
                         onChange={(ids) =>
                           void patch(member.id, { portfolioIds: ids })
                         }
                       />
                     </TableCell>
                     <TableCell className="pr-4 text-right">
-                      {member.foundingAdmin ? (
+                      {member.foundingAdmin || !puedeModificar ? (
                         <span className="text-xs text-foreground/45">
                           No editable
                         </span>
@@ -306,11 +346,16 @@ export function EquipoView({
   );
 }
 
+const SIN_PREFERIDO = "__ninguno__";
+
 /**
  * Selector de clientes de una persona.
  *
- * Los roles que ven todo no muestran selector: asignarles clientes daría a
- * entender un límite que no existe.
+ * Dos modos según el rol: quien ve todos los clientes no tiene nada que
+ * restringir, pero sí puede tener uno "preferido" — el primero de
+ * `portfolioIds` — que solo decide con qué cliente arranca su vista al
+ * entrar, no qué puede ver. Quien no ve todos usa el multi-selector de
+ * siempre: ahí `portfolioIds` sí es el límite real de su acceso.
  */
 function ClientPicker({
   portfolios,
@@ -327,7 +372,23 @@ function ClientPicker({
 }) {
   if (roleCan(role, "ver_todos_los_clientes")) {
     return (
-      <span className="text-xs text-foreground/45">Todos los clientes</span>
+      <Select
+        value={selected[0] ?? SIN_PREFERIDO}
+        onValueChange={(value) => onChange(value === SIN_PREFERIDO ? [] : [value])}
+        disabled={disabled}
+      >
+        <SelectTrigger size="sm" className="w-48 bg-field/60">
+          <SelectValue placeholder="Sin preferido" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={SIN_PREFERIDO}>Sin preferido</SelectItem>
+          {portfolios.map((portfolio) => (
+            <SelectItem key={portfolio.id} value={portfolio.id}>
+              {portfolio.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
 
