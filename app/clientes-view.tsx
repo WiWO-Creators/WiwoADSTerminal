@@ -182,9 +182,10 @@ export function ClientesView({
    */
   seleccionado: string | null;
   onSeleccionar: (portfolioId: string | null) => void;
-  onCrearCampana: (portfolioId: string) => void;
-  onAgregarConjunto: (attachTo: AttachToCampana) => void;
-  onAgregarAnuncio: (attachTo: AttachToConjunto) => void;
+  /** Sin esta prop (rol sin crear_campanas), AnunciosView no ofrece el botón. */
+  onCrearCampana?: (portfolioId: string) => void;
+  onAgregarConjunto?: (attachTo: AttachToCampana) => void;
+  onAgregarAnuncio?: (attachTo: AttachToConjunto) => void;
 }) {
   const [data, setData] = useState<Respuesta | null>(null);
   const [error, setError] = useState<string | null>(null);

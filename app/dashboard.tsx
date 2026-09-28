@@ -290,6 +290,15 @@ export default function WiwoDashboard({
   // real siempre es el único), la vista arranca ya puesta ahí en vez de en
   // "Todos los clientes" — la persona no tiene que buscarse a sí misma en
   // el selector cada vez que entra.
+  // Único lugar que decide esto: admin y supervisor son los dos roles con
+  // crear_campanas (lib/permisos.ts). Reportado en producción (2026-09-28):
+  // el ítem "Creador de campañas" del menú ya se ocultaba para el resto,
+  // pero los botones "+ Conjunto" / "+ Anuncio" dentro de Cliente llevaban a
+  // la misma vista sin este chequeo — un analista podía ver y usar el
+  // Constructor entero (no publicar: la API ya lo bloqueaba, pero sí ver la
+  // interfaz completa, que es justo lo que no debía pasar).
+  const puedeCrearCampanas =
+    initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor";
   const [clienteSeleccionado, setClienteSeleccionado] = useState<
     string | null
   >(initialSnapshot.user.portfolioIds[0] ?? null);
@@ -651,21 +660,33 @@ export default function WiwoDashboard({
               performance={performance}
               seleccionado={clienteSeleccionado}
               onSeleccionar={setClienteSeleccionado}
-              onCrearCampana={(portfolioId) => {
-                setBuilderContexto({ modo: "nueva", portfolioId });
-                setView("builder");
-              }}
-              onAgregarConjunto={(attachTo) => {
-                setBuilderContexto({ modo: "adjuntar", attachTo });
-                setView("builder");
-              }}
-              onAgregarAnuncio={(attachTo) => {
-                setBuilderContexto({ modo: "adjuntar", attachTo });
-                setView("builder");
-              }}
+              onCrearCampana={
+                puedeCrearCampanas
+                  ? (portfolioId) => {
+                      setBuilderContexto({ modo: "nueva", portfolioId });
+                      setView("builder");
+                    }
+                  : undefined
+              }
+              onAgregarConjunto={
+                puedeCrearCampanas
+                  ? (attachTo) => {
+                      setBuilderContexto({ modo: "adjuntar", attachTo });
+                      setView("builder");
+                    }
+                  : undefined
+              }
+              onAgregarAnuncio={
+                puedeCrearCampanas
+                  ? (attachTo) => {
+                      setBuilderContexto({ modo: "adjuntar", attachTo });
+                      setView("builder");
+                    }
+                  : undefined
+              }
             />
           )}
-          {view === "builder" && (
+          {view === "builder" && puedeCrearCampanas && (
             <ConstructorView
               // Cada contexto nuevo es un constructor nuevo: reiniciar el
               // formulario al cambiar de cliente o de campaña de destino, no
