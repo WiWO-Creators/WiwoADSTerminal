@@ -729,6 +729,32 @@ export function AnunciosView({
   const marcasCampanaParaFiltrar = !seleccion ? marcasPorNivel.campana : null;
   const marcasConjuntoParaFiltrar = !seleccion ? marcasPorNivel.conjunto : null;
 
+  /**
+   * La fila con id nativo de lo elegido en el breadcrumb — `Seleccion` solo
+   * guarda nombres (sirve para filtrar y navegar), así que para ofrecer
+   * "Editar nombre" ahí mismo hace falta volver a agrupar al nivel que
+   * corresponda y encontrar la fila real. `agrupar` es pura y barata; no
+   * vale la pena guardar el id nativo en `Seleccion` solo para este botón.
+   */
+  const filaDeLaSeleccion = useMemo(() => {
+    if (!seleccion) return null;
+    if (seleccion.conjunto === null) {
+      return (
+        agrupar(ads, "campana").find(
+          (fila) => fila.accountKey === seleccion.accountKey && fila.campaignName === seleccion.campana,
+        ) ?? null
+      );
+    }
+    return (
+      agrupar(ads, "conjunto").find(
+        (fila) =>
+          fila.accountKey === seleccion.accountKey &&
+          fila.campaignName === seleccion.campana &&
+          (fila.adsetName ?? "") === seleccion.conjunto,
+      ) ?? null
+    );
+  }, [ads, seleccion]);
+
   const filas = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
     const base = agrupar(ads, nivel).filter((fila) => {
@@ -1381,6 +1407,39 @@ export function AnunciosView({
               </span>
             </>
           ) : null}
+          {puedeAprobar &&
+            filaDeLaSeleccion &&
+            (() => {
+              // Edita lo más específico que muestra el breadcrumb: el
+              // conjunto si hay uno elegido, si no la campaña — no la
+              // variable de estado `nivel` (que en ese momento ya bajó un
+              // paso más, a "anuncio", y no sirve para decidir esto).
+              const nivelBreadcrumb = seleccion.conjunto !== null ? "conjunto" : "campana";
+              const id =
+                nivelBreadcrumb === "campana"
+                  ? filaDeLaSeleccion.campaignId
+                  : filaDeLaSeleccion.adsetId;
+              if (!id) return null;
+              return (
+                <button
+                  type="button"
+                  title={nivelBreadcrumb === "campana" ? "Editar nombre de la campaña" : "Editar nombre del conjunto"}
+                  onClick={() =>
+                    setGestionando({
+                      provider: filaDeLaSeleccion.provider as Platform,
+                      accountId: filaDeLaSeleccion.accountId,
+                      nivel: nivelBreadcrumb,
+                      id,
+                      nombre: filaDeLaSeleccion.nombre,
+                      currency: filaDeLaSeleccion.currency,
+                    })
+                  }
+                  className="rounded-full p-1 text-foreground/40 transition-colors hover:bg-foreground/8 hover:text-brand"
+                >
+                  <Pencil className="size-3" />
+                </button>
+              );
+            })()}
           <button
             type="button"
             onClick={() => verNivel("campana")}
