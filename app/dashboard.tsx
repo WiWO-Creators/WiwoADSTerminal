@@ -618,7 +618,11 @@ export default function WiwoDashboard({
             );
           }}
         />
-        <div className="telemetry-grid min-h-[calc(100svh-4rem)]">
+        {/* pb-24: reserva el alto del botón del asistente (64px) más su
+            margen (16px) y algo de aire, para que ninguna vista termine con
+            un control importante (un botón, la última fila de una tabla)
+            justo detrás del orbe flotante al hacer scroll hasta el final. */}
+        <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
           {view === "control" && (
             <ControlRoomView
               nombre={initialSnapshot.user.displayName.trim().split(/\s+/)[0] || "equipo"}
