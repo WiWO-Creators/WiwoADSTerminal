@@ -1780,6 +1780,24 @@ export async function executeWindsorAction(
     return { ok: false, raw: cuerpo, error: mensaje };
   }
 
+  // Windsor puede responder HTTP 200 con el error adentro del cuerpo en vez
+  // de en el status — visto en producción con una campaña de Google que
+  // Windsor dio por creada (200, sin este chequeo) y nunca existió en la
+  // cuenta real. Sin esto, `ok: true` seguía adelante y el extractor de ids
+  // (deliberadamente permisivo con Google, que no da un id estructurado)
+  // podía tomar cualquier número del mensaje de error como si fuera el id
+  // de la campaña recién "creada".
+  if (cuerpo && typeof cuerpo === "object") {
+    const campo = cuerpo as { error?: unknown; success?: unknown };
+    if (campo.error || campo.success === false) {
+      return {
+        ok: false,
+        raw: cuerpo,
+        error: campo.error ? String(campo.error) : `Windsor rechazó ${action}`,
+      };
+    }
+  }
+
   return { ok: true, raw: cuerpo, error: null };
 }
 

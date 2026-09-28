@@ -513,12 +513,15 @@ function TarjetaPublicacion({
 }) {
   const [cargada, setCargada] = useState(false);
   const [rota, setRota] = useState(false);
-  // Ver la nota en SelectorDePublicaciones: el video de Facebook solo trae
-  // miniatura por esta vía, así que no se puede usar como pieza real.
-  const usable = !(
-    post.platform === "facebook" &&
-    (post.format === "video" || post.format === "reel")
-  );
+  // Una publicación de Facebook siempre boostea (constructor-view.tsx la
+  // manda a boostPostId), y boost_post reutiliza la publicación real como
+  // creativo sin tocar mediaUrl — el video de Facebook solo trae miniatura
+  // por esta vía, pero eso no importa porque nunca se usa como pieza. Solo
+  // Instagram (que no bostea, sigue el camino de armar una pieza nueva desde
+  // el archivo) necesita el video completo.
+  const usable =
+    post.platform === "facebook" ||
+    !(post.format === "video" || post.format === "reel");
   const IconoInteraccion = post.platform === "facebook" ? ThumbsUp : Heart;
   const esArchivoDeVideo =
     post.platform === "instagram" && (post.format === "reel" || post.format === "video");

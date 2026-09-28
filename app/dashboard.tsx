@@ -49,6 +49,7 @@ import type {
   PerformanceSnapshot,
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
+import { ROLE_LABELS, type Role } from "@/lib/permisos";
 import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
 import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
@@ -79,8 +80,6 @@ import { ThinkingOrb } from "./ui";
 type ItemDeMenu = {
   key: ViewKey;
   label: string;
-  /** Solo visible para quien administra el equipo. */
-  adminOnly?: boolean;
   /** Roles que pueden ver la entrada. Vacío: todos. */
   roles?: string[];
   /** Icono y resumen: solo los usan las tarjetas de Inicio, no el menú.
@@ -111,21 +110,21 @@ const navItems: ItemDeMenu[] = [
     // campañas de UN cliente — la lista de arriba es solo el punto de
     // entrada, no lo que define la pantalla.
     label: "Cliente",
-    roles: ["admin", "lead", "buyer"],
+    roles: ["admin", "supervisor", "analyst"],
     icono: Building2,
     resumen: "Ficha de cada cliente, sus cuentas y sus anuncios en vivo.",
   },
   {
     key: "builder",
     label: "Creador de campañas",
-    roles: ["admin", "lead", "buyer"],
+    roles: ["admin", "supervisor"],
     icono: Megaphone,
     resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado.",
   },
   {
     key: "audiencias",
     label: "Audiencias",
-    roles: ["admin", "lead", "buyer"],
+    roles: ["admin", "supervisor"],
     icono: Target,
     resumen: "Segmentos y cobertura geográfica por cuenta.",
     bloqueado: true,
@@ -138,7 +137,7 @@ const navItemsGestion: ItemDeMenu[] = [
   {
     key: "historial",
     label: "Auditoría",
-    roles: ["admin", "lead", "buyer", "analyst"],
+    roles: ["admin", "supervisor", "analyst"],
     icono: History,
     resumen: "Qué se publicó, quién lo mandó y qué respondió cada paso.",
   },
@@ -159,7 +158,9 @@ const navItemsGestion: ItemDeMenu[] = [
 const itemEquipo: ItemDeMenu = {
   key: "team",
   label: "Equipo",
-  adminOnly: true,
+  // No solo admin: supervisor y analyst también pueden sumar gente (con su
+  // propia jerarquía de a quién) — ver lib/permisos.ts, rolesAsignables.
+  roles: ["admin", "supervisor", "analyst"],
   icono: Cog,
   resumen: "Quién entra, con qué rol y a qué clientes.",
 };
@@ -203,19 +204,12 @@ const TODOS_LOS_CLIENTES = "__todos__";
  * navegador (ver `PuertaDeCliente` más abajo). */
 const PUERTA_CLIENTE_STORAGE_KEY = "wiwo-ads-puerta-cliente-resuelta";
 
-/** "hace 5 min", "hace 3 h", "hace 2 días" — para decir de cuándo es un dato. */
-const roleLabels: Record<string, string> = {
-  direction: "Dirección",
-  lead: "Lead",
-  buyer: "Buyer",
-  analyst: "Analista",
-};
-
 export type DashboardIdentity = {
   id: string;
   email: string;
   displayName: string;
   role: string;
+  portfolioIds: string[];
 };
 
 /** A qué abrir el Constructor cuando se navega hacia él desde Clientes o
@@ -292,9 +286,13 @@ export default function WiwoDashboard({
    * selector del navbar como desde la lista de la propia vista — por eso
    * vive acá y se pasa controlado, no como valor inicial.
    */
+  // Con un portafolio asignado (el primero de la lista, para un cliente
+  // real siempre es el único), la vista arranca ya puesta ahí en vez de en
+  // "Todos los clientes" — la persona no tiene que buscarse a sí misma en
+  // el selector cada vez que entra.
   const [clienteSeleccionado, setClienteSeleccionado] = useState<
     string | null
-  >(null);
+  >(initialSnapshot.user.portfolioIds[0] ?? null);
   const [performance, setPerformance] = useState(initialSnapshot.performance);
   const [rango, setRango] = useState<RangoId>(
     initialSnapshot.performance.rango?.id ?? RANGO_POR_DEFECTO,
@@ -582,7 +580,7 @@ export default function WiwoDashboard({
         }
         rango={rango}
         puedeAprobar={
-          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
         }
         onCambioAplicado={() => void refreshOperationalData()}
       />
@@ -644,7 +642,7 @@ export default function WiwoDashboard({
               critical={healthCritical}
               warnings={healthWarnings}
               puedeVerResumen={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
               }
             />
           )}
@@ -705,7 +703,7 @@ export default function WiwoDashboard({
               ads={performance.ads}
               clienteSeleccionado={clienteSeleccionado}
               puedeAprobar={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
               }
             />
           )}
@@ -719,7 +717,7 @@ export default function WiwoDashboard({
         }
         rango={rango}
         puedeAprobar={
-          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "lead"
+          initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
         }
         onAbrirConstructor={(portfolioId, semilla) => {
           setClienteSeleccionado(portfolioId);
@@ -735,10 +733,7 @@ export default function WiwoDashboard({
 }
 
 function puedeVerItem(item: ItemDeMenu, role: string): boolean {
-  return (
-    (!item.adminOnly || role === "admin") &&
-    (!item.roles || item.roles.includes(role))
-  );
+  return !item.roles || item.roles.includes(role);
 }
 
 /**
@@ -923,7 +918,7 @@ function AppSidebar({
           </p>
           <div className="mt-2 flex items-center gap-2 group-data-[collapsible=icon]:mt-0">
             <span className="inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase group-data-[collapsible=icon]:hidden">
-              {roleLabels[currentUser.role] ?? currentUser.role}
+              {ROLE_LABELS[currentUser.role as Role] ?? currentUser.role}
             </span>
             {puedeVerItem(itemEquipo, currentUser.role) && (
               // Solo el engranaje, al lado del rol: las dos cosas hablan de

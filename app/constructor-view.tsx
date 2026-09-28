@@ -281,7 +281,7 @@ function borradorInicial(
     metaObjective: null,
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
-    dailyBudget: null,
+    dailyBudget: semilla?.dailyBudget ?? null,
     budgetByPlatform: {},
     budgetMode: "diaria",
     endDate: null,

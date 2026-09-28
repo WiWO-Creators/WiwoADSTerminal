@@ -16,34 +16,41 @@
  * sigue sin poder administrar el equipo.
  */
 
-export const ROLES = ["admin", "lead", "buyer", "analyst", "client"] as const;
+export const ROLES = ["admin", "supervisor", "analyst", "client"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   admin: "Administrador",
-  lead: "Lead",
-  buyer: "Buyer",
+  supervisor: "Supervisor",
   analyst: "Analista",
   client: "Cliente",
 };
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
-  admin: "Ve todo, aprueba cambios y administra el equipo.",
-  lead: "Ve todos los clientes y aprueba cambios.",
-  buyer: "Trabaja los clientes asignados y propone cambios.",
-  analyst: "Solo lectura, pero de todos los clientes.",
-  client: "Solo ve el rendimiento de su propio portafolio.",
+  admin: "Ve todo, aprueba cambios y administra el equipo por completo.",
+  supervisor: "Ve todo, crea y aprueba cambios. Puede sumar analistas y clientes, pero no modificar a quien ya está.",
+  analyst: "Ve todos los clientes y propone cambios. Puede dar de alta clientes y asignarles su portafolio.",
+  client: "Ve el rendimiento de su propio portafolio y puede proponer cambios.",
 };
 
 export type Capability =
   /** Ver todos los clientes sin asignación explícita. */
   | "ver_todos_los_clientes"
-  /** Crear o editar campañas y anuncios (queda pendiente de aprobación). */
+  /** Arma y publica campañas de verdad, desde el Constructor. */
   | "crear_campanas"
+  /**
+   * Deja una sugerencia de campaña (vía el asistente de IA) pendiente de que
+   * alguien con `crear_campanas` la publique — no la publica ella misma. Todo
+   * rol con `crear_campanas` puede sugerir también: `can()` no lo exige por
+   * separado, pero `puedeSugerirCampanas` sí lo cubre.
+   */
+  | "sugerir_campanas"
   /** Aprobar y ejecutar un cambio sobre la plataforma. */
   | "aprobar_cambios"
-  /** Dar de alta personas, cambiar roles y asignar clientes. */
-  | "administrar_equipo"
+  /** Entrar a la pantalla Equipo. Qué puede hacer ahí (invitar a quién,
+   * modificar a alguien ya existente) lo deciden `rolesAsignables` y
+   * `puedeModificarMiembros`, no esta capability por sí sola. */
+  | "ver_equipo"
   /** Administrar las conexiones de datos. */
   | "administrar_conexiones"
   /** Ver la cola de decisiones y la bitácora interna. */
@@ -54,25 +61,59 @@ const CAPABILITIES: Record<Role, Capability[]> = {
     "ver_todos_los_clientes",
     "crear_campanas",
     "aprobar_cambios",
-    "administrar_equipo",
+    "ver_equipo",
     "administrar_conexiones",
     "ver_operacion",
   ],
-  lead: [
+  // Todo lo operativo de admin (ve, crea, aprueba, conecta), pero sin poder
+  // tocar a nadie que ya esté en el equipo — solo sumar gente nueva, y con
+  // rol analista o cliente (ver `rolesAsignables`).
+  supervisor: [
     "ver_todos_los_clientes",
     "crear_campanas",
     "aprobar_cambios",
+    "ver_equipo",
     "administrar_conexiones",
     "ver_operacion",
   ],
-  buyer: ["crear_campanas", "ver_operacion"],
   // Decisión del equipo (2026-09-25): un analista ve TODO el roster de
-  // clientes, sin necesitar asignación manual por portafolio — a diferencia
-  // de buyer/client, que sí quedan acotados a `portfolioIds`. Puede volver a
-  // acotarse más adelante si hace falta un rol de lectura más fino.
-  analyst: ["ver_todos_los_clientes", "ver_operacion"],
-  client: [],
+  // clientes, sin necesitar asignación manual por portafolio. No crea
+  // campañas de verdad, pero sí puede dejar una sugerencia, y puede dar de
+  // alta a un cliente nuevo (solo ese rol) asignándole su portafolio.
+  analyst: ["ver_todos_los_clientes", "sugerir_campanas", "ver_equipo", "ver_operacion"],
+  client: ["sugerir_campanas"],
 };
+
+/**
+ * Qué roles puede asignar esta persona al invitar a alguien nuevo — [] si no
+ * puede invitar a nadie. Jerarquía estricta: cada rol solo suma por debajo de
+ * sí mismo, nunca a su propio nivel ni por encima (ni siquiera admin invita
+ * "otro admin" por accidente sin querer, aunque sí puede si de verdad lo
+ * necesita: es el único con la lista completa).
+ */
+export function rolesAsignables(actor: Actor): Role[] {
+  if (!actor.isActive) return [];
+  switch (actor.role) {
+    case "admin":
+      return [...ROLES];
+    case "supervisor":
+      return ["analyst", "client"];
+    case "analyst":
+      return ["client"];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Si puede modificar a alguien que YA está en el equipo (rol, estado,
+ * portafolio) — distinto de poder invitar: invitar es crear una persona
+ * nueva, esto es editar una que ya existe. Solo admin: supervisor y analyst
+ * pueden sumar gente, pero no tocar lo que ya está.
+ */
+export function puedeModificarMiembros(actor: Actor): boolean {
+  return actor.isActive && actor.role === "admin";
+}
 
 export type Actor = {
   id: string;
