@@ -234,14 +234,17 @@ export function HealthBadge({
 }
 
 export function Surface({
+  id,
   className,
   children,
 }: {
+  id?: string;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <section
+      id={id}
       className={cn(
         // Tarjeta de MetriQ: relleno sólido más claro que el lienzo (oscuro) o
         // crema (claro), contorno fino y sombra suave.
