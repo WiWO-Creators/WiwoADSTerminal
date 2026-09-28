@@ -1072,6 +1072,39 @@ export function AnunciosView({
   }
 
   /**
+   * Lápiz pegado al nombre, en la misma celda — acceso directo a renombrar
+   * sin ir a buscar el engranaje de la columna de acciones. Abre el mismo
+   * `GestionarCampanaDialog` que `botonGestionar`; no hay una forma de abrir
+   * solo la sección de nombre, así que es el mismo modal completo.
+   */
+  function botonEditarNombre(fila: Fila) {
+    if (!puedeAprobar) return null;
+    if (nivel !== "campana" && nivel !== "conjunto") return null;
+    const id = nivel === "campana" ? fila.campaignId : fila.adsetId;
+    if (!id) return null;
+    return (
+      <button
+        type="button"
+        title={nivel === "campana" ? "Editar nombre de la campaña" : "Editar nombre del conjunto"}
+        onClick={(e) => {
+          e.stopPropagation();
+          setGestionando({
+            provider: fila.provider as Platform,
+            accountId: fila.accountId,
+            nivel,
+            id,
+            nombre: fila.nombre,
+            currency: fila.currency,
+          });
+        }}
+        className="shrink-0 rounded-full p-1 text-foreground/35 transition-colors hover:bg-foreground/8 hover:text-brand"
+      >
+        <Pencil className="size-3" />
+      </button>
+    );
+  }
+
+  /**
    * Presupuesto, nombre, estrategia de puja y el resto de `gestionar-campana`
    * — solo a nivel de campaña, que es donde vive cada una de esas acciones en
    * Windsor. Exige el id nativo, igual que pausar/activar.
@@ -1681,11 +1714,14 @@ export function AnunciosView({
                             </span>
                           ))}
                         <div className="min-w-0">
-                          <span
-                            className="block max-w-[380px] truncate text-sm font-bold text-foreground"
-                            title={fila.nombre}
-                          >
-                            {fila.nombre}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className="block max-w-[340px] truncate text-sm font-bold text-foreground"
+                              title={fila.nombre}
+                            >
+                              {fila.nombre}
+                            </span>
+                            {botonEditarNombre(fila)}
                           </span>
                           <span className="mt-1 block max-w-[380px] truncate text-xs text-foreground/45">
                             {platformLabel(fila.provider)} · {fila.contexto} ·{" "}

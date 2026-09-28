@@ -1432,17 +1432,6 @@ body {
 }
 
 
-/* Susu (app/mascota-susu.tsx): un saltito sutil mientras está a la vista. */
-@keyframes susu-salto {
-  0%,
-  100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  50% {
-    transform: translateY(-8%) rotate(-3deg);
-  }
-}
-
 /* Reduced motion: el orbe queda como un campo de luz estático. */
 @media (prefers-reduced-motion: reduce) {
   .wiwo-orb-stage,

@@ -25,6 +25,7 @@ jobs:
             git checkout main
             git pull origin main
             npm ci
-            npx vinext build
-            pm2 restart wiwo-ads || pm2 start ecosystem.config.cjs
+            NODE_OPTIONS='--import /root/wiwo-ads/servidor/registrar.mjs' npx vinext build
+            node servidor/migrar.mjs
+            pm2 reload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs
             pm2 save
