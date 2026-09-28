@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { evaluarYGuardarDecisiones } from "@/lib/dashboard-store";
 import { can } from "@/lib/permisos";
@@ -18,9 +19,9 @@ const NO_STORE = { "cache-control": "no-store" };
 
 export async function POST() {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "aprobar_cambios")) {
-    return fail("Tu rol no puede correr el motor de reglas", 403);
+    return fail("Tu rol no puede correr el motor de reglas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   try {
@@ -32,6 +33,3 @@ export async function POST() {
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

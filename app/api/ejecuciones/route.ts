@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { getRawDb } from "@/db";
 import { can } from "@/lib/permisos";
@@ -28,9 +29,9 @@ type FilaEjecucion = {
 
 export async function GET() {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "ver_operacion")) {
-    return fail("No tienes permiso para ver la bitácora", 403);
+    return fail("No tienes permiso para ver la bitácora", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   const alcance = can(session.actor, "ver_todos_los_clientes")
@@ -92,6 +93,3 @@ function parseSteps(raw: string): Array<{
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

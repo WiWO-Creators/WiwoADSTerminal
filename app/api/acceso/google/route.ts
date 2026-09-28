@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
 import { respuestaCierrePopup } from "@/lib/acceso-popup";
+import { origenPublico } from "@/lib/origen-publico";
 
 export const dynamic = "force-dynamic";
 
@@ -14,16 +15,7 @@ export function googleLoginConfigured(): boolean {
   return Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 }
 
-/**
- * Origen público real del sitio, no el de la conexión interna. Detrás de un
- * proxy que no reenvíe `X-Forwarded-Proto` correctamente, `url.origin` puede
- * llegar como `http://` aunque el visitante entre por HTTPS — y Google exige
- * que el `redirect_uri` coincida byte a byte con el registrado (`https://`
- * incluido), o rechaza con `redirect_uri_mismatch`.
- */
-export function origenPublico(url: URL): string {
-  return (env.APP_ORIGIN ?? url.origin).replace(/\/$/, "");
-}
+export { origenPublico };
 
 /**
  * La única puerta de entrada de la app. Prueba identidad real contra Google

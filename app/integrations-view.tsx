@@ -627,6 +627,21 @@ type CatalogoEstado = {
  */
 type EstadoDeCelda = "ok" | "atencion" | "sin_cuenta";
 
+/**
+ * El id externo viene embebido en el id interno de la cuenta
+ * ("windsor:google:832-810-5693"). Se toma el último segmento.
+ *
+ * Copia deliberada de la misma función en lib/portafolios.ts, no un import:
+ * este archivo es un Client Component, y lib/portafolios.ts importa (para
+ * otras cosas) desde lib/portafolios-store.ts, que sí toca `cloudflare:workers`
+ * — importar un valor real de ahí (no solo el type PortfolioSummary) arrastra
+ * esa cadena entera al bundle del navegador y rompe el build.
+ */
+function externalId(account: PerformanceAccountSummary): string {
+  const parts = account.id.split(":");
+  return parts.at(-1) ?? account.id;
+}
+
 function estadoDePlataforma(
   cuentas: PerformanceAccountSummary[],
 ): { estado: EstadoDeCelda; detalle: string } {
@@ -642,7 +657,7 @@ function estadoDePlataforma(
       detalle: conProblema
         .map(
           (c) =>
-            `${c.name}: ${
+            `${c.name} (${externalId(c)}): ${
               c.issue ??
               (c.connectionStatus === "needs_attention"
                 ? "conexión requiere atención"
@@ -654,7 +669,7 @@ function estadoDePlataforma(
   }
   return {
     estado: "ok",
-    detalle: `${cuentas.length} cuenta${cuentas.length === 1 ? "" : "s"} conectada${cuentas.length === 1 ? "" : "s"}`,
+    detalle: cuentas.map((c) => `${c.name} (${externalId(c)})`).join(" · "),
   };
 }
 

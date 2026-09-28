@@ -1365,6 +1365,9 @@ function FaseCampana({
                 ))}
               </SelectContent>
             </Select>
+            <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+              {OBJECTIVES[draft.objective].description}
+            </p>
           </Campo>
         </div>
 

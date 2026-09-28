@@ -1,4 +1,6 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import {
   AlmacenamientoError,
   subirCreativo,
@@ -19,14 +21,13 @@ const NO_STORE = { "cache-control": "no-store" };
 
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "crear_campanas")) {
-    return fail("Tu rol no puede construir campañas", 403);
+    return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
-    return fail("Origen no permitido", 403);
+  if (!mismoOrigen(request)) {
+    return fail("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
 
   // El archivo llega como cuerpo crudo, con su tipo en `content-type` y el
@@ -71,6 +72,3 @@ export async function POST(request: Request) {
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

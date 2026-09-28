@@ -51,6 +51,8 @@ export const OBJECTIVES: Record<
   Objective,
   {
     label: string;
+    /** Qué implica elegir este objetivo, para mostrar junto al selector. */
+    description: string;
     google: string;
     meta: string;
     /**
@@ -64,24 +66,32 @@ export const OBJECTIVES: Record<
 > = {
   trafico: {
     label: "Tráfico al sitio",
+    description:
+      "Prioriza mostrar el anuncio a quien tiene más probabilidad de hacer clic e ir al sitio. No optimiza por conversión, solo por visitas.",
     google: "maximize_clicks",
     meta: "OUTCOME_TRAFFIC",
     sigla: "TRF",
   },
   leads: {
     label: "Generar leads",
+    description:
+      "Prioriza mostrar el anuncio a quien tiene más probabilidad de dejar sus datos en un formulario, sea del sitio o nativo de la plataforma.",
     google: "maximize_conversions",
     meta: "OUTCOME_LEADS",
     sigla: "LDS",
   },
   ventas: {
     label: "Ventas",
+    description:
+      "Prioriza mostrar el anuncio a quien tiene más probabilidad de comprar. Necesita conversiones de compra ya configuradas para optimizar de verdad.",
     google: "maximize_conversions",
     meta: "OUTCOME_SALES",
     sigla: "VTA",
   },
   alcance: {
     label: "Alcance y reconocimiento",
+    description:
+      "Prioriza mostrar el anuncio a la mayor cantidad de gente posible dentro del público elegido, sin buscar una acción puntual (ni clic ni conversión).",
     google: "maximize_clicks",
     meta: "OUTCOME_AWARENESS",
     sigla: "AE",

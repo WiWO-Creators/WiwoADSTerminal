@@ -1,3 +1,4 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { geocodificarLugar } from "@/lib/geocoding";
 import { can } from "@/lib/permisos";
@@ -15,9 +16,9 @@ const NO_STORE = { "cache-control": "no-store" };
 
 export async function GET(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "crear_campanas")) {
-    return fail("Tu rol no puede construir campañas", 403);
+    return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
   const params = new URL(request.url).searchParams;
@@ -36,6 +37,3 @@ export async function GET(request: Request) {
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

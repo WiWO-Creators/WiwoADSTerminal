@@ -1,4 +1,6 @@
+import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import { getRawDb } from "@/db";
 import { generarAlertas } from "@/lib/alertas";
 import { can } from "@/lib/permisos";
@@ -84,7 +86,7 @@ async function soltarCandado(): Promise<void> {
 /** Estado: cuándo se construyó por última vez el catálogo y si toca refrescarlo solo. */
 export async function GET() {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
 
   const hoy = new Date().toISOString().slice(0, 10);
   const catalogo = await fetchWindsorCatalog(hoy);
@@ -101,13 +103,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const session = await getSession();
-  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403);
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
   if (!can(session.actor, "administrar_conexiones")) {
-    return fail("No tienes permiso para actualizar los datos", 403);
+    return fail("No tienes permiso para actualizar los datos", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
-    return fail("Origen no permitido", 403);
+  if (!mismoOrigen(request)) {
+    return fail("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   if (!windsorConfigured()) return fail("Falta configurar WINDSOR_API_KEY", 503);
 
@@ -184,6 +185,3 @@ export async function POST(request: Request) {
   }
 }
 
-function fail(message: string, status: number) {
-  return Response.json({ error: message }, { status, headers: NO_STORE });
-}

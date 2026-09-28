@@ -1,4 +1,6 @@
+import { CODIGOS_ERROR } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import {
   applyDecisionAction,
   approveDecisionBatch,
@@ -14,7 +16,7 @@ export async function GET(request: Request) {
   const session = await getSession();
   if (!session) {
     return Response.json(
-      { error: "Tu cuenta no tiene acceso a WiWO.ADS" },
+      { error: "Tu cuenta no tiene acceso a WiWO.ADS", code: CODIGOS_ERROR.SIN_SESION },
       { status: 403, headers: { "cache-control": "no-store" } },
     );
   }
@@ -35,14 +37,13 @@ export async function POST(request: Request) {
   const session = await getSession();
   if (!session) {
     return Response.json(
-      { error: "Tu cuenta no tiene acceso a WiWO.ADS" },
+      { error: "Tu cuenta no tiene acceso a WiWO.ADS", code: CODIGOS_ERROR.SIN_SESION },
       { status: 403, headers: { "cache-control": "no-store" } },
     );
   }
   const user = session.actor;
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
-    return Response.json({ error: "Origen no permitido" }, { status: 403 });
+  if (!mismoOrigen(request)) {
+    return Response.json({ error: "Origen no permitido", code: CODIGOS_ERROR.ORIGEN_NO_PERMITIDO }, { status: 403 });
   }
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {

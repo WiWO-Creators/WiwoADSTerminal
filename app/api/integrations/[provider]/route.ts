@@ -1,4 +1,6 @@
+import { CODIGOS_ERROR, fail as responseError } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
+import { mismoOrigen } from "@/lib/origen-publico";
 import {
   disconnectIntegration,
   IntegrationError,
@@ -38,10 +40,9 @@ async function mutate(
 ) {
   const session = await getSession();
   const user = session?.actor ?? null;
-  if (!user) return responseError("Inicia sesión para continuar", 401);
-  const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(request.url).origin) {
-    return responseError("Origen no permitido", 403);
+  if (!user) return responseError("Inicia sesión para continuar", 401, CODIGOS_ERROR.SIN_SESION);
+  if (!mismoOrigen(request)) {
+    return responseError("Origen no permitido", 403, CODIGOS_ERROR.ORIGEN_NO_PERMITIDO);
   }
   const { provider } = await context.params;
   if (!isIntegrationProvider(provider)) {
@@ -106,9 +107,3 @@ async function mutate(
   }
 }
 
-function responseError(message: string, status: number) {
-  return Response.json(
-    { error: message },
-    { status, headers: { "cache-control": "no-store" } },
-  );
-}
