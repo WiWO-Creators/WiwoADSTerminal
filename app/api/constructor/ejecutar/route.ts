@@ -189,12 +189,20 @@ export async function POST(request: Request) {
   // actualizado (arriba) es lo único que puede detectarlo, así que cada
   // campaña, conjunto y anuncio creado en este plan se compara contra lo que
   // Windsor acaba de confirmar que existe de verdad — no solo la campaña.
+  // `catalogoActualizado` en false significa que ni siquiera se pudo releer
+  // la cuenta real (timeout o error) — eso NO es lo mismo que "releímos y
+  // está todo bien". Antes, en ese caso, los tres filtros de abajo exigían
+  // `catalogoActualizado` para contar algo como "sin confirmar", así que con
+  // el catálogo caído quedaban todos vacíos en silencio y el aviso final
+  // decía "Creado y pausado" como si se hubiera verificado de verdad. Ahora
+  // "no se pudo verificar" cuenta igual que "se verificó y no está": en
+  // ambos casos hay que decirlo, no callarlo.
   const campanasSinConfirmar = realizados
     .filter((paso) => paso.action === "create_campaign" && paso.ok)
     .map((paso) => ({ platform: paso.platform, nivel: "campaña", id: idDeCreacion(paso) }))
     .filter(
       (item): item is { platform: string; nivel: string; id: string } =>
-        item.id !== null && catalogoActualizado && !campaignIdsVistos.has(item.id),
+        item.id !== null && (!catalogoActualizado || !campaignIdsVistos.has(item.id)),
     );
   const idsDeCampana = new Set([ids.campaign].filter((id): id is string => Boolean(id)));
   const conjuntosSinConfirmar = realizados
@@ -202,7 +210,7 @@ export async function POST(request: Request) {
     .map((paso) => ({ platform: paso.platform, nivel: "conjunto", id: idDeCreacion(paso, idsDeCampana) }))
     .filter(
       (item): item is { platform: string; nivel: string; id: string } =>
-        item.id !== null && catalogoActualizado && !adsetIdsVistos.has(item.id),
+        item.id !== null && (!catalogoActualizado || !adsetIdsVistos.has(item.id)),
     );
   // El id del padre (ad group de Google o adset de Meta) se descarta como
   // candidato al id del anuncio: un texto libre de Windsor a veces nombra al
@@ -218,7 +226,7 @@ export async function POST(request: Request) {
     }))
     .filter(
       (item): item is { platform: string; nivel: string; id: string } =>
-        item.id !== null && catalogoActualizado && !adIdsVistos.has(item.id),
+        item.id !== null && (!catalogoActualizado || !adIdsVistos.has(item.id)),
     );
   let sinConfirmar = [...campanasSinConfirmar, ...conjuntosSinConfirmar, ...anunciosSinConfirmar];
 
@@ -228,7 +236,7 @@ export async function POST(request: Request) {
   // las dos campañas cuando se revisó unos minutos después). Un segundo
   // intento, con una espera corta, resuelve el caso normal de demora sin
   // multiplicar mucho el tiempo de respuesta.
-  if (sinConfirmar.length > 0 && catalogoActualizado) {
+  if (sinConfirmar.length > 0) {
     await new Promise((resolve) => setTimeout(resolve, 6_000));
     try {
       const reintento = await Promise.race([
@@ -236,6 +244,9 @@ export async function POST(request: Request) {
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
       ]);
       if (reintento) {
+        // Aunque el primer intento nunca haya terminado (catalogoActualizado
+        // en false), este sí lo hizo: ya hay con qué confirmar de verdad.
+        catalogoActualizado = true;
         campaignIdsVistos = reintento.campaignIdsVistos;
         adsetIdsVistos = reintento.adsetIdsVistos;
         adIdsVistos = reintento.adIdsVistos;
@@ -259,9 +270,13 @@ export async function POST(request: Request) {
         : ` La campaña de ${campanaIncompleta.platform === "google" ? "Google" : "Meta"} que alcanzó a crearse (id ${campanaIncompleta.campaignId}) quedó huérfana y no se pudo renombrar para marcarla — revísala a mano en la cuenta.`;
     }
   } else if (sinConfirmar.length > 0) {
-    aviso = `Windsor confirmó la creación, pero al releer la cuenta real todavía no encontramos: ${sinConfirmar
-      .map((c) => `${c.platform === "google" ? "Google" : "Meta"} ${c.nivel} (id ${c.id})`)
-      .join(", ")}. Puede ser solo demora en reflejarse — revisa directamente en la plataforma antes de darlo por creado.`;
+    aviso = catalogoActualizado
+      ? `Windsor confirmó la creación, pero al releer la cuenta real todavía no encontramos: ${sinConfirmar
+          .map((c) => `${c.platform === "google" ? "Google" : "Meta"} ${c.nivel} (id ${c.id})`)
+          .join(", ")}. Puede ser solo demora en reflejarse — revisa directamente en la plataforma antes de darlo por creado.`
+      : `Windsor confirmó la creación, pero no pudimos releer la cuenta real a tiempo para verificarlo (no es un rechazo, es que la consulta tardó demasiado). No des esto por creado sin revisarlo tú mismo en la plataforma: ${sinConfirmar
+          .map((c) => `${c.platform === "google" ? "Google" : "Meta"} ${c.nivel} (id ${c.id})`)
+          .join(", ")}.`;
   } else {
     aviso = "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar.";
   }
