@@ -173,6 +173,23 @@ const FASES: Array<{ id: Fase; label: string; detalle: string }> = [
 ];
 
 /**
+ * Check del riel de índice: orientativo, no una validación real (esa sigue
+ * viviendo en `validateDraft`, del lado del servidor). Solo dice si lo
+ * mínimo de ese grupo ya está puesto, para saber dónde falta mirar.
+ */
+function grupoResuelto(id: Fase, draft: CampaignDraft): boolean {
+  if (id === "campana") {
+    if (draft.existingCampaign) return true;
+    return Boolean(draft.portfolioId) && draft.platforms.length > 0 && draft.name.trim() !== "";
+  }
+  if (id === "conjunto") {
+    if (draft.existingAdset) return true;
+    return draft.dailyBudget !== null || Object.keys(draft.budgetByPlatform).length > 0;
+  }
+  return draft.landingUrl.trim() !== "";
+}
+
+/**
  * Contexto para abrir el constructor ya apuntando a algo que existe —viene
  * del botón "+ Añadir conjunto" o "+ Añadir anuncio" sobre una fila real del
  * administrador de anuncios—, en vez de partir de una campaña en blanco.
@@ -369,9 +386,6 @@ export function ConstructorView({
 } = {}) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [fase, setFase] = useState<Fase>(
-    attachTo?.adsetId ? "anuncio" : attachTo?.campaignId ? "conjunto" : "campana",
-  );
   const [draft, setDraft] = useState<CampaignDraft>(() =>
     borradorInicial(attachTo, clienteGlobal, semillaIA),
   );
@@ -404,6 +418,24 @@ export function ConstructorView({
   if (!plataformasElegidas.includes(plataformaActiva)) {
     setPlataformaActiva(plataformasElegidas[0] ?? "google");
   }
+
+  // Llegando a añadir un anuncio o un conjunto sobre algo que ya existe, el
+  // formulario entero sigue visible (ya no hay pasos que ocultar), pero
+  // conviene arrancar el scroll en el grupo que de verdad hace falta llenar,
+  // no arriba del todo en "Campaña" (que acá ya viene resuelta).
+  useEffect(() => {
+    const grupoInicial = attachTo?.adsetId
+      ? "grupo-anuncio"
+      : attachTo?.campaignId
+        ? "grupo-conjunto"
+        : null;
+    if (grupoInicial) {
+      document.getElementById(grupoInicial)?.scrollIntoView({ block: "start" });
+    }
+    // Solo al montar: es el punto de entrada, no algo que deba repetirse si
+    // `attachTo` cambiara de identidad después (no cambia en la práctica).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelado = false;
@@ -525,7 +557,6 @@ export function ConstructorView({
   const planVigente = plan !== null && planDraftJson === JSON.stringify(draft);
   const bloqueantes = planVigente ? (plan?.issues.filter((i) => i.blocking) ?? []) : [];
   const avisos = planVigente ? (plan?.issues.filter((i) => !i.blocking) ?? []) : [];
-  const indiceFase = FASES.findIndex((f) => f.id === fase);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
@@ -566,45 +597,52 @@ export function ConstructorView({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
-        {/* Riel de fases, como el panel izquierdo del creador de anuncios de Meta. */}
+        {/* Índice de saltos, como el árbol izquierdo del creador de anuncios
+            de Meta — ya no es un asistente de pasos: todo el formulario está
+            visible de una, esto solo hace scroll hasta ese grupo. */}
         <Surface className="h-fit overflow-hidden p-2">
-          {FASES.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setFase(item.id)}
-              className={cn(
-                "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors",
-                fase === item.id
-                  ? "bg-brand/12 text-foreground"
-                  : "text-foreground/55 hover:bg-foreground/6 hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.62rem] font-bold",
-                  index < indiceFase
-                    ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-brand"
-                    : fase === item.id
-                      ? "border-brand text-brand"
-                      : "border-foreground/20 text-foreground/40",
-                )}
+          {FASES.map((item) => {
+            const completo = grupoResuelto(item.id, draft);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() =>
+                  document
+                    .getElementById(`grupo-${item.id}`)
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                }
+                className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-foreground/55 transition-colors hover:bg-foreground/6 hover:text-foreground"
               >
-                {index < indiceFase ? <Check className="size-3" /> : index + 1}
-              </span>
-              <span>
-                <span className="block text-sm font-bold">{item.label}</span>
-                <span className="mt-0.5 block text-[0.68rem] text-foreground/45">
-                  {item.detalle}
+                <span
+                  className={cn(
+                    "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border",
+                    completo
+                      ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-brand"
+                      : "border-foreground/20 text-transparent",
+                  )}
+                >
+                  <Check className="size-3" />
                 </span>
-              </span>
-            </button>
-          ))}
+                <span>
+                  <span className="block text-sm font-bold">{item.label}</span>
+                  <span className="mt-0.5 block text-[0.68rem] text-foreground/45">
+                    {item.detalle}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </Surface>
 
-        {/* Formulario de la fase activa. */}
-        <Surface className="p-5">
-          {fase === "campana" && (
+        {/* Todo el formulario, en un solo scroll — cada sección se abre y
+            cierra por su cuenta, y muestra su check cuando ya está resuelta. */}
+        <div className="space-y-6">
+          <GrupoDeSecciones
+            id="grupo-campana"
+            titulo={FASES[0].label}
+            detalle={FASES[0].detalle}
+          >
             <FaseCampana
               draft={draft}
               clientes={clientes}
@@ -614,8 +652,13 @@ export function ConstructorView({
               onTogglePlatform={alternarPlataforma}
               onCambiarClienteGlobal={onCambiarClienteGlobal}
             />
-          )}
-          {fase === "conjunto" && (
+          </GrupoDeSecciones>
+
+          <GrupoDeSecciones
+            id="grupo-conjunto"
+            titulo={FASES[1].label}
+            detalle={FASES[1].detalle}
+          >
             <FaseConjunto
               draft={draft}
               cuentas={cuentas}
@@ -624,8 +667,13 @@ export function ConstructorView({
               plataformaActiva={plataformaActiva}
               onPlataformaActiva={setPlataformaActiva}
             />
-          )}
-          {fase === "anuncio" && (
+          </GrupoDeSecciones>
+
+          <GrupoDeSecciones
+            id="grupo-anuncio"
+            titulo={FASES[2].label}
+            detalle={FASES[2].detalle}
+          >
             <FaseAnuncio
               draft={draft}
               cuentas={cuentas}
@@ -634,10 +682,10 @@ export function ConstructorView({
               plataformaActiva={plataformaActiva}
               onPlataformaActiva={setPlataformaActiva}
             />
-          )}
+          </GrupoDeSecciones>
 
-          {indiceFase === FASES.length - 1 && !draft.existingCampaign && (
-            <label className="mt-6 flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
+          {!draft.existingCampaign && (
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
               <Checkbox
                 checked={draft.activarConjuntoYAnuncio}
                 onCheckedChange={(checked) =>
@@ -656,38 +704,18 @@ export function ConstructorView({
             </label>
           )}
 
-          <div className="mt-6 flex items-center justify-between border-t border-foreground/10 pt-4">
+          <div className="flex justify-end border-t border-foreground/10 pt-4">
             <Button
               type="button"
-              variant="ghost"
-              disabled={indiceFase === 0}
-              onClick={() => setFase(FASES[Math.max(0, indiceFase - 1)].id)}
-              className="text-foreground/60"
+              onClick={() => void revisarPlan()}
+              disabled={busy}
+              className="font-extrabold"
             >
-              Atrás
+              {busy ? <ThinkingOrb size="xs" state="thinking" label="" /> : <Wand2 />}
+              Revisar el plan
             </Button>
-            {indiceFase < FASES.length - 1 ? (
-              <Button
-                type="button"
-                onClick={() => setFase(FASES[indiceFase + 1].id)}
-                className="font-extrabold"
-              >
-                Siguiente
-                <ChevronRight />
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                onClick={() => void revisarPlan()}
-                disabled={busy}
-                className="font-extrabold"
-              >
-                {busy ? <ThinkingOrb size="xs" state="thinking" label="" /> : <Wand2 />}
-                Revisar el plan
-              </Button>
-            )}
           </div>
-        </Surface>
+        </div>
 
         {/* Vista previa y plan, visibles durante todo el recorrido. */}
         <div className="space-y-4">
@@ -1080,22 +1108,51 @@ function JerarquiaCreada({
 }
 
 /** Envoltorio de sección, igual en las tres fases. */
+/**
+ * Cada sección es su propia tarjeta, colapsable, con el check verde de
+ * "resuelta" a la izquierda del título — el mismo patrón visual y de
+ * navegación del creador de anuncios de Meta (todas las secciones visibles
+ * en un solo scroll, en vez del asistente de pasos que tenía antes esta
+ * pantalla). El check es una guía, no un bloqueo: lo calcula cada llamado a
+ * `Seccion` con una regla simple sobre `draft`, la publicación real sigue
+ * validándose aparte, en el servidor (`validateDraft`).
+ */
 function Seccion({
+  id,
   titulo,
   soloPlataforma,
   informativo,
+  completa,
   children,
 }: {
+  id?: string;
   titulo: string;
   /** Chip "Solo X" cuando la sección no aplica a todas las plataformas elegidas. */
   soloPlataforma?: string;
   informativo?: boolean;
+  /** Sin definir: la sección no lleva check (ni completa ni incompleta). */
+  completa?: boolean;
   children: React.ReactNode;
 }) {
+  const [abierta, setAbierta] = useState(true);
   return (
-    <div className="border-b border-foreground/8 py-4 first:pt-0 last:border-0 last:pb-0">
-      <div className="mb-2.5 flex items-center gap-2">
-        <h3 className="text-sm font-bold text-foreground">{titulo}</h3>
+    <Surface id={id} className="scroll-mt-4 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setAbierta((v) => !v)}
+        className="flex w-full items-center gap-2.5 px-5 py-4 text-left"
+      >
+        <span
+          className={cn(
+            "flex size-5 shrink-0 items-center justify-center rounded-full border",
+            completa === true
+              ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-brand"
+              : "border-foreground/15 text-transparent",
+          )}
+        >
+          <Check className="size-3" />
+        </span>
+        <h3 className="flex-1 text-sm font-bold text-foreground">{titulo}</h3>
         {soloPlataforma && (
           <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/45">
             SOLO {soloPlataforma.toUpperCase()}
@@ -1106,8 +1163,40 @@ function Seccion({
             INFORMATIVO
           </span>
         )}
+        <ChevronRight
+          className={cn(
+            "size-4 shrink-0 text-foreground/30 transition-transform",
+            abierta && "rotate-90",
+          )}
+        />
+      </button>
+      {abierta && (
+        <div className="border-t border-foreground/8 px-5 py-4">{children}</div>
+      )}
+    </Surface>
+  );
+}
+
+/** Encabezado de grupo (Campaña / Conjunto de anuncios / Anuncio) sobre sus
+ * secciones — separa visualmente los tres bloques dentro del scroll único. */
+function GrupoDeSecciones({
+  id,
+  titulo,
+  detalle,
+  children,
+}: {
+  id: string;
+  titulo: string;
+  detalle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div id={id} className="scroll-mt-4">
+      <div className="mb-3">
+        <h2 className="text-base font-extrabold text-foreground">{titulo}</h2>
+        <p className="text-xs text-foreground/45">{detalle}</p>
       </div>
-      {children}
+      <div className="space-y-3">{children}</div>
     </div>
   );
 }
@@ -1296,7 +1385,7 @@ function FaseCampana({
   // Pedirlos de nuevo sería fingir una elección que no corresponde acá.
   if (draft.existingCampaign) {
     return (
-      <Seccion titulo="Campaña existente">
+      <Seccion id="grupo-campana-existente" titulo="Campaña existente" completa>
         <p className="text-sm leading-6 text-foreground/70">
           {platformLabel(draft.existingCampaign.platform)} ·{" "}
           <strong className="text-foreground">
@@ -1323,7 +1412,11 @@ function FaseCampana({
 
   return (
     <>
-      <Seccion titulo="Cliente y objetivo">
+      <Seccion
+        id="grupo-campana-cliente"
+        titulo="Cliente y objetivo"
+        completa={Boolean(draft.portfolioId) && draft.platforms.length > 0}
+      >
         <div className="grid gap-4 sm:grid-cols-2">
           <Campo etiqueta="CLIENTE">
             <Select
@@ -1441,7 +1534,7 @@ function FaseCampana({
         )}
       </Seccion>
 
-      <Seccion titulo="Nombre">
+      <Seccion titulo="Nombre" completa={draft.name.trim() !== ""}>
         <Input
           value={draft.name}
           onChange={(e) => onChange({ name: e.target.value })}
@@ -1472,7 +1565,7 @@ function FaseCampana({
         </div>
       </Seccion>
 
-      <Seccion titulo="Detalles (nota interna)">
+      <Seccion titulo="Detalles (nota interna)" completa>
         <Textarea
           value={draft.details}
           onChange={(e) => onChange({ details: e.target.value })}
@@ -1486,7 +1579,7 @@ function FaseCampana({
         </p>
       </Seccion>
 
-      <Seccion titulo="Categoría" soloPlataforma="meta">
+      <Seccion titulo="Categoría" soloPlataforma="meta" completa>
         <Select
           value={draft.specialAdCategory}
           onValueChange={(value) =>
@@ -1512,7 +1605,7 @@ function FaseCampana({
         </p>
       </Seccion>
 
-      <Seccion titulo="Objetivo de Meta" soloPlataforma="meta">
+      <Seccion titulo="Objetivo de Meta" soloPlataforma="meta" completa>
         <Select
           value={draft.metaObjective ?? "default"}
           onValueChange={(value) =>
@@ -1567,7 +1660,7 @@ function FaseConjunto({
   // presupuesto, público y ubicaciones. Nada de esto se crea de nuevo.
   if (draft.existingAdset) {
     return (
-      <Seccion titulo="Conjunto de anuncios existente">
+      <Seccion titulo="Conjunto de anuncios existente" completa>
         <p className="text-sm leading-6 text-foreground/70">
           El presupuesto, el público y las ubicaciones de{" "}
           <strong className="text-foreground">{draft.existingAdset.adsetName}</strong>{" "}
@@ -1583,7 +1676,7 @@ function FaseConjunto({
   return (
     <>
       {draft.existingCampaign && (
-        <Seccion titulo="Nombre del conjunto de anuncios">
+        <Seccion titulo="Nombre del conjunto de anuncios" completa={draft.name.trim() !== ""}>
           <Input
             value={draft.name}
             onChange={(e) => onChange({ name: e.target.value })}
@@ -1598,7 +1691,10 @@ function FaseConjunto({
         entera, no de una plataforma — por eso vive fuera del selector de
         abajo y se ve sin importar cuál pestaña esté activa.
       */}
-      <Seccion titulo="Presupuesto y calendario">
+      <Seccion
+        titulo="Presupuesto y calendario"
+        completa={draft.dailyBudget !== null || Object.keys(draft.budgetByPlatform).length > 0}
+      >
         <PresupuestoPorPlataforma draft={draft} cuentas={cuentas} onChange={onChange} />
       </Seccion>
 
@@ -1608,7 +1704,14 @@ function FaseConjunto({
         Meta y a Google en `buildPlan`, así que se ve sin importar cuál
         pestaña esté activa abajo.
       */}
-      <Seccion titulo="Segmentación geográfica">
+      <Seccion
+        titulo="Segmentación geográfica"
+        completa={
+          draft.targetCountries.length > 0 ||
+          (draft.targetPlaces?.length ?? 0) > 0 ||
+          Boolean(draft.geoRadius)
+        }
+      >
         <SegmentacionGeografica
           targetCountries={draft.targetCountries}
           onTargetCountriesChange={(targetCountries) =>
@@ -1633,7 +1736,7 @@ function FaseConjunto({
 
       {conMeta && (
         <>
-          <Seccion titulo="Conversión">
+          <Seccion titulo="Conversión" completa>
             <RadioGroup
               value={draft.conversionLocation ?? "sitio_web"}
               onValueChange={(value) =>
@@ -1653,7 +1756,7 @@ function FaseConjunto({
           </Seccion>
 
           {!draft.existingCampaign && (
-            <Seccion titulo="Presupuesto de campaña">
+            <Seccion titulo="Presupuesto de campaña" completa>
               <RadioGroup
                 value={draft.metaBudgetLevel}
                 onValueChange={(value) =>
@@ -1691,7 +1794,10 @@ function FaseConjunto({
             </Seccion>
           )}
 
-          <Seccion titulo="Calendario">
+          <Seccion
+            titulo="Calendario"
+            completa={draft.budgetMode === "diaria" || Boolean(draft.endDate)}
+          >
             <Campo etiqueta="TIPO DE PRESUPUESTO" className="sm:w-60">
               <Select
                 value={draft.budgetMode}
@@ -1720,7 +1826,7 @@ function FaseConjunto({
             )}
           </Seccion>
 
-          <Seccion titulo="Público">
+          <Seccion titulo="Público" completa>
             <div className="grid gap-4 sm:grid-cols-3">
               <Campo etiqueta="EDAD MÍNIMA">
                 <Input
@@ -1785,14 +1891,14 @@ function FaseConjunto({
             </p>
           </Seccion>
 
-          <Seccion titulo="Transparencia de anuncios" informativo>
+          <Seccion titulo="Transparencia de anuncios" informativo completa>
             <p className="text-xs leading-5 text-foreground/55">
               Meta publica todo anuncio activo en su Biblioteca de Anuncios de
               forma automática. No es un ajuste que se pueda enviar desde acá.
             </p>
           </Seccion>
 
-          <Seccion titulo="Ubicaciones">
+          <Seccion titulo="Ubicaciones" completa>
             <p className="text-xs leading-5 text-foreground/55">
               Sin marcar nada acá, Meta reparte el anuncio solo entre
               Facebook, Instagram, Messenger y Audience Network — es la
@@ -1847,7 +1953,7 @@ function FaseConjunto({
             </div>
           </Seccion>
 
-          <Seccion titulo="Seguridad" informativo>
+          <Seccion titulo="Seguridad" informativo completa>
             <Select
               value={draft.brandSafety}
               onValueChange={(value) =>
@@ -1873,7 +1979,7 @@ function FaseConjunto({
       )}
 
       {conGoogle && (
-        <Seccion titulo="Ubicaciones">
+        <Seccion titulo="Ubicaciones" completa>
           <RadioGroup
             value={draft.googleChannel}
             onValueChange={(value) =>
@@ -1900,7 +2006,7 @@ function FaseConjunto({
       )}
 
       {conGoogle && draft.googleChannel === "search" && (
-        <Seccion titulo="Palabras clave">
+        <Seccion titulo="Palabras clave" completa={draft.keywords.some((k) => k.trim())}>
           <Textarea
             value={draft.keywords.join("\n")}
             onChange={(e) => onChange({ keywords: e.target.value.split("\n") })}
@@ -1918,7 +2024,7 @@ function FaseConjunto({
       )}
 
       {conGoogle && draft.googleChannel === "search" && (
-        <Seccion titulo="Palabras clave negativas">
+        <Seccion titulo="Palabras clave negativas" completa>
           <Textarea
             value={draft.negativeKeywords.join("\n")}
             onChange={(e) => onChange({ negativeKeywords: e.target.value.split("\n") })}
@@ -1935,7 +2041,7 @@ function FaseConjunto({
       )}
 
       {conGoogle && OBJECTIVES[draft.objective].google !== "maximize_conversions" && (
-        <Seccion titulo="Tope de CPC">
+        <Seccion titulo="Tope de CPC" completa>
           <Input
             type="number"
             inputMode="decimal"
@@ -1953,7 +2059,7 @@ function FaseConjunto({
       )}
 
       {conGoogle && (
-        <Seccion titulo="Idiomas">
+        <Seccion titulo="Idiomas" completa>
           <div className="flex flex-wrap gap-4">
             {(
               [
@@ -2125,7 +2231,7 @@ function FaseAnuncio({
   return (
     <>
       {draft.existingAdset && (
-        <Seccion titulo="Nombre del anuncio">
+        <Seccion titulo="Nombre del anuncio" completa={draft.name.trim() !== ""}>
           <Input
             value={draft.name}
             onChange={(e) => onChange({ name: e.target.value })}
@@ -2136,7 +2242,7 @@ function FaseAnuncio({
       )}
 
       {/* Destino: la misma URL alimenta el `final_url` de Google y el `link` de Meta. */}
-      <Seccion titulo="Destino">
+      <Seccion titulo="Destino" completa={draft.landingUrl.trim() !== ""}>
         <Campo etiqueta="URL DE DESTINO" className="sm:w-96">
           <Input
             value={draft.landingUrl}
@@ -2155,7 +2261,7 @@ function FaseAnuncio({
 
       {conMeta && (
         <>
-          <Seccion titulo="Identidad">
+          <Seccion titulo="Identidad" completa>
             {cuentaMeta ? (
               cuentaMeta.pageId ? (
                 <IdentidadMeta
@@ -2178,7 +2284,7 @@ function FaseAnuncio({
             )}
           </Seccion>
 
-          <Seccion titulo="Configuración del anuncio">
+          <Seccion titulo="Configuración del anuncio" completa>
             <div className="grid gap-4 sm:grid-cols-2">
               <Campo etiqueta="FORMATO">
                 <Select
@@ -2219,7 +2325,13 @@ function FaseAnuncio({
             </div>
           </Seccion>
 
-          <Seccion titulo="Contenido del anuncio">
+          <Seccion
+            titulo="Contenido del anuncio"
+            completa={
+              draft.message.trim() !== "" &&
+              (draft.mediaType === "none" || draft.mediaUrl.trim() !== "")
+            }
+          >
             <Campo etiqueta="TEXTO PRINCIPAL">
               <Textarea
                 value={draft.message}
@@ -2351,14 +2463,20 @@ function FaseAnuncio({
 
       {conGoogle && (
         <>
-          <Seccion titulo="Identidad">
+          <Seccion titulo="Identidad" completa>
             <p className="text-sm text-foreground/75">
               Google no tiene un concepto de identidad: publica desde la
               cuenta elegida en el paso de Campaña.
             </p>
           </Seccion>
 
-          <Seccion titulo="Contenido del anuncio">
+          <Seccion
+            titulo="Contenido del anuncio"
+            completa={
+              draft.headlines.filter((h) => h.trim()).length >= 3 &&
+              draft.descriptions.filter((d) => d.trim()).length >= 2
+            }
+          >
             <Campo etiqueta="TÍTULOS · UNO POR LÍNEA, 3 A 15, MÁX 30 CARACTERES">
               <Textarea
                 value={draft.headlines.join("\n")}

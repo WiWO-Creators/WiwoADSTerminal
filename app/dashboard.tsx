@@ -204,6 +204,39 @@ const TODOS_LOS_CLIENTES = "__todos__";
  * navegador (ver `PuertaDeCliente` más abajo). */
 const PUERTA_CLIENTE_STORAGE_KEY = "wiwo-ads-puerta-cliente-resuelta";
 
+/**
+ * Fetch con reintento y backoff, para tolerar los cortes de red pasajeros
+ * del servidor compartido (otro proceso del VPS satura la CPU un momento,
+ * ver docs/DESPLIEGUE_VPS.md) sin que el dashboard se vea "colgado" a la
+ * primera. Cada intento tiene su propio timeout: sin esto, un intento que
+ * nunca responde bloquearía todos los reintentos siguientes.
+ *
+ * Solo reintenta fallos de RED (fetch que ni siquiera consigue respuesta).
+ * Una respuesta HTTP de error (404, 500…) es una respuesta válida del
+ * servidor y se devuelve tal cual — reintentarla a ciegas no la arregla.
+ */
+async function fetchConReintento(
+  input: string,
+  init: RequestInit,
+  intentos = 3,
+): Promise<Response> {
+  let ultimoError: unknown;
+  for (let intento = 0; intento < intentos; intento++) {
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: init.signal ?? AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      ultimoError = error;
+      if (intento < intentos - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 600 * 2 ** intento));
+      }
+    }
+  }
+  throw ultimoError;
+}
+
 export type DashboardIdentity = {
   id: string;
   email: string;
@@ -537,7 +570,7 @@ export default function WiwoDashboard({
     solicitud: number = ++rangoSolicitadoRef.current,
   ) {
     try {
-      const response = await fetch(
+      const response = await fetchConReintento(
         `/api/dashboard?rango=${encodeURIComponent(periodo)}`,
         { headers: { accept: "application/json" } },
       );
@@ -558,7 +591,16 @@ export default function WiwoDashboard({
           : null,
       );
     } catch {
-      // The integration surface already reports provider errors.
+      // Ya se reintentó solo (fetchConReintento) — esto es un corte real,
+      // no uno pasajero. Antes quedaba en silencio total: el dashboard se
+      // veía "colgado" sin decir por qué. Un id fijo evita apilar el mismo
+      // aviso si dos actualizaciones fallan casi juntas.
+      if (solicitud === rangoSolicitadoRef.current) {
+        toast.error("No se pudo actualizar los datos", {
+          id: "refresh-operational-data-error",
+          description: "Puede ser un corte de red pasajero — reintenta en unos segundos.",
+        });
+      }
     }
   }
 

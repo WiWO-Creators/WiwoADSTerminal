@@ -993,7 +993,10 @@ function paisesEfectivos(
  * formato, pero Meta no puede descargarla, y descubrirlo recién al ejecutar
  * dejaría una campaña y un conjunto ya creados sin anuncio.
  */
-export function problemaDeUrlPublica(valor: string): string | null {
+export function problemaDeUrlPublica(
+  valor: string,
+  tipo?: "image" | "video",
+): string | null {
   const texto = valor.trim();
   if (!texto) {
     return "Falta la URL de la pieza: pega una dirección que empiece con https:// (o sube el archivo)";
@@ -1019,6 +1022,9 @@ export function problemaDeUrlPublica(valor: string): string | null {
     /^172\.(1[6-9]|2\d|3[01])\./.test(host);
   if (privado) {
     return `La pieza está en una dirección local (${host}): Meta no puede descargarla desde ahí. Usa una URL pública`;
+  }
+  if (tipo === "image" && /\.hei[cf](\?|$)/i.test(url.pathname)) {
+    return "Esa imagen es .heic/.heif (el formato nativo de fotos de iPhone): Meta suele rechazarlo al crear el anuncio. Elige otra publicación o sube una versión en .jpg/.png";
   }
   return null;
 }
@@ -1263,7 +1269,7 @@ export function validateDraft(
       add("mediaUrl", "Meta necesita una imagen o un video");
     } else if (!boosteandoValidacion) {
       // Windsor no recibe archivos: va a buscar la pieza a una URL pública.
-      const problema = problemaDeUrlPublica(draft.mediaUrl);
+      const problema = problemaDeUrlPublica(draft.mediaUrl, draft.mediaType === "image" ? "image" : "video");
       if (problema) add("mediaUrl", problema);
     }
     if (draft.budgetMode === "total" && !draft.endDate) {

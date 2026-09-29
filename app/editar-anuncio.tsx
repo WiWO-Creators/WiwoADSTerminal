@@ -158,7 +158,7 @@ export function EditarAnuncioDialog({
     }
     if (cta) cambios.call_to_action_type = cta;
     if (imagenUrl.trim()) {
-      const problema = problemaDeUrlPublica(imagenUrl);
+      const problema = problemaDeUrlPublica(imagenUrl, "image");
       if (problema) {
         toast.error(problema);
         return;
