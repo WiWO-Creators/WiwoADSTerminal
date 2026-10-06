@@ -1,5 +1,6 @@
-import { ACTIVE_PLATFORMS, PLATFORM } from "@/lib/plataformas";
+import { LECTURA_PLATFORMS, PLATFORM } from "@/lib/plataformas";
 import type { Portfolio } from "@/lib/portafolios-store";
+import type { Segmento } from "@/lib/segmentos";
 import { normalizeAccountId } from "@/lib/portafolios-store";
 
 import type {
@@ -33,6 +34,12 @@ export type PortfolioSummary = {
   pageId: string | null;
   /** Países ISO-2 para la segmentación mínima que Meta exige. */
   countries: string[];
+  /** Proyectos o mercados del cliente, para filtrar su tabla. */
+  segmentos: Segmento[];
+  /** Empresa del grupo (solo para ordenar los selectores). */
+  empresa: "mgc" | "wiwo" | null;
+  /** Ya no es cliente: no se ofrece en los selectores. */
+  archivado: boolean;
   accountCount: number;
   accountsWithData: number;
   currencyTotals: CurrencyTotal[];
@@ -69,6 +76,9 @@ export function buildPortfolios(
       declared: boolean;
       pageId: string | null;
       countries: string[];
+      segmentos: Segmento[];
+      empresa: "mgc" | "wiwo" | null;
+      archivado: boolean;
       accounts: PerformanceAccountSummary[];
     }
   >();
@@ -81,6 +91,9 @@ export function buildPortfolios(
       declared: Boolean(declared),
       pageId: declared?.pageId ?? null,
       countries: declared?.countries ?? [],
+      segmentos: declared?.segmentos ?? [],
+      empresa: declared?.empresa ?? null,
+      archivado: declared?.archivado ?? false,
       accounts: [],
     };
     group.accounts.push(account);
@@ -105,6 +118,9 @@ function summarize(
     declared: boolean;
     pageId: string | null;
     countries: string[];
+    segmentos: Segmento[];
+    empresa: "mgc" | "wiwo" | null;
+    archivado: boolean;
     accounts: PerformanceAccountSummary[];
   },
 ): PortfolioSummary {
@@ -117,10 +133,13 @@ function summarize(
     declared: group.declared,
     pageId: group.pageId,
     countries: group.countries,
+    segmentos: group.segmentos,
+    empresa: group.empresa,
+    archivado: group.archivado,
     accountCount: accounts.length,
     accountsWithData: withData.length,
     currencyTotals: sumByCurrency(withData),
-    byProvider: ACTIVE_PLATFORMS
+    byProvider: LECTURA_PLATFORMS
       .map((provider) => {
         const own = accounts.filter((a) => a.provider === provider);
         const ownWithData = own.filter((a) => a.hasData);

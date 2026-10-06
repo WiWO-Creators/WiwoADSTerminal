@@ -8,6 +8,7 @@ import {
   getDashboardSnapshot,
   type DecisionAction,
 } from "@/lib/dashboard-store";
+import { can, enAlcance } from "@/lib/permisos";
 import { esRango } from "@/lib/rangos";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +26,17 @@ export async function GET(request: Request) {
   try {
     // Un periodo desconocido no es un error: se cae al mes en curso, que es lo
     // que se venía mostrando siempre.
-    const pedido = new URL(request.url).searchParams.get("rango") ?? "";
+    const params = new URL(request.url).searchParams;
+    const pedido = params.get("rango") ?? "";
     const rango = esRango(pedido) ? pedido : undefined;
-    return Response.json(await getDashboardSnapshot(user, rango));
+    // Los anuncios son el 90 % del peso: solo se mandan si se piden, y de un cliente.
+    const cliente = params.get("anuncios") === "1" ? params.get("cliente") : null;
+    if (cliente && !enAlcance(user, cliente)) {
+      return Response.json({ error: "Ese cliente no está en tu alcance" }, { status: 403 });
+    }
+    return Response.json(
+      await getDashboardSnapshot(user, rango, cliente ? { anunciosDelCliente: cliente } : {}),
+    );
   } catch (error) {
     return routeError(error);
   }
@@ -50,6 +59,15 @@ export async function POST(request: Request) {
     return Response.json(
       { error: "Formato de solicitud no válido" },
       { status: 415 },
+    );
+  }
+
+  // Firmar, descartar o posponer una decisión es aprobar cambios: solo quien
+  // tiene ese permiso. Antes cualquier sesión válida podía hacerlo.
+  if (!can(user, "aprobar_cambios")) {
+    return Response.json(
+      { error: "Tu rol no puede resolver decisiones", code: CODIGOS_ERROR.PERMISO_INSUFICIENTE },
+      { status: 403 },
     );
   }
 

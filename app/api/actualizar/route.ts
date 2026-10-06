@@ -8,6 +8,7 @@ import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { listPortfolios } from "@/lib/portafolios-store";
 import { construirResumenSemanal } from "@/lib/resumen-semanal";
 import { guardarResumenSemanal } from "@/lib/resumen-semanal-store";
+import { evaluarSugerencias } from "@/lib/sugerencias-store";
 import {
   fetchWindsorCatalog,
   limpiarCacheDeMetricas,
@@ -166,6 +167,14 @@ export async function POST(request: Request) {
       await guardarResumenSemanal(construirResumenSemanal(snap, alertas));
     } catch (error) {
       console.error("WiWO.ADS resumen semanal", error);
+    }
+
+    // Con datos frescos, las sugerencias de todos los clientes se recalculan.
+    // Solo lee y guarda recomendaciones; tampoco debe tumbar la actualización.
+    try {
+      await evaluarSugerencias(session.actor);
+    } catch (error) {
+      console.error("WiWO.ADS sugerencias", error);
     }
 
     return Response.json(

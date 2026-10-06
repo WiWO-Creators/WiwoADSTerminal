@@ -6,6 +6,7 @@ import { Building2, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import type { PortfolioSummary } from "@/lib/portafolios";
 import { cn } from "@/lib/utils";
+import { agruparPorEmpresa } from "@/lib/empresas";
 
 /**
  * Puerta de entrada: elegir un cliente antes de ver nada más, como el
@@ -67,7 +68,12 @@ export function PuertaDeCliente({
               Ningún cliente coincide con la búsqueda.
             </p>
           ) : (
-            filtrados.map((cliente) => (
+            agruparPorEmpresa(filtrados).map((grupo) => (
+              <div key={grupo.empresa ?? "sin"}>
+                {grupo.etiqueta && (
+                  <p className="font-micro px-3 pt-3 pb-1 text-[0.6rem] text-muted-foreground">{grupo.etiqueta.toUpperCase()}</p>
+                )}
+                {grupo.clientes.map((cliente) => (
               <button
                 key={cliente.id}
                 type="button"
@@ -88,6 +94,8 @@ export function PuertaDeCliente({
                   </span>
                 </span>
               </button>
+                ))}
+              </div>
             ))
           )}
         </div>

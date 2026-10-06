@@ -13,7 +13,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { summarizeObjectives } from "@/lib/objetivos";
+import type { SemillaDeCampana } from "@/lib/constructor";
+import { DEFINICION_KPI, KPIS_PRINCIPALES, type KpiPrincipal } from "@/lib/kpis-cliente";
+import type { GtmEstado } from "@/lib/gtm";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
@@ -22,7 +24,6 @@ import {
   type AttachToCampana,
   type AttachToConjunto,
 } from "./anuncios-view";
-import { TarjetaResumenCliente } from "./resumen-cliente";
 import { OrbeDeBoton, Surface } from "./ui";
 
 type CuentaVinculada = {
@@ -58,7 +59,7 @@ type CuentaVinculada = {
 };
 
 /** Lo que puede guardarse desde la ficha de un cliente. */
-type CambiosPortfolio = Partial<Portfolio> & {
+type CambiosPortfolio = Partial<Omit<Portfolio, "metas">> & CambiosMetas & {
   accountPageId?: { externalId: string; pageId: string | null };
   accountPixelAdd?: { externalId: string; pixelId: string; label?: string | null };
   accountPixelRemove?: { externalId: string; pixelRowId: string };
@@ -78,8 +79,34 @@ type Portfolio = {
   notes: string | null;
   targetCpaMicros: number | null;
   targetRoas: number | null;
+  /** Qué se mira primero en este cliente. */
+  kpiPrincipal: KpiPrincipal | null;
+  /** ¿Tiene Google Tag Manager? `null`: sin verificar. */
+  gtmEstado: GtmEstado | null;
+  gtmContainerId: string | null;
+  monthlyBudgetMicros: number | null;
+  monthlyBudgetCurrency: string | null;
+  ga4PropertyId: string | null;
+  empresa?: "mgc" | "wiwo" | null;
+  archivado?: boolean;
+  /** Proyectos o mercados del cliente, con su presupuesto mensual propio si lo tienen. */
+  segmentos?: Array<{ id: string; nombre: string; presupuesto: { micros: number; moneda: string } | null }>;
+  metas: {
+    cpmMicros: number | null;
+    /** Fracción (0,015 = 1,5 %). */
+    ctrMinimo: number | null;
+    frecuenciaMaxima: number | null;
+  };
   accountIds: string[];
   accounts: CuentaVinculada[];
+};
+
+/** Lo que el formulario de la ficha manda al guardar las metas nuevas. */
+type CambiosMetas = {
+  kpiPrincipal?: KpiPrincipal | null;
+  targetCpmMicros?: number | null;
+  targetCtr?: number | null;
+  maxFrequency?: number | null;
 };
 
 type Unassigned = {
@@ -169,8 +196,13 @@ export function ClientesView({
   seleccionado,
   onSeleccionar,
   onCrearCampana,
+  onAbrirImpulsar,
   onAgregarConjunto,
   onAgregarAnuncio,
+  onImpulsar,
+  onVersionNueva,
+  onDatosCambiaron,
+  cargandoAnuncios = false,
 }: {
   performance: PerformanceSnapshot;
   /**
@@ -184,8 +216,16 @@ export function ClientesView({
   onSeleccionar: (portfolioId: string | null) => void;
   /** Sin esta prop (rol sin crear_campanas), AnunciosView no ofrece el botón. */
   onCrearCampana?: (portfolioId: string) => void;
+  onAbrirImpulsar?: () => void;
   onAgregarConjunto?: (attachTo: AttachToCampana) => void;
   onAgregarAnuncio?: (attachTo: AttachToConjunto) => void;
+  onImpulsar?: (portfolioId: string, semilla: SemillaDeCampana) => void;
+  /** Un anuncio nuevo, en el mismo conjunto, con el contenido de uno que no se puede editar. */
+  onVersionNueva?: (attachTo: AttachToConjunto, semilla: SemillaDeCampana) => void;
+  /** Se aplicó un cambio desde el editor: hay que volver a leer los anuncios. */
+  onDatosCambiaron?: () => void;
+  /** Los anuncios del cliente se están leyendo: se muestra eso en vez de una tabla vacía. */
+  cargandoAnuncios?: boolean;
 }) {
   const [data, setData] = useState<Respuesta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -261,23 +301,14 @@ export function ClientesView({
 
   const portfolios = data?.portfolios ?? [];
   const seleccionadoObj = portfolios.find((p) => p.id === seleccionado) ?? null;
-  const performanceDelSeleccionado =
-    performance.portfolios.find((p) => p.id === seleccionado) ?? null;
-  const cuentasDelSeleccionado = new Set(
-    performanceDelSeleccionado?.accounts.map((a) => a.id) ?? [],
-  );
-  const objetivosDelSeleccionado = performanceDelSeleccionado
-    ? summarizeObjectives(
-        performance.campaigns.filter((c) => cuentasDelSeleccionado.has(c.accountKey)),
-      )
-    : [];
-  const pendientes = portfolios.filter((p) => faltantesDe(p).lista.length > 0);
-  const porRevisar = portfolios.filter((p) => p.needsReview);
+  const pendientes = portfolios.filter((p) => !p.archivado && faltantesDe(p).lista.length > 0);
+  const porRevisar = portfolios.filter((p) => !p.archivado && p.needsReview);
 
   const anunciosPortfolios = performance.portfolios.map((item) => ({
     id: item.id,
     name: item.name,
     accountKeys: item.accounts.map((a) => a.id),
+    segmentos: item.segmentos,
     // Clientes como SQM facturan desde varias cuentas de la misma
     // plataforma, una por país o mercado (SQM España, SQM SPN…). Sin esto,
     // AnunciosView solo podía sumarlas todas o separarlas por plataforma —
@@ -454,18 +485,6 @@ export function ClientesView({
         </div>
       ) : null}
 
-      {seleccionadoObj && performanceDelSeleccionado && (
-        <TarjetaResumenCliente
-          portfolio={performanceDelSeleccionado}
-          periodo={{
-            desde: performance.rangeStart,
-            hasta: performance.rangeEnd,
-            enCurso: performance.rango.enCurso,
-          }}
-          objetivos={objetivosDelSeleccionado}
-        />
-      )}
-
       <div className="space-y-4">
         {seleccionadoObj && verFicha && (
           <Ficha
@@ -482,9 +501,14 @@ export function ClientesView({
           />
         )}
 
+        {/* Cuánto se invirtió y cuánto sobra: del mes, de las campañas y por segmento. */}
+
         {/* AnunciosView ya arma sus propias tarjetas (filtros, tabla); una
             tarjeta más envolviéndola solo agregaba un borde y una sombra
             extra alrededor de otras dos. */}
+        {cargandoAnuncios ? (
+          <Surface className="p-6 text-sm text-foreground/55">Leyendo las campañas y anuncios de este cliente…</Surface>
+        ) : (
         <AnunciosView
           // Sin esto, cambiar de cliente en el selector del navbar no
           // reinicia el filtro interno de la tabla: `useState` solo lee
@@ -495,10 +519,16 @@ export function ClientesView({
           portfolios={anunciosPortfolios}
           portfolioIdFijo={seleccionadoObj?.id}
           onCrearCampana={onCrearCampana}
+          onAbrirImpulsar={onAbrirImpulsar}
           onAgregarConjunto={onAgregarConjunto}
           onAgregarAnuncio={onAgregarAnuncio}
+          onImpulsar={onImpulsar}
+          onVersionNueva={onVersionNueva}
+          onDatosCambiaron={onDatosCambiaron}
+          kpiPrincipal={seleccionadoObj?.kpiPrincipal ?? null}
           puedeAprobar={Boolean(data?.canApprove)}
         />
+        )}
       </div>
     </div>
   );
@@ -528,7 +558,47 @@ function Ficha({
   const [metaRoas, setMetaRoas] = useState(
     portfolio.targetRoas !== null ? String(portfolio.targetRoas) : "",
   );
+  const [kpiPrincipal, setKpiPrincipal] = useState<string>(portfolio.kpiPrincipal ?? "");
+  const [presupuestoMes, setPresupuestoMes] = useState(
+    portfolio.monthlyBudgetMicros !== null ? String(portfolio.monthlyBudgetMicros / 1_000_000) : "",
+  );
+  const [monedaPresupuesto, setMonedaPresupuesto] = useState(portfolio.monthlyBudgetCurrency ?? "");
+  // Presupuesto mensual de cada segmento (texto, en la moneda de arriba).
+  const presupuestoInicialDeSegmento = (id: string) => {
+    const p = portfolio.segmentos?.find((x) => x.id === id)?.presupuesto;
+    return p ? String(p.micros / 1_000_000) : "";
+  };
+  const [presupuestoSegmento, setPresupuestoSegmento] = useState<Record<string, string>>(() =>
+    Object.fromEntries((portfolio.segmentos ?? []).map((x) => [x.id, x.presupuesto ? String(x.presupuesto.micros / 1_000_000) : ""])),
+  );
+  const [ga4Propiedad, setGa4Propiedad] = useState(portfolio.ga4PropertyId ?? "");
+  const [empresa, setEmpresa] = useState<string>(portfolio.empresa ?? "");
+  const [archivado, setArchivado] = useState<boolean>(portfolio.archivado === true);
+  const [gtmEstado, setGtmEstado] = useState<string>(portfolio.gtmEstado ?? "");
+  const [gtmContenedor, setGtmContenedor] = useState(portfolio.gtmContainerId ?? "");
+  const [metaCpm, setMetaCpm] = useState(
+    portfolio.metas.cpmMicros !== null ? String(portfolio.metas.cpmMicros / 1_000_000) : "",
+  );
+  // El CTR se muestra y se escribe en % (1,5), no como fracción.
+  const [metaCtr, setMetaCtr] = useState(
+    portfolio.metas.ctrMinimo !== null ? String(Math.round(portfolio.metas.ctrMinimo * 10_000) / 100) : "",
+  );
+  const [maxFrecuencia, setMaxFrecuencia] = useState(
+    portfolio.metas.frecuenciaMaxima !== null ? String(portfolio.metas.frecuenciaMaxima) : "",
+  );
   const cambiado =
+    empresa !== (portfolio.empresa ?? "") ||
+    archivado !== (portfolio.archivado === true) ||
+    ga4Propiedad !== (portfolio.ga4PropertyId ?? "") ||
+    presupuestoMes !== (portfolio.monthlyBudgetMicros !== null ? String(portfolio.monthlyBudgetMicros / 1_000_000) : "") ||
+    monedaPresupuesto !== (portfolio.monthlyBudgetCurrency ?? "") ||
+    (portfolio.segmentos ?? []).some((x) => (presupuestoSegmento[x.id] ?? "") !== presupuestoInicialDeSegmento(x.id)) ||
+    gtmEstado !== (portfolio.gtmEstado ?? "") ||
+    gtmContenedor !== (portfolio.gtmContainerId ?? "") ||
+    kpiPrincipal !== (portfolio.kpiPrincipal ?? "") ||
+    metaCpm !== (portfolio.metas.cpmMicros !== null ? String(portfolio.metas.cpmMicros / 1_000_000) : "") ||
+    metaCtr !== (portfolio.metas.ctrMinimo !== null ? String(Math.round(portfolio.metas.ctrMinimo * 10_000) / 100) : "") ||
+    maxFrecuencia !== (portfolio.metas.frecuenciaMaxima !== null ? String(portfolio.metas.frecuenciaMaxima) : "") ||
     pageId !== (portfolio.pageId ?? "") ||
     countries !== portfolio.countries.join(", ") ||
     website !== (portfolio.website ?? "") ||
@@ -817,6 +887,200 @@ function Ficha({
             cola de Decisiones.
           </p>
 
+          {/*
+            Qué es "buen rendimiento" depende del cliente: uno de awareness se
+            juzga por alcance y CPM, no por CPA. El KPI principal decide qué
+            columnas se ven primero en sus tablas y cómo lo lee el asistente;
+            las metas de abajo son contra qué se le compara.
+          */}
+          <div className="mt-3 border-t border-foreground/8 pt-3">
+            <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+              PRESUPUESTO MENSUAL
+            </label>
+            <div className="grid gap-2 sm:grid-cols-[1fr_7rem]">
+              <input
+                value={presupuestoMes}
+                disabled={!editable}
+                inputMode="decimal"
+                onChange={(e) => setPresupuestoMes(e.target.value)}
+                placeholder="Ej: 3000000"
+                className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+              />
+              <input
+                value={monedaPresupuesto}
+                disabled={!editable}
+                maxLength={3}
+                onChange={(e) => setMonedaPresupuesto(e.target.value.toUpperCase())}
+                placeholder="CLP"
+                className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+              />
+            </div>
+            <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+              Con esto la pantalla del cliente muestra cuánto queda del mes, a qué ritmo va y cómo cerraría. Sin presupuesto mensual se
+              muestra la suma de lo asignado a sus campañas.
+            </p>
+            {(portfolio.segmentos ?? []).length > 0 && (
+              <div className="mt-2 space-y-1.5">
+                <p className="font-micro text-[0.58rem] text-foreground/45">PRESUPUESTO MENSUAL POR SEGMENTO (EN LA MISMA MONEDA)</p>
+                {(portfolio.segmentos ?? []).map((x) => (
+                  <div key={x.id} className="grid grid-cols-[1fr_9rem] items-center gap-2">
+                    <span className="truncate text-xs text-foreground/75">{x.nombre}</span>
+                    <input
+                      value={presupuestoSegmento[x.id] ?? ""}
+                      disabled={!editable}
+                      inputMode="decimal"
+                      aria-label={`Presupuesto mensual de ${x.nombre}`}
+                      onChange={(e) => setPresupuestoSegmento((actual) => ({ ...actual, [x.id]: e.target.value.replace(/[^\d.,]/g, "") }))}
+                      placeholder="Sin presupuesto"
+                      className="h-8 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="mt-3 border-t border-foreground/8 pt-3">
+            <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+              PROPIEDADES DE GOOGLE ANALYTICS 4
+            </label>
+            <input
+              value={ga4Propiedad}
+              disabled={!editable}
+              onChange={(e) => setGa4Propiedad(e.target.value)}
+              placeholder="Ej: 307451372 — o varias separadas por coma"
+              className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+            />
+            <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+              Con el ID de la propiedad (o de varias, separadas por coma), la pantalla del cliente vigila la salud de la medición: eventos clave mal marcados,
+              leads que no cuentan o que dejaron de llegar. Lo ves en GA4 → Administrar → Detalles de la propiedad.
+            </p>
+          </div>
+          <div className="mt-3 border-t border-foreground/8 pt-3">
+            <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">EMPRESA DEL GRUPO</label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select
+                value={empresa}
+                disabled={!editable}
+                onChange={(e) => setEmpresa(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+              >
+                <option value="">Sin asignar</option>
+                <option value="mgc">MGC</option>
+                <option value="wiwo">WIWO</option>
+              </select>
+              <label className="flex items-center gap-2 text-xs text-foreground/70">
+                <input type="checkbox" checked={archivado} disabled={!editable} onChange={(e) => setArchivado(e.target.checked)} />
+                Ya no es cliente (archivar)
+              </label>
+            </div>
+            <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+              Solo ordena los selectores: las dos empresas trabajan juntas y todos ven a todos. Archivar lo saca de los selectores sin
+              borrar sus datos.
+            </p>
+          </div>
+          {/* Medición: sin GTM la plataforma avisa "NO cuenta con GTM". */}
+          <div className="mt-3 border-t border-foreground/8 pt-3">
+            <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+              GOOGLE TAG MANAGER
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select
+                value={gtmEstado}
+                disabled={!editable}
+                onChange={(e) => setGtmEstado(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+              >
+                <option value="">Sin verificar</option>
+                <option value="tiene">Cuenta con GTM</option>
+                <option value="no_tiene">NO cuenta con GTM</option>
+              </select>
+              {gtmEstado === "tiene" && (
+                <input
+                  value={gtmContenedor}
+                  disabled={!editable}
+                  onChange={(e) => setGtmContenedor(e.target.value)}
+                  placeholder="GTM-ABC1234"
+                  className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+                />
+              )}
+            </div>
+            <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+              Un cliente marcado sin GTM aparece en Alertas y con un aviso en su pantalla. «Sin verificar» no genera ninguna alerta.
+            </p>
+          </div>
+          <div className="mt-3 border-t border-foreground/8 pt-3">
+            <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+              KPI PRINCIPAL DE ESTE CLIENTE
+            </label>
+            <select
+              value={kpiPrincipal}
+              disabled={!editable}
+              onChange={(e) => setKpiPrincipal(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-field/60 px-3 text-xs"
+            >
+              <option value="">Sin definir</option>
+              {KPIS_PRINCIPALES.map((k) => (
+                <option key={k} value={k}>
+                  {DEFINICION_KPI[k].etiqueta}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[0.62rem] leading-4 text-foreground/38">
+              {kpiPrincipal && (KPIS_PRINCIPALES as readonly string[]).includes(kpiPrincipal)
+                ? DEFINICION_KPI[kpiPrincipal as KpiPrincipal].descripcion
+                : "Define qué se mira primero en las tablas y en las recomendaciones de este cliente."}
+            </p>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+                CPM OBJETIVO
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={metaCpm}
+                disabled={!editable}
+                onChange={(e) => setMetaCpm(e.target.value)}
+                placeholder="Sin meta"
+                className="h-9 bg-field/60 text-xs"
+              />
+            </div>
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+                CTR MÍNIMO (%)
+              </label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={metaCtr}
+                disabled={!editable}
+                onChange={(e) => setMetaCtr(e.target.value)}
+                placeholder="Ej. 1.5"
+                className="h-9 bg-field/60 text-xs"
+              />
+            </div>
+            <div>
+              <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
+                FRECUENCIA MÁXIMA
+              </label>
+              <Input
+                type="number"
+                min="1"
+                max="20"
+                step="0.1"
+                value={maxFrecuencia}
+                disabled={!editable}
+                onChange={(e) => setMaxFrecuencia(e.target.value)}
+                placeholder="Ej. 3.5"
+                className="h-9 bg-field/60 text-xs"
+              />
+            </div>
+          </div>
+
           {portfolio.needsReview && portfolio.reviewNote && (
             <p className="mt-3 rounded-xl border border-brand/20 bg-brand/[0.06] px-3 py-2 text-[0.68rem] leading-5 text-foreground/62">
               {portfolio.reviewNote}
@@ -850,6 +1114,28 @@ function Ficha({
                     ? Math.round(Number(metaCpa) * 1_000_000)
                     : null,
                   targetRoas: metaRoas.trim() ? Number(metaRoas) : null,
+                  kpiPrincipal: kpiPrincipal ? (kpiPrincipal as KpiPrincipal) : null,
+                  ga4PropertyId: ga4Propiedad.trim() || null,
+                  empresa: empresa ? (empresa as "mgc" | "wiwo") : null,
+                  archivado,
+                  monthlyBudgetMicros: presupuestoMes.trim() ? Math.round(Number(presupuestoMes) * 1_000_000) : null,
+                  monthlyBudgetCurrency: presupuestoMes.trim() ? monedaPresupuesto.trim().toUpperCase() || null : null,
+                  ...((portfolio.segmentos ?? []).length > 0
+                    ? {
+                        segmentBudgets: Object.fromEntries(
+                          (portfolio.segmentos ?? []).map((x) => {
+                            const n = Number((presupuestoSegmento[x.id] ?? "").replace(",", "."));
+                            return [x.id, (presupuestoSegmento[x.id] ?? "").trim() && n > 0 ? Math.round(n * 1_000_000) : null];
+                          }),
+                        ),
+                        segmentBudgetCurrency: monedaPresupuesto.trim().toUpperCase() || null,
+                      }
+                    : {}),
+                  gtmEstado: gtmEstado ? (gtmEstado as GtmEstado) : null,
+                  gtmContainerId: gtmEstado === "tiene" && gtmContenedor.trim() ? gtmContenedor.trim() : null,
+                  targetCpmMicros: metaCpm.trim() ? Math.round(Number(metaCpm) * 1_000_000) : null,
+                  targetCtr: metaCtr.trim() ? Number(metaCtr) / 100 : null,
+                  maxFrequency: maxFrecuencia.trim() ? Number(maxFrecuencia) : null,
                 })
               }
               className="mt-3 border-foreground/12 bg-transparent text-foreground/70"

@@ -1,8 +1,11 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
-import { can } from "@/lib/permisos";
+import { registrarEjecucion } from "@/lib/constructor-ejecutar";
+import { nombreDeEdicion, pasoDeEdicion } from "@/lib/edicion-registro";
+import { can, enAlcance } from "@/lib/permisos";
 import { isActivePlatform } from "@/lib/plataformas";
+import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 import { executeWindsorAction, type WindsorProvider } from "@/lib/windsor";
 
 /**
@@ -222,14 +225,38 @@ export async function POST(request: Request) {
     return fail("Faltan los parámetros de la acción", 400);
   }
 
+  // Hoy solo admin y supervisor llegan hasta acá y ven todos los clientes, así
+  // que esto no bloquea a nadie; existe para que el día que un rol con alcance
+  // limitado pueda aprobar cambios, no pueda tocar cuentas de otro cliente
+  // mandando un `accountId` ajeno (el navegador es quien lo dice, no se puede
+  // confiar). Una cuenta que no pertenece a ningún cliente tampoco se edita.
+  const portafolio = (await accountIndex()).get(normalizeAccountId(body.accountId));
+  if (!portafolio) return fail("Esa cuenta no pertenece a ningún cliente", 403);
+  if (!enAlcance(session.actor, portafolio.id)) {
+    return fail("Ese cliente no está en tu alcance", 403);
+  }
+
   const resultado = await executeWindsorAction(
     provider,
     body.accountId,
     action,
     body.params,
   );
+  const pasos = [pasoDeEdicion(provider, action, body.params, resultado, body.accountId)];
+  const registrar = (ok: boolean) =>
+    registrarEjecucion(
+      {
+        portfolioId: portafolio.id,
+        name: nombreDeEdicion(action, body.params ?? {}),
+        platforms: [provider],
+      },
+      session.actor.email,
+      pasos,
+      ok,
+    );
 
   if (!resultado.ok) {
+    await registrar(false);
     return Response.json(
       { ok: false, error: resultado.error },
       { status: 502, headers: NO_STORE },
@@ -252,8 +279,18 @@ export async function POST(request: Request) {
       // Si la pausa falla, el cambio real ya se aplicó igual: se avisa en la
       // respuesta en vez de fingir que se revirtió algo que nunca se tocó.
       if (pausa.ok) pausado = { nivel: entidad.nivel };
+      pasos.push(
+        pasoDeEdicion(
+          provider,
+          receta.action,
+          { [receta.param]: entidad.id },
+          pausa,
+          body.accountId,
+        ),
+      );
     }
   }
+  await registrar(true);
 
   return Response.json(
     { ok: true, data: resultado.raw, pausado },

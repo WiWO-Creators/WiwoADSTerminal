@@ -87,6 +87,26 @@ export default function PoliticaDePrivacidadPage() {
           </p>
         </section>
 
+        <section id="eliminar-datos">
+          <h2 className="text-base font-semibold text-foreground">
+            Eliminación de datos
+          </h2>
+          <p className="mt-2">
+            Para pedir que eliminemos tus datos de WiWO.ADS, incluidos los que
+            llegaron por tu cuenta de Meta o de Google, escribe a{" "}
+            <a
+              href="mailto:aveas@mgcglobalgroup.com?subject=Eliminar%20mis%20datos"
+              className="text-brand underline underline-offset-2"
+            >
+              aveas@mgcglobalgroup.com
+            </a>{" "}
+            con el asunto &ldquo;Eliminar mis datos&rdquo; y el correo con el que
+            entraste. Borramos tu usuario y los permisos de conexión asociados, y
+            te confirmamos por el mismo medio. También puedes quitar el acceso
+            de WiWO.ADS desde la configuración de tu cuenta de Meta o de Google.
+          </p>
+        </section>
+
         <section>
           <h2 className="text-base font-semibold text-foreground">
             Contacto

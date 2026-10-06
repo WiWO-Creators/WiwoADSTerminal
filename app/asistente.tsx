@@ -5,6 +5,7 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUp,
+  BrainCircuit,
   Check,
   Maximize2,
   Minimize2,
@@ -22,7 +23,7 @@ import { ThinkingOrb } from "./ui";
 
 type EstadoDePropuesta = "pendiente" | "aplicando" | "aplicada" | "descartada" | "error";
 
-type PropuestaEnPantalla = Propuesta & { estado: EstadoDePropuesta; error?: string };
+type PropuestaEnPantalla = Propuesta & { estado: EstadoDePropuesta; error?: string; aviso?: string };
 
 type Mensaje = {
   id: string;
@@ -67,6 +68,92 @@ function conNegritas(texto: string): React.ReactNode[] {
  * nueva, siempre deja una tarjeta con un botón y la persona decide — la
  * campaña nueva se revisa y se publica desde el Constructor, no antes.
  */
+type NotaVisible = { id: string; texto: string; autor: string; alcance: "equipo" | "cliente"; puedeBorrar: boolean };
+
+/**
+ * Lo que el asistente recuerda, a la vista: del equipo y del cliente activo. Se guarda hablando con él («recuerda que…»)
+ * o cuando aprende algo duradero; aquí se revisa y se borra lo que ya no sirve.
+ */
+function PanelDeMemoria({ clienteId, clienteNombre, onCerrar }: { clienteId: string | null; clienteNombre: string | null; onCerrar: () => void }) {
+  const [notas, setNotas] = useState<NotaVisible[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelado = false;
+    fetch(`/api/asistente/memoria${clienteId ? `?cliente=${encodeURIComponent(clienteId)}` : ""}`, { cache: "no-store" })
+      .then(async (r) => (r.ok ? ((await r.json()) as { notas: NotaVisible[] }) : Promise.reject(new Error("No se pudo leer la memoria"))))
+      .then((j) => !cancelado && setNotas(j.notas))
+      .catch((e: unknown) => !cancelado && setError(e instanceof Error ? e.message : "No se pudo leer la memoria"));
+    return () => {
+      cancelado = true;
+    };
+  }, [clienteId]);
+
+  async function borrar(nota: NotaVisible) {
+    const r = await fetch("/api/asistente/memoria", {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: nota.id, cliente: clienteId }),
+    });
+    if (r.ok) setNotas((actual) => (actual ?? []).filter((n) => n.id !== nota.id));
+    else setError("No se pudo borrar la nota");
+  }
+
+  const delEquipo = (notas ?? []).filter((n) => n.alcance === "equipo");
+  const delCliente = (notas ?? []).filter((n) => n.alcance === "cliente");
+  return (
+    <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-xs leading-5 text-muted-foreground">
+          Esto es lo que recuerdo para trabajar mejor con el tiempo. Pídeme «recuerda que…» para guardar algo; borra lo que ya no sirva.
+          Nunca guardo datos personales ni claves.
+        </p>
+        <button type="button" onClick={onCerrar} className="shrink-0 text-xs font-semibold text-brand hover:underline">
+          Volver al chat
+        </button>
+      </div>
+      {error && <p className="text-xs text-danger">{error}</p>}
+      {notas === null && !error && <p className="text-xs text-muted-foreground">Leyendo la memoria…</p>}
+      {notas !== null && notas.length === 0 && <p className="text-sm text-muted-foreground">Todavía no he guardado nada.</p>}
+      {[
+        ["Del equipo", delEquipo],
+        [clienteNombre ? `Sobre ${clienteNombre}` : "Del cliente", delCliente],
+      ].map(([titulo, lista]) =>
+        (lista as NotaVisible[]).length > 0 ? (
+          <div key={titulo as string}>
+            <h3 className="font-micro text-[0.6rem] text-muted-foreground">{(titulo as string).toUpperCase()}</h3>
+            <ul className="mt-1.5 space-y-1.5">
+              {(lista as NotaVisible[]).map((n) => (
+                <li key={n.id} className="flex items-start gap-2 rounded-lg border border-border px-3 py-2 text-xs leading-5">
+                  <span className="min-w-0 flex-1 text-foreground">{n.texto}</span>
+                  {n.puedeBorrar && (
+                    <button type="button" onClick={() => void borrar(n)} aria-label="Olvidar esta nota" className="shrink-0 text-muted-foreground hover:text-danger">
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null,
+      )}
+    </div>
+  );
+}
+
+const FRASES_DE_ESPERA = ["Trabajando…", "Pensando…", "Revisando los datos…", "Armando la respuesta…", "Ordenando las ideas…"];
+
+/** Mientras no hay un aviso concreto de lo que se está haciendo, rota entre varias frases en vez de repetir una. */
+function FraseDeEspera({ fija }: { fija: string | null }) {
+  const [indice, setIndice] = useState(0);
+  useEffect(() => {
+    if (fija) return;
+    const t = window.setInterval(() => setIndice((v) => (v + 1) % FRASES_DE_ESPERA.length), 2600);
+    return () => window.clearInterval(t);
+  }, [fija]);
+  return <>{fija ?? FRASES_DE_ESPERA[indice]}</>;
+}
+
 export function AsistenteFlotante({
   clienteId,
   clienteNombre,
@@ -211,13 +298,40 @@ export function AsistenteFlotante({
   }
 
   async function aplicar(mensajeId: string, propuesta: PropuestaEnPantalla) {
-    if (propuesta.tipo !== "estado") return;
-    const marcar = (estado: EstadoDePropuesta, error?: string) =>
+    if (propuesta.tipo !== "estado" && propuesta.tipo !== "edicion") return;
+    const marcar = (estado: EstadoDePropuesta, error?: string, aviso?: string) =>
       actualizarMensaje(mensajeId, (m) => ({
         ...m,
-        propuestas: m.propuestas.map((p) => (p.id === propuesta.id ? { ...p, estado, error } : p)),
+        propuestas: m.propuestas.map((p) => (p.id === propuesta.id ? { ...p, estado, error, aviso } : p)),
       }));
     marcar("aplicando");
+    if (propuesta.tipo === "edicion") {
+      // Lo que se aplica no es lo que dibujó el modelo: el servidor vuelve a leer
+      // la entidad de la plataforma y a armar el cambio, con los mismos permisos,
+      // confirmación y bitácora que el editor.
+      try {
+        const response = await fetch("/api/entidades/editar", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            provider: propuesta.plataforma,
+            accountId: propuesta.cuentaId,
+            nivel: propuesta.nivel,
+            id: propuesta.entidadId,
+            cambios: propuesta.cambios,
+            modo: "aplicar",
+            confirmacion: "EDITAR",
+          }),
+        });
+        const cuerpo = (await response.json()) as { ok?: boolean; error?: string; aviso?: string };
+        if (!response.ok || !cuerpo.ok) throw new Error(cuerpo.aviso ?? cuerpo.error ?? "No se pudo aplicar");
+        marcar("aplicada", undefined, cuerpo.aviso);
+        onCambioAplicado();
+      } catch (issue) {
+        marcar("error", issue instanceof Error ? issue.message : "No se pudo aplicar");
+      }
+      return;
+    }
     try {
       const response = await fetch("/api/anuncios/estado", {
         method: "POST",
@@ -268,6 +382,7 @@ export function AsistenteFlotante({
   }
 
   const vacio = mensajes.length === 0;
+  const [verMemoria, setVerMemoria] = useState(false);
   const ultima = mensajes[mensajes.length - 1];
   const esperandoTexto = cargando && ultima?.role === "assistant" && ultima.text === "";
 
@@ -291,6 +406,19 @@ export function AsistenteFlotante({
                 {clienteNombre ? `Cliente: ${clienteNombre}` : "Todos los clientes"}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setVerMemoria((v) => !v)}
+              aria-label="Memoria del asistente"
+              aria-pressed={verMemoria}
+              title="Lo que recuerda el asistente"
+              className={cn(
+                "grid size-8 place-items-center rounded-full transition-colors hover:bg-secondary hover:text-foreground",
+                verMemoria ? "bg-secondary text-foreground" : "text-muted-foreground",
+              )}
+            >
+              <BrainCircuit className="size-4" />
+            </button>
             {!vacio && (
               <button
                 type="button"
@@ -321,7 +449,9 @@ export function AsistenteFlotante({
             </button>
           </header>
 
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+          {verMemoria && <PanelDeMemoria clienteId={clienteId} clienteNombre={clienteNombre} onCerrar={() => setVerMemoria(false)} />}
+
+          <div className={cn("flex-1 space-y-3 overflow-y-auto px-4 py-4", verMemoria && "hidden")}>
             {vacio && (
               <div className="space-y-4">
                 <p className="text-sm leading-6 text-muted-foreground">
@@ -372,12 +502,32 @@ export function AsistenteFlotante({
                     onAplicar={() => void aplicar(m.id, p)}
                     onDescartar={() => descartar(m.id, p.id)}
                     onAbrirConstructor={() => {
+                      if (p.tipo === "impulso") {
+                        setAbierto(false);
+                        onAbrirConstructor(p.clienteId, {
+                          propuestaId: p.id,
+                          name: `Impulso · ${p.anuncioNombre}`,
+                          objective: "alcance",
+                          platforms: ["meta"],
+                          details: p.motivo || `Impulsa el anuncio «${p.anuncioNombre}».`,
+                          targetCountries: [],
+                          metaMessage: p.texto ?? undefined,
+                          boost: {
+                            postId: p.postId,
+                            accountId: p.cuentaId,
+                            mediaUrl: p.miniatura ?? "",
+                            anuncioOrigen: p.anuncioNombre,
+                          },
+                        });
+                        return;
+                      }
                       if (p.tipo !== "constructor") return;
                       setAbierto(false);
                       onAbrirConstructor(p.clienteId, {
                         propuestaId: p.id,
                         name: p.nombreSugerido,
                         objective: p.objetivo,
+                        objectiveByPlatform: p.objetivoPorPlataforma,
                         platforms: p.plataformas,
                         details: p.resumen,
                         targetCountries: p.paises,
@@ -385,6 +535,10 @@ export function AsistenteFlotante({
                         targetLanguages:
                           p.targetLanguages.length > 0 ? p.targetLanguages : undefined,
                         landingUrl: p.landingUrl || undefined,
+                        dailyBudget: p.dailyBudget ?? undefined,
+                        budgetByPlatform: Object.keys(p.budgetByPlatform ?? {}).length > 0 ? p.budgetByPlatform : undefined,
+                        budgetMode: p.budgetMode,
+                        endDate: p.endDate ?? undefined,
                         headlines: p.headlines.length > 0 ? p.headlines : undefined,
                         descriptions: p.descriptions.length > 0 ? p.descriptions : undefined,
                         keywords: p.keywords.length > 0 ? p.keywords : undefined,
@@ -401,7 +555,7 @@ export function AsistenteFlotante({
             {(esperandoTexto || herramienta) && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <ThinkingOrb size="sm" state="generating" label="" />
-                {herramienta ?? "Un momento…"}
+                <FraseDeEspera fija={herramienta} />
               </div>
             )}
             {errorDeCarga && (
@@ -586,6 +740,99 @@ function TarjetaDePropuesta({
           Abrir en el Constructor
           <ArrowRight className="size-3.5" />
         </button>
+      </div>
+    );
+  }
+
+  if (propuesta.tipo === "impulso") {
+    return (
+      <div className="w-full rounded-xl border border-border bg-card p-3">
+        <p className="font-micro text-[0.6rem] text-muted-foreground">
+          Impulso sugerido · Meta Ads · {propuesta.clienteNombre}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">{propuesta.anuncioNombre}</p>
+        {propuesta.texto && (
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{propuesta.texto}</p>
+        )}
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{propuesta.motivo}</p>
+        <p className="mt-1.5 text-[0.68rem] leading-5 text-muted-foreground">
+          Crea un anuncio nuevo que reutiliza esta misma publicación y conserva sus reacciones y comentarios.
+        </p>
+        <button
+          type="button"
+          onClick={onAbrirConstructor}
+          className="mt-3 flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground"
+        >
+          Abrir en el Constructor
+          <ArrowRight className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  if (propuesta.tipo === "edicion") {
+    const niveles = { campana: "campaña", conjunto: "conjunto", anuncio: "anuncio" } as const;
+    return (
+      <div className="w-full rounded-xl border border-border bg-card p-3">
+        <p className="font-micro text-[0.6rem] text-muted-foreground">
+          Edición propuesta · {propuesta.plataforma === "google" ? "Google Ads" : "Meta Ads"} · {niveles[propuesta.nivel]}
+        </p>
+        <p className="mt-1 text-sm font-semibold text-foreground">{propuesta.nombre}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{propuesta.motivo}</p>
+        <ul className="mt-2 space-y-1.5">
+          {propuesta.diff.map((d) => (
+            <li key={d.campo} className="text-xs leading-5">
+              <span className="font-semibold text-foreground/80">{d.etiqueta}</span>
+              <span className="block break-words text-muted-foreground line-through">{d.antes}</span>
+              <span className="block break-words text-foreground">{d.despues}</span>
+            </li>
+          ))}
+        </ul>
+        {propuesta.pausaAlAplicar && propuesta.estado === "pendiente" && (
+          <p className="mt-2 text-xs font-semibold text-warn">
+            Al aplicarlo, esto queda pausado para que alguien lo revise antes de seguir corriendo con lo nuevo.
+          </p>
+        )}
+        {propuesta.avisos.map((aviso) => (
+          <p key={aviso} className="mt-1 text-[0.68rem] leading-5 text-muted-foreground">⚠️ {aviso}</p>
+        ))}
+        <div className="mt-3 flex items-center gap-2">
+          {propuesta.estado === "pendiente" && puedeAprobar && (
+            <>
+              <button
+                type="button"
+                onClick={onAplicar}
+                className="rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground"
+              >
+                Aplicar cambio
+              </button>
+              <button
+                type="button"
+                onClick={onDescartar}
+                className="rounded-full border border-border px-3.5 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                Descartar
+              </button>
+            </>
+          )}
+          {propuesta.estado === "pendiente" && !puedeAprobar && (
+            <span className="text-xs text-muted-foreground">Tu rol puede ver la propuesta pero no aplicarla.</span>
+          )}
+          {propuesta.estado === "aplicando" && (
+            <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <ThinkingOrb size="xs" state="generating" label="" />
+              Aplicando…
+            </span>
+          )}
+          {propuesta.estado === "aplicada" && (
+            <span className="flex items-start gap-1.5 text-xs font-semibold text-ok">
+              <Check className="mt-0.5 size-3.5 shrink-0" />
+              {propuesta.aviso ?? "Cambio aplicado"}
+            </span>
+          )}
+          {propuesta.estado === "descartada" && <span className="text-xs text-muted-foreground">Descartada</span>}
+          {propuesta.estado === "error" && <span className="text-xs text-danger">{propuesta.error}</span>}
+        </div>
       </div>
     );
   }

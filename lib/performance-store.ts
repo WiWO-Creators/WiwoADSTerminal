@@ -7,7 +7,7 @@ import {
 } from "@/lib/rangos";
 import { can, type Actor } from "@/lib/permisos";
 import {
-  ACTIVE_PLATFORMS,
+  LECTURA_PLATFORMS,
   PLATFORM,
   type Platform,
 } from "@/lib/plataformas";
@@ -327,7 +327,7 @@ function assembleSnapshot(
 function summarizeProviders(
   accounts: PerformanceAccountSummary[],
 ): ProviderTotal[] {
-  return ACTIVE_PLATFORMS
+  return LECTURA_PLATFORMS
     .map((provider) => {
       const own = accounts.filter((account) => account.provider === provider);
       const withData = own.filter((account) => account.hasData);

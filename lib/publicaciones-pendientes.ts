@@ -53,6 +53,81 @@ async function idsDescartados(candidatos: string[]): Promise<Set<string>> {
   );
 }
 
+/** Lo recién creado desde el Constructor en UNA cuenta, para completar el árbol de edición mientras Windsor no lo trae. */
+export type EntidadesRecientes = {
+  campanas: Array<{ id: string; nombre: string; presupuestoDiario: number | null; presupuestoTotal: number | null; objetivo: string | null }>;
+  conjuntos: Array<{ id: string; nombre: string; campaignId: string | null }>;
+  anuncios: Array<{ id: string; nombre: string; campaignId: string | null; conjuntoId: string | null }>;
+};
+
+/**
+ * Lo creado con éxito en las últimas horas en esta cuenta (según la bitácora). Solo si el cliente tiene UNA cuenta
+ * de esa plataforma (la bitácora no guarda a qué cuenta fue cada paso; con más de una no se adivina).
+ */
+export async function entidadesRecientesDeCuenta(provider: string, accountId: string): Promise<EntidadesRecientes> {
+  const vacio: EntidadesRecientes = { campanas: [], conjuntos: [], anuncios: [] };
+  const db = getRawDb();
+  const { results: duenos } = await db
+    .prepare(`SELECT portfolio_id FROM portfolio_accounts WHERE external_id = ?`)
+    .bind(accountId)
+    .all<{ portfolio_id: string }>();
+  const portfolioId = duenos?.[0]?.portfolio_id;
+  if (!portfolioId) return vacio;
+  const { results: hermanas } = await db
+    .prepare(`SELECT external_id FROM portfolio_accounts WHERE portfolio_id = ? AND (provider = ? OR provider IS NULL)`)
+    .bind(portfolioId, provider)
+    .all<{ external_id: string }>();
+  // Sin proveedor guardado en la tabla no se puede contar cuentas hermanas con certeza: se exige que la cuenta sea la única que
+  // coincide por formato (Google: 123-456-7890; Meta: solo dígitos largos).
+  const mismoFormato = (id: string) => (provider === "google" ? /^\d{3}-\d{3}-\d{4}$/.test(id) : provider === "meta" ? /^\d{12,}$/.test(id) : false);
+  if ((hermanas ?? []).filter((h) => mismoFormato(h.external_id)).length !== 1) return vacio;
+
+  const { results } = await db
+    .prepare(`SELECT steps_json FROM ejecuciones WHERE ok = 1 AND portfolio_id = ? AND created_at > ? ORDER BY created_at DESC`)
+    .bind(portfolioId, Date.now() - VENTANA_MS)
+    .all<{ steps_json: string }>();
+
+  const salida: EntidadesRecientes = { campanas: [], conjuntos: [], anuncios: [] };
+  for (const fila of results ?? []) {
+    let pasos: PasoEjecutado[];
+    try {
+      pasos = JSON.parse(fila.steps_json) as PasoEjecutado[];
+    } catch {
+      continue;
+    }
+    let campaignId: string | null = null;
+    let conjuntoId: string | null = null;
+    for (const paso of pasos) {
+      if (!paso.ok || paso.platform !== provider) continue;
+      const nombre = typeof paso.params.name === "string" ? paso.params.name : "(sin nombre)";
+      if (paso.action === "create_campaign") {
+        const id = idDeResultado(paso.raw, ["campaign_id", "campaignId", "id"]);
+        campaignId = id;
+        conjuntoId = null;
+        if (!id) continue;
+        const unidad = provider === "meta" ? 100 : 1_000_000;
+        const dinero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v / unidad : null);
+        salida.campanas.push({
+          id,
+          nombre,
+          presupuestoDiario: dinero(paso.params.daily_budget ?? paso.params.budget_amount_micros),
+          presupuestoTotal: dinero(paso.params.lifetime_budget),
+          objetivo: typeof paso.params.objective === "string" ? paso.params.objective : typeof paso.params.channel_type === "string" ? paso.params.channel_type.toUpperCase() : null,
+        });
+      } else if (paso.action === "create_ad_group" || paso.action === "create_adset") {
+        const id = idDeResultado(paso.raw, ["ad_group_id", "adGroupId", "adset_id", "adsetId", "id"]);
+        conjuntoId = id;
+        if (id) salida.conjuntos.push({ id, nombre, campaignId });
+      } else if (paso.action === "create_ad" || paso.action === "create_responsive_search_ad" || paso.action === "boost_post") {
+        const id = idDeResultado(paso.raw, ["ad_id", "adId", "id"], new Set([campaignId, conjuntoId].filter((v): v is string => Boolean(v))));
+        const titulo = Array.isArray(paso.params.headlines) && typeof paso.params.headlines[0] === "string" ? paso.params.headlines[0] : nombre;
+        if (id) salida.anuncios.push({ id, nombre: titulo, campaignId, conjuntoId });
+      }
+    }
+  }
+  return salida;
+}
+
 export type PublicacionesPendientes = {
   campanas: WindsorCampaign[];
   anuncios: WindsorAd[];
@@ -167,7 +242,7 @@ export async function publicacionesPendientes(
       } else if (paso.action === "create_ad_group" || paso.action === "create_adset") {
         ctx.adsetId = idDeResultado(paso.raw, ["ad_group_id", "adGroupId", "adset_id", "adsetId", "id"]);
         ctx.adsetName = typeof paso.params.name === "string" ? paso.params.name : ctx.campaignName;
-      } else if (paso.action === "create_ad" || paso.action === "create_responsive_search_ad") {
+      } else if (paso.action === "create_ad" || paso.action === "create_responsive_search_ad" || paso.action === "boost_post") {
         const adId = idDeResultado(paso.raw, ["ad_id", "adId", "id"]);
         const nombreAd =
           typeof paso.params.name === "string"

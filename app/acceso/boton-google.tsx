@@ -1,30 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-
-import { mensajeDeError } from "@/lib/acceso-errores";
-import {
-  CANAL_ACCESO,
-  CLAVE_RESULTADO,
-  type ResultadoAcceso,
-} from "@/lib/acceso-popup";
+import { useEffect, useState } from "react";
 
 /**
- * Responsabilidad: iniciar el acceso con Google en una ventana emergente y
- *   mover la ventana de atrás cuando el flujo termina.
+ * Responsabilidad: iniciar el acceso con Google.
  * Usado por: app/acceso/page.tsx.
  * NO hace: validar identidad ni permisos — eso es de /api/acceso/google y su
- *   callback. Aquí solo se decide dónde ocurre el flujo.
+ *   callback.
  *
- * Sigue siendo un enlace real: sin JavaScript, o con las emergentes
- * bloqueadas, el acceso cae al flujo clásico de redirección en la misma
- * pestaña.
+ * Redirige en la misma pestaña. Antes abría una ventana emergente y esperaba
+ * un aviso por BroadcastChannel; si la emergente quedaba tapada, la bloqueaba el
+ * navegador o el aviso se perdía, el botón se quedaba en «Esperando a Google…»
+ * sin salida. La redirección es un salto menos, no depende de ventanas ni de
+ * canales y se ve más rápida. (El callback aún sabe responder a una emergente,
+ * por si algún enlace antiguo la usa.)
  */
-
-const ANCHO = 500;
-const ALTO = 640;
-const NOMBRE_VENTANA = "wiwo-acceso";
-
 export function BotonGoogle({
   returnTo,
   listo,
@@ -32,125 +22,44 @@ export function BotonGoogle({
   returnTo: string;
   listo: boolean;
 }) {
-  const [esperando, setEsperando] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const emergente = useRef<Window | null>(null);
-
+  const [yendo, setYendo] = useState(false);
   const url = `/api/acceso/google?return_to=${encodeURIComponent(returnTo)}`;
 
-  const resolver = useCallback((resultado: ResultadoAcceso) => {
-    emergente.current?.close();
-    emergente.current = null;
-
-    if (resultado.ok) {
-      // replace y no href: que el botón "atrás" no vuelva a un login ya usado.
-      window.location.replace(resultado.destino);
-      return;
-    }
-    setEsperando(false);
-    setError(mensajeDeError(resultado.error));
+  // Volver con «atrás» desde Google restaura la página tal cual estaba: el botón no puede quedar bloqueado.
+  useEffect(() => {
+    const alVolver = (evento: PageTransitionEvent) => {
+      if (evento.persisted) setYendo(false);
+    };
+    window.addEventListener("pageshow", alVolver);
+    return () => window.removeEventListener("pageshow", alVolver);
   }, []);
 
-  useEffect(() => {
-    if (!esperando) return;
-
-    let canal: BroadcastChannel | null = null;
-    try {
-      canal = new BroadcastChannel(CANAL_ACCESO);
-      canal.onmessage = (evento) => resolver(evento.data as ResultadoAcceso);
-    } catch {
-      canal = null;
-    }
-
-    const desdeStorage = (evento: StorageEvent) => {
-      if (evento.key !== CLAVE_RESULTADO || !evento.newValue) return;
-      try {
-        resolver(JSON.parse(evento.newValue).resultado as ResultadoAcceso);
-      } catch {
-        setEsperando(false);
-        setError(mensajeDeError("google_estado_invalido"));
-      }
-    };
-    window.addEventListener("storage", desdeStorage);
-
-    // Si cierran la emergente a mano, el botón tiene que volver a quedar usable.
-    const vigilante = window.setInterval(() => {
-      if (emergente.current?.closed) {
-        emergente.current = null;
-        setEsperando(false);
-      }
-    }, 500);
-
-    return () => {
-      canal?.close();
-      window.removeEventListener("storage", desdeStorage);
-      window.clearInterval(vigilante);
-    };
-  }, [esperando, resolver]);
-
-  function abrir(evento: React.MouseEvent<HTMLAnchorElement>) {
-    if (!listo) {
+  function ir(evento: React.MouseEvent<HTMLAnchorElement>) {
+    if (!listo || yendo) {
       evento.preventDefault();
       return;
     }
-    // Respetar ctrl/cmd/shift+clic: si alguien quiere otra pestaña, que la abra.
+    // Ctrl/cmd/shift+clic: dejar que el navegador abra otra pestaña.
     if (evento.metaKey || evento.ctrlKey || evento.shiftKey) return;
-
-    evento.preventDefault();
-    setError(null);
-
-    const izquierda = window.screenX + Math.max(0, (window.outerWidth - ANCHO) / 2);
-    const arriba = window.screenY + Math.max(0, (window.outerHeight - ALTO) / 2);
-    const ventana = window.open(
-      `${url}&modo=popup`,
-      NOMBRE_VENTANA,
-      `popup=yes,width=${ANCHO},height=${ALTO},left=${Math.round(izquierda)},top=${Math.round(arriba)}`,
-    );
-
-    if (!ventana) {
-      // Bloqueador de emergentes: seguir por el camino de siempre.
-      window.location.href = url;
-      return;
-    }
-
-    emergente.current = ventana;
-    ventana.focus();
-    setEsperando(true);
+    // La navegación la hace el propio enlace; aquí solo se muestra que ya está en camino.
+    setYendo(true);
   }
 
   return (
-    <>
-      <a
-        href={url}
-        onClick={abrir}
-        aria-disabled={!listo}
-        aria-busy={esperando}
-        className={
-          listo
-            ? "mt-6 inline-flex h-11 w-full items-center justify-center gap-3 rounded-xl bg-[#F8FAD7] px-5 text-sm font-bold text-[#292929] transition-colors hover:bg-[#3BFF00]"
-            : "mt-6 inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-3 rounded-xl bg-[#F8FAD7]/12 px-5 text-sm font-bold text-[#F8FAD7]/38"
-        }
-      >
-        <GoogleMark />
-        {esperando ? "Esperando a Google…" : "Continuar con Google"}
-      </a>
-
-      {esperando && (
-        <p className="mt-2 text-xs leading-5 text-[#F8FAD7]/45">
-          Se abrió una ventana para entrar con Google. Si no la ves, revisa
-          detrás de esta o el bloqueador de ventanas emergentes.
-        </p>
-      )}
-
-      {error && (
-        <p
-          className="mt-3 rounded-xl border border-danger-deep/25 bg-danger-deep/8 px-4 py-3 text-sm leading-6 text-danger"
-          role="alert"
-        >
-          {error}
-        </p>
-      )}
-    </>
+    <a
+      href={url}
+      onClick={ir}
+      aria-disabled={!listo || yendo}
+      aria-busy={yendo}
+      className={
+        listo
+          ? "mt-6 inline-flex h-11 w-full items-center justify-center gap-3 rounded-xl bg-[#F8FAD7] px-5 text-sm font-bold text-[#292929] transition-colors hover:bg-[#3BFF00] aria-busy:pointer-events-none aria-busy:opacity-80"
+          : "mt-6 inline-flex h-11 w-full cursor-not-allowed items-center justify-center gap-3 rounded-xl bg-[#F8FAD7]/12 px-5 text-sm font-bold text-[#F8FAD7]/38"
+      }
+    >
+      <GoogleMark />
+      {yendo ? "Conectando con Google…" : "Continuar con Google"}
+    </a>
   );
 }
 

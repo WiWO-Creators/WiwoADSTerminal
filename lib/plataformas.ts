@@ -13,9 +13,83 @@
 export const PLATFORMS = ["google", "meta", "tiktok", "linkedin"] as const;
 export type Platform = (typeof PLATFORMS)[number];
 
+/**
+ * Plataformas con conexión OAuth propia (Google Ads API y Meta Graph), aparte
+ * de la que se hace vía Windsor. No es lo mismo que "plataformas activas": una
+ * plataforma puede leerse y escribirse solo por Windsor sin tener OAuth nativo.
+ * Por eso es su propia lista y no un alias de `Platform`.
+ */
+export const CONECTABLES = ["google", "meta"] as const satisfies readonly Platform[];
+export type PlataformaConectable = (typeof CONECTABLES)[number];
+
+export function isConectable(value: string): value is PlataformaConectable {
+  return (CONECTABLES as readonly string[]).includes(value);
+}
+
+/** Los tres niveles de la jerarquía que comparten todas las plataformas (la de Meta). */
+export type NivelEntidad = "campana" | "conjunto" | "anuncio";
+
+/**
+ * Cosas que se pueden cambiar de algo que ya existe. Un solo vocabulario para
+ * todas las plataformas: cada una declara cuáles soporta y por qué vía.
+ */
+export type CampoEditable =
+  | "nombre"
+  | "estado"
+  | "presupuesto"
+  | "puja"
+  | "optimizacion"
+  | "programacion"
+  | "segmentacion"
+  | "ubicaciones"
+  | "idioma"
+  | "palabras_clave"
+  | "negativas"
+  | "audiencias"
+  | "extensiones"
+  | "texto"
+  | "titulo"
+  | "descripcion"
+  | "url_destino"
+  | "imagen"
+  | "cta"
+  | "url_tags";
+
+/**
+ * Por dónde se escribe un campo:
+ *  - `windsor`: con una acción de escritura que Windsor expone hoy.
+ *  - `nativa`: directo contra la API de la plataforma (Windsor no lo cubre).
+ *  - `ninguna`: hoy no se puede; `nota` dice por qué y quién impone el límite.
+ */
+export type ViaEscritura = "windsor" | "nativa" | "ninguna";
+
+export type CapacidadDeCampo = {
+  via: ViaEscritura;
+  /** Acción real de Windsor (`list_actions`) cuando `via` es `windsor`. */
+  acciones?: string[];
+  nota?: string;
+};
+
+export type Capacidades = Record<
+  NivelEntidad,
+  Partial<Record<CampoEditable, CapacidadDeCampo>>
+>;
+
 export type PlatformSpec = {
   id: Platform;
   label: string;
+  /**
+   * Cómo se llama cada nivel en esta plataforma. La jerarquía es la misma
+   * (campaña → conjunto → anuncio, como Meta Ads Manager); el vocabulario no.
+   */
+  niveles: Record<NivelEntidad, string>;
+  /**
+   * Qué se puede editar de algo ya publicado y por qué vía. La interfaz lo
+   * consulta para mostrar cada campo editable o bloqueado con su motivo, en
+   * vez de decidirlo con un `if (plataforma === ...)`. Verificado contra
+   * `list_actions` de Windsor el 2026-09-29.
+   */
+  capacidades: Capacidades;
   /**
    * Sigla de plataforma para el nombre de campaña, ej. "[MT]" en
    * `[TRF] [MT] Campaña Halloween 2026`.
@@ -31,6 +105,17 @@ export type PlatformSpec = {
   connector: string;
   /** false: declarada pero todavía no se lee ni se muestra. */
   activa: boolean;
+  /**
+   * `true`: se lee y se muestra aunque todavía no se pueda escribir en ella (crear, editar, pausar). Es el
+   * paso previo a `activa`: una plataforma solo de lectura no aparece en el Constructor, el asistente ni el
+   * simulador. LinkedIn está así.
+   */
+  soloLectura?: boolean;
+  /**
+   * `true`: aunque no se puedan CREAR campañas, sí se administran las que ya existen (pausar, activar,
+   * presupuesto, nombre, fechas) con las acciones que Windsor ofrece. LinkedIn está así.
+   */
+  administraExistentes?: boolean;
   /** Campos de Windsor para la serie diaria por cuenta. */
   camposDiarios: string[];
   /**
@@ -79,6 +164,54 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
     id: "google",
     sigla: "GO",
     label: "Google Ads",
+    niveles: { campana: "Campaña", conjunto: "Grupo de anuncios", anuncio: "Anuncio" },
+    capacidades: {
+      campana: {
+        nombre: { via: "windsor", acciones: ["rename_campaign"] },
+        estado: { via: "windsor", acciones: ["pause_campaign", "enable_campaign"] },
+        presupuesto: { via: "windsor", acciones: ["set_campaign_budget"] },
+        puja: {
+          via: "windsor",
+          acciones: [
+            "set_campaign_bidding_strategy",
+            "set_target_cpa",
+            "set_target_roas",
+            "set_cpc_bid_ceiling",
+          ],
+        },
+        segmentacion: { via: "windsor", acciones: ["set_campaign_geo_targeting"] },
+        idioma: { via: "windsor", acciones: ["set_campaign_language_targeting"] },
+        programacion: { via: "windsor", acciones: ["set_ad_schedule"] },
+        negativas: { via: "windsor", acciones: ["push_negative_keywords", "remove_negative_keywords"] },
+        extensiones: { via: "windsor", acciones: ["create_ad_asset"] },
+      },
+      conjunto: {
+        nombre: { via: "windsor", acciones: ["rename_ad_group", "update_ad_group"] },
+        estado: { via: "windsor", acciones: ["pause_ad_group", "enable_ad_group"] },
+        puja: { via: "windsor", acciones: ["set_max_cpc", "update_ad_group"] },
+        palabras_clave: {
+          via: "windsor",
+          acciones: ["push_keywords", "update_keywords", "remove_keywords"],
+        },
+        negativas: { via: "windsor", acciones: ["push_negative_keywords", "remove_negative_keywords"] },
+        audiencias: {
+          via: "windsor",
+          acciones: ["attach_user_list_to_ad_group", "detach_user_list_from_ad_group"],
+        },
+        extensiones: { via: "windsor", acciones: ["create_ad_asset"] },
+      },
+      anuncio: {
+        estado: { via: "windsor", acciones: ["pause_ad", "enable_ad"] },
+        // Windsor no tiene ninguna acción para editar un anuncio existente (solo
+        // crear uno nuevo). Es un límite de Windsor, no de Google: la API de
+        // Google Ads sí lo permite, así que se escribe directo (`google-ads-nativo.ts`),
+        // en el mismo anuncio y sin cambiar su id. Requiere que quien edita
+        // tenga conectada su cuenta de Google en Integraciones.
+        titulo: { via: "nativa", nota: "Anuncios de búsqueda responsivos" },
+        descripcion: { via: "nativa", nota: "Anuncios de búsqueda responsivos" },
+        url_destino: { via: "nativa", nota: "Anuncios de búsqueda responsivos" },
+      },
+    },
     connector: "google_ads",
     activa: true,
     camposDiarios: [
@@ -165,6 +298,36 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
     id: "meta",
     sigla: "MT",
     label: "Meta Ads",
+    niveles: { campana: "Campaña", conjunto: "Conjunto de anuncios", anuncio: "Anuncio" },
+    capacidades: {
+      campana: {
+        nombre: { via: "windsor", acciones: ["update_campaign"] },
+        estado: { via: "windsor", acciones: ["pause_campaign", "enable_campaign"] },
+        presupuesto: { via: "windsor", acciones: ["set_campaign_budget"] },
+        puja: { via: "windsor", acciones: ["update_campaign"] },
+      },
+      conjunto: {
+        nombre: { via: "windsor", acciones: ["update_adset"] },
+        estado: { via: "windsor", acciones: ["pause_adset", "enable_adset"] },
+        presupuesto: { via: "windsor", acciones: ["set_adset_budget"] },
+        puja: { via: "windsor", acciones: ["update_adset"] },
+        optimizacion: { via: "windsor", acciones: ["update_adset"] },
+        programacion: { via: "windsor", acciones: ["update_adset"] },
+        segmentacion: { via: "windsor", acciones: ["update_adset"] },
+        ubicaciones: { via: "windsor", acciones: ["update_adset"] },
+      },
+      anuncio: {
+        nombre: { via: "windsor", acciones: ["update_ad"] },
+        estado: { via: "windsor", acciones: ["pause_ad", "enable_ad"] },
+        texto: { via: "windsor", acciones: ["update_ad_creative"] },
+        titulo: { via: "windsor", acciones: ["update_ad_creative"] },
+        descripcion: { via: "windsor", acciones: ["update_ad_creative"] },
+        url_destino: { via: "windsor", acciones: ["update_ad_creative"] },
+        imagen: { via: "windsor", acciones: ["update_ad_creative"] },
+        cta: { via: "windsor", acciones: ["update_ad_creative"] },
+        url_tags: { via: "windsor", acciones: ["update_ad_creative"] },
+      },
+    },
     connector: "facebook",
     activa: true,
     // Conjunto verificado por MetriQ contra cuentas reales. Meta no tiene una
@@ -264,6 +427,15 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
       "body",
       "title",
       "link",
+      // Verificados con datos reales de Colbún (2026-09-29). `source_instagram_media_id`
+      // viene poblado EXACTAMENTE en los anuncios armados desde una publicación
+      // de Instagram existente y en null en los propios: es la señal fiable de
+      // "este anuncio reusa una publicación". `effective_object_story_id` (la
+      // publicación de página que usa el anuncio, `{page_id}_{post_id}`) viene en
+      // TODOS —incluidos los propios, que crean una publicación oculta—, así que
+      // no distingue nada, pero es el id que pide `boost_post` para impulsarlo.
+      "source_instagram_media_id",
+      "effective_object_story_id",
       "spend",
       "impressions",
       "reach",
@@ -293,15 +465,63 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
     id: "tiktok",
     sigla: "TT",
     label: "TikTok Ads",
+    niveles: { campana: "Campaña", conjunto: "Grupo de anuncios", anuncio: "Anuncio" },
+    // Solo lectura (2026-10-05). Windsor ofrece pausar, activar y presupuesto para TikTok (`list_actions`); no se
+    // expone en la app hasta que se pida. Los nombres de campo se verificaron con `get_fields` del conector.
+    capacidades: { campana: {}, conjunto: {}, anuncio: {} },
     connector: "tiktok",
-    // Pendiente de activar. MetriQ ya tiene su mapeo verificado: reach,
-    // impressions, frequency, cpm, clicks, ctr, cpc, spend, profile_visits,
-    // follows, likes, comments, shares. Ojo: en TikTok `engagement_rate`
-    // significa CTR, no el ER% del reporte.
+    // Ojo: en TikTok `engagement_rate` significa CTR, no el ER% del reporte. `lib/tiktok.ts` traduce las filas.
     activa: false,
-    camposDiarios: [],
-    camposCampana: [],
-    camposAnuncio: [],
+    soloLectura: true,
+    camposDiarios: [
+      "date",
+      "account_id",
+      "account_name",
+      "currency",
+      "spend",
+      "impressions",
+      "clicks",
+      "reach",
+      "results",
+    ],
+    camposCampana: [
+      "account_id",
+      "account_name",
+      "currency",
+      "campaign_id",
+      "campaign_name",
+      "campaign_operation_status",
+      "objective_type",
+      "campaign_budget",
+      "spend",
+      "impressions",
+      "clicks",
+      "reach",
+      "results",
+      "likes",
+      "comments",
+      "shares",
+      "follows",
+    ],
+    // Pocos campos a propósito: el conector de TikTok tarda mucho a nivel de anuncio y con la creatividad (imagen,
+    // texto, destino) más las interacciones se pasaba del tiempo y no llegaba ningún anuncio.
+    camposAnuncio: [
+      "account_id",
+      "account_name",
+      "currency",
+      "campaign_id",
+      "campaign_name",
+      "campaign_operation_status",
+      "ad_group_id",
+      "ad_group_name",
+      "ad_id",
+      "ad_name",
+      "ad_operation_status",
+      "spend",
+      "impressions",
+      "clicks",
+      "results",
+    ],
     camposCatalogoCampana: [],
     camposCatalogoAnuncio: [],
     unidadPresupuesto: "centavos",
@@ -310,11 +530,82 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
     id: "linkedin",
     sigla: "LI",
     label: "LinkedIn Ads",
+    niveles: { campana: "Grupo de campañas", conjunto: "Campaña", anuncio: "Anuncio" },
+    // Lo que Windsor permite sobre lo que ya existe (list_actions, 2026-10-02). No hay forma de CREAR campañas.
+    capacidades: {
+      campana: {
+        estado: { via: "windsor", acciones: ["pause_campaign_group", "enable_campaign_group"] },
+        presupuesto: { via: "windsor", acciones: ["set_campaign_group_budget"] },
+      },
+      conjunto: {
+        nombre: { via: "windsor", acciones: ["rename_campaign"] },
+        estado: { via: "windsor", acciones: ["pause_campaign", "enable_campaign"] },
+        presupuesto: { via: "windsor", acciones: ["set_campaign_budget"] },
+        programacion: { via: "windsor", acciones: ["set_campaign_schedule"] },
+      },
+      anuncio: {
+        estado: { via: "windsor", acciones: ["pause_creative", "enable_creative"] },
+      },
+    },
     connector: "linkedin",
     activa: false,
-    camposDiarios: [],
-    camposCampana: [],
-    camposAnuncio: [],
+    soloLectura: true,
+    administraExistentes: true,
+    // Verificado con get_fields y una lectura real de las cuentas de Colbún. Aquí `campaign` es el conjunto
+    // y `campaign_group_*` la campaña; `lib/linkedin.ts` traduce las filas al vocabulario común.
+    camposDiarios: [
+      "date",
+      "account_id",
+      "account_name",
+      "currency",
+      "spend",
+      "impressions",
+      "clicks",
+      "engagements",
+      "externalwebsiteconversions",
+      "oneclickleads",
+    ],
+    camposCampana: [
+      "account_id",
+      "account_name",
+      "currency",
+      "campaign_group_id",
+      "campaign_group_name",
+      "campaign_group_status",
+      "campaign_id",
+      "campaign",
+      "campaign_status",
+      "objective_type",
+      "spend",
+      "impressions",
+      "clicks",
+      "engagements",
+      "landingpageclicks",
+      "externalwebsiteconversions",
+      "oneclickleads",
+    ],
+    camposAnuncio: [
+      "account_id",
+      "account_name",
+      "currency",
+      "campaign_group_id",
+      "campaign_group_name",
+      "campaign_group_status",
+      "campaign_id",
+      "campaign",
+      "creative_id",
+      "creative_status",
+      "sponsored_creative_content_title",
+      "creative_thumbnail",
+      "spend",
+      "impressions",
+      "clicks",
+      "engagements",
+      "landingpageclicks",
+      "externalwebsiteconversions",
+      "oneclickleads",
+      "video_views",
+    ],
     camposCatalogoCampana: [],
     camposCatalogoAnuncio: [],
     unidadPresupuesto: "centavos",
@@ -324,6 +615,14 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
 /** Las plataformas que hoy se leen y se muestran. */
 export const ACTIVE_PLATFORMS: Platform[] = PLATFORMS.filter(
   (id) => PLATFORM[id].activa,
+);
+
+/**
+ * Las que se LEEN: las activas más las de solo lectura (LinkedIn). Para todo lo que sea crear, editar,
+ * pausar o proponer cambios se sigue usando `ACTIVE_PLATFORMS` / `isActivePlatform`.
+ */
+export const LECTURA_PLATFORMS: Platform[] = PLATFORMS.filter(
+  (id) => PLATFORM[id].activa || PLATFORM[id].soloLectura === true,
 );
 
 /**
@@ -342,4 +641,31 @@ export function isPlatform(value: string): value is Platform {
 
 export function isActivePlatform(value: string): value is Platform {
   return isPlatform(value) && PLATFORM[value].activa;
+}
+
+/**
+ * ¿Se puede pausar, activar o editar algo que YA existe en esa plataforma? Es más amplio que
+ * `isActivePlatform` (crear campañas): LinkedIn no se puede crear desde WiWO.ADS, pero lo publicado sí se
+ * administra.
+ */
+export function puedeAdministrar(value: string): value is Platform {
+  return isPlatform(value) && (PLATFORM[value].activa || PLATFORM[value].administraExistentes === true);
+}
+
+/** Nombre del nivel en esa plataforma ("Grupo de anuncios" en Google, "Conjunto de anuncios" en Meta). */
+export function nombreDeNivel(id: string, nivel: NivelEntidad): string {
+  return isPlatform(id) ? PLATFORM[id].niveles[nivel] : nivel;
+}
+
+/**
+ * Qué puede hacerse con un campo de algo ya publicado. `null` = la plataforma
+ * no lo declara: no es editable, y tampoco hay un motivo específico que dar.
+ */
+export function capacidadDe(
+  id: string,
+  nivel: NivelEntidad,
+  campo: CampoEditable,
+): CapacidadDeCampo | null {
+  if (!isPlatform(id)) return null;
+  return PLATFORM[id].capacidades[nivel][campo] ?? null;
 }

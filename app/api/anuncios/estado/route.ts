@@ -1,9 +1,13 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
-import { can } from "@/lib/permisos";
-import { isActivePlatform } from "@/lib/plataformas";
-import { executeWindsorAction, type WindsorProvider } from "@/lib/windsor";
+import { registrarEjecucion } from "@/lib/constructor-ejecutar";
+import { nombreDeEdicion, pasoDeEdicion } from "@/lib/edicion-registro";
+import { can, enAlcance } from "@/lib/permisos";
+import { ACCION, valoresDeParametros, type Nivel } from "@/lib/acciones-estado";
+import { puedeAdministrar } from "@/lib/plataformas";
+import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
+import { executeWindsorAction } from "@/lib/windsor";
 
 /**
  * Pausa o activa una campaña, un conjunto o un anuncio ya existente.
@@ -21,56 +25,6 @@ import { executeWindsorAction, type WindsorProvider } from "@/lib/windsor";
 export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" };
-
-type Nivel = "campana" | "conjunto" | "anuncio";
-
-const ACCION: Record<
-  WindsorProvider,
-  Record<Nivel, { enable: string; pause: string; params: string[] }>
-> = {
-  google: {
-    campana: {
-      enable: "enable_campaign",
-      pause: "pause_campaign",
-      params: ["campaign_id"],
-    },
-    conjunto: {
-      enable: "enable_ad_group",
-      pause: "pause_ad_group",
-      params: ["ad_group_id"],
-    },
-    anuncio: {
-      enable: "enable_ad",
-      pause: "pause_ad",
-      params: ["ad_group_id", "ad_id"],
-    },
-  },
-  meta: {
-    campana: {
-      enable: "enable_campaign",
-      pause: "pause_campaign",
-      params: ["campaign_id"],
-    },
-    conjunto: {
-      enable: "enable_adset",
-      pause: "pause_adset",
-      params: ["adset_id"],
-    },
-    anuncio: { enable: "enable_ad", pause: "pause_ad", params: ["ad_id"] },
-  },
-  // Declaradas pero inactivas: si algún día se activan, sus acciones de
-  // pausa/activación reales van acá, no antes.
-  tiktok: {
-    campana: { enable: "", pause: "", params: [] },
-    conjunto: { enable: "", pause: "", params: [] },
-    anuncio: { enable: "", pause: "", params: [] },
-  },
-  linkedin: {
-    campana: { enable: "", pause: "", params: [] },
-    conjunto: { enable: "", pause: "", params: [] },
-    anuncio: { enable: "", pause: "", params: [] },
-  },
-};
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -97,7 +51,7 @@ export async function POST(request: Request) {
   };
 
   const provider = body.provider ?? "";
-  if (!isActivePlatform(provider)) {
+  if (!puedeAdministrar(provider)) {
     return fail("Plataforma no reconocida o todavía no activa", 400);
   }
   const nivel = body.nivel as Nivel;
@@ -112,12 +66,7 @@ export async function POST(request: Request) {
     return fail(`${provider} todavía no tiene esta acción disponible`, 400);
   }
 
-  const valores: Record<string, string | null | undefined> = {
-    campaign_id: body.campaignId,
-    ad_group_id: body.adsetId,
-    adset_id: body.adsetId,
-    ad_id: body.adId,
-  };
+  const valores = valoresDeParametros(provider, body);
   const params: Record<string, unknown> = {};
   for (const clave of receta.params) {
     const valor = valores[clave];
@@ -130,11 +79,29 @@ export async function POST(request: Request) {
     params[clave] = valor;
   }
 
+  // Ver el mismo control en `/api/anuncios/gestionar`: hoy no bloquea a nadie,
+  // pero el `accountId` lo manda el navegador y no se le puede creer solo.
+  const portafolio = (await accountIndex()).get(normalizeAccountId(body.accountId));
+  if (!portafolio) return fail("Esa cuenta no pertenece a ningún cliente", 403);
+  if (!enAlcance(session.actor, portafolio.id)) {
+    return fail("Ese cliente no está en tu alcance", 403);
+  }
+
   const resultado = await executeWindsorAction(
     provider,
     body.accountId,
     action,
     params,
+  );
+  await registrarEjecucion(
+    {
+      portfolioId: portafolio.id,
+      name: nombreDeEdicion(action, params),
+      platforms: [provider],
+    },
+    session.actor.email,
+    [pasoDeEdicion(provider, action, params, resultado, body.accountId)],
+    resultado.ok,
   );
 
   if (!resultado.ok) {

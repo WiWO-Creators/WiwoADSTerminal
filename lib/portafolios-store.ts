@@ -1,5 +1,17 @@
+import {
+  ctrABp,
+  esKpiPrincipal,
+  frecuenciaAX10,
+  metasDeFila,
+  validarMetas,
+  type KpiPrincipal,
+  type MetasCliente,
+} from "@/lib/kpis-cliente";
+import { conPresupuestos, parsearSegmentos, serializarSegmentos, type Segmento } from "@/lib/segmentos";
 import semilla from "@/config/portafolios.json";
 import { getRawDb } from "@/db";
+import { esGtmEstado, normalizarContenedor, type GtmEstado } from "@/lib/gtm";
+import { guardarPropiedadesGa4, problemaDeGa4 } from "@/lib/ga4";
 import { can, type Actor } from "@/lib/permisos";
 
 /**
@@ -49,6 +61,25 @@ export type Portfolio = {
   targetCpaMicros: number | null;
   /** Como razón real (3.5 = 3.5x), no en la unidad `_bp` que usa la base. */
   targetRoas: number | null;
+  /** Qué se mira primero en este cliente. `null`: sin definir. */
+  kpiPrincipal: KpiPrincipal | null;
+  /** ¿Tiene Google Tag Manager? `null`: sin verificar. Ver `lib/gtm.ts`. */
+  gtmEstado: GtmEstado | null;
+  /** ID del contenedor (GTM-XXXXXXX), solo si tiene GTM. */
+  gtmContainerId: string | null;
+  /** ID de la propiedad de Google Analytics 4 (solo dígitos). Habilita la vigilancia de medición. */
+  ga4PropertyId: string | null;
+  /** A qué empresa del grupo pertenece (solo para ordenar: trabajan juntas). `null`: sin asignar. */
+  empresa: "mgc" | "wiwo" | null;
+  /** Ya no es cliente: sale de los selectores y de las pantallas, pero sus datos se conservan. */
+  archivado: boolean;
+  /** Presupuesto acordado para el mes, en micros de `monthlyBudgetCurrency`. */
+  monthlyBudgetMicros: number | null;
+  monthlyBudgetCurrency: string | null;
+  /** Proyectos o mercados del cliente (Valor: Ébano, Corotú…; SQM: México, LATAM…). Ver `lib/segmentos.ts`. */
+  segmentos: Segmento[];
+  /** Metas complementarias a CPA y ROAS. Ver `kpis-cliente.ts`. */
+  metas: MetasCliente;
   accountIds: string[];
   /**
    * Página de Facebook por cuenta de Meta, no por cliente.
@@ -106,6 +137,18 @@ type PortfolioRow = {
   notes: string | null;
   target_cpa_micros: number | null;
   target_roas_bp: number | null;
+  kpi_principal: string | null;
+  gtm_estado: string | null;
+  gtm_container_id: string | null;
+  monthly_budget_micros: number | null;
+  monthly_budget_currency: string | null;
+  ga4_property_id: string | null;
+  empresa: string | null;
+  archivado: number | null;
+  target_cpm_micros: number | null;
+  target_ctr_bp: number | null;
+  max_frequency_x10: number | null;
+  segments: string | null;
 };
 
 const SEED_FLAG = "portfolios_seed_v1";
@@ -181,7 +224,10 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     db
       .prepare(
         `SELECT id, name, page_id, instagram_id, countries, website, contact_email,
-                needs_review, review_note, notes, target_cpa_micros, target_roas_bp
+                needs_review, review_note, notes, target_cpa_micros, target_roas_bp,
+                kpi_principal, target_cpm_micros, target_ctr_bp, max_frequency_x10,
+                gtm_estado, gtm_container_id, monthly_budget_micros, monthly_budget_currency,
+                ga4_property_id, segments, empresa, archivado
          FROM portfolios ORDER BY name COLLATE NOCASE`,
       )
       .all<PortfolioRow>(),
@@ -256,6 +302,16 @@ export async function listPortfolios(): Promise<Portfolio[]> {
     notes: row.notes,
     targetCpaMicros: row.target_cpa_micros,
     targetRoas: row.target_roas_bp === null ? null : row.target_roas_bp / 100,
+    kpiPrincipal: esKpiPrincipal(row.kpi_principal) ? row.kpi_principal : null,
+    gtmEstado: esGtmEstado(row.gtm_estado) ? row.gtm_estado : null,
+    gtmContainerId: row.gtm_container_id,
+    ga4PropertyId: row.ga4_property_id,
+    empresa: row.empresa === "mgc" || row.empresa === "wiwo" ? row.empresa : null,
+    archivado: row.archivado === 1,
+    segmentos: parsearSegmentos(row.segments),
+    monthlyBudgetMicros: row.monthly_budget_micros,
+    monthlyBudgetCurrency: row.monthly_budget_currency,
+    metas: metasDeFila(row),
     accountIds: byPortfolio.get(row.id) ?? [],
     accountPages: pagesByPortfolio.get(row.id) ?? {},
     accountPixels: pixelsByPortfolio.get(row.id) ?? {},
@@ -287,6 +343,27 @@ export type PortfolioInput = {
   targetCpaMicros?: number | null;
   /** Como razón real (3.5 = 3.5x); se convierte a `_bp` al guardar. */
   targetRoas?: number | null;
+  kpiPrincipal?: KpiPrincipal | null;
+  /** `null` = sin verificar. */
+  gtmEstado?: GtmEstado | null;
+  /** GTM-XXXXXXX; se ignora si el cliente no tiene GTM. */
+  gtmContainerId?: string | null;
+  /** Solo dígitos (por ejemplo 307451372); `null` o vacío lo quita. */
+  ga4PropertyId?: string | null;
+  empresa?: "mgc" | "wiwo" | null;
+  archivado?: boolean;
+  /** Presupuesto del mes en micros; `null` lo quita. Exige moneda. */
+  monthlyBudgetMicros?: number | null;
+  monthlyBudgetCurrency?: string | null;
+  /** Presupuesto mensual de cada segmento, en micros, por id de segmento (`null` lo quita). Va en `segmentBudgetCurrency`. */
+  segmentBudgets?: Record<string, number | null>;
+  segmentBudgetCurrency?: string | null;
+  /** CPM objetivo en micros. */
+  targetCpmMicros?: number | null;
+  /** CTR mínimo como fracción (0,015 = 1,5 %). */
+  targetCtr?: number | null;
+  /** Frecuencia máxima tolerada (3,5 = 3,5 veces). */
+  maxFrequency?: number | null;
   accountIds?: string[];
 };
 
@@ -399,6 +476,100 @@ export async function updatePortfolio(
     valores.push(
       input.targetRoas === null ? null : Math.round(input.targetRoas * 100),
     );
+  }
+
+  if (input.kpiPrincipal !== undefined) {
+    if (input.kpiPrincipal !== null && !esKpiPrincipal(input.kpiPrincipal)) {
+      throw new PortafolioError("Ese KPI principal no existe");
+    }
+    campos.push("kpi_principal = ?");
+    valores.push(input.kpiPrincipal);
+  }
+  if (input.gtmEstado !== undefined || input.gtmContainerId !== undefined) {
+    if (input.gtmEstado !== undefined && input.gtmEstado !== null && !esGtmEstado(input.gtmEstado)) {
+      throw new PortafolioError("Ese estado de GTM no existe");
+    }
+    // Sin GTM no hay contenedor que guardar; con GTM, el ID se valida si viene.
+    const contenedor = clean(input.gtmContainerId ?? null);
+    if (input.gtmEstado !== "no_tiene" && contenedor && !normalizarContenedor(contenedor)) {
+      throw new PortafolioError("El contenedor de GTM debe verse así: GTM-ABC1234");
+    }
+    if (input.gtmEstado !== undefined) {
+      campos.push("gtm_estado = ?");
+      valores.push(input.gtmEstado);
+    }
+    if (input.gtmEstado === "no_tiene") {
+      campos.push("gtm_container_id = ?");
+      valores.push(null);
+    } else if (input.gtmContainerId !== undefined) {
+      campos.push("gtm_container_id = ?");
+      valores.push(contenedor ? normalizarContenedor(contenedor) : null);
+    }
+  }
+  if (input.empresa !== undefined) {
+    if (input.empresa !== null && input.empresa !== "mgc" && input.empresa !== "wiwo") {
+      throw new PortafolioError("La empresa debe ser MGC o WIWO");
+    }
+    campos.push("empresa = ?");
+    valores.push(input.empresa);
+  }
+  if (input.archivado !== undefined) {
+    campos.push("archivado = ?");
+    valores.push(input.archivado ? 1 : 0);
+  }
+  if (input.ga4PropertyId !== undefined) {
+    // Una o varias propiedades, separadas por coma (ALO, SQM y Valor tienen varias).
+    const problema = problemaDeGa4(input.ga4PropertyId);
+    if (problema) throw new PortafolioError(problema);
+    campos.push("ga4_property_id = ?");
+    valores.push(guardarPropiedadesGa4(input.ga4PropertyId));
+  }
+  if (input.monthlyBudgetMicros !== undefined || input.monthlyBudgetCurrency !== undefined) {
+    const micros = input.monthlyBudgetMicros;
+    if (micros !== undefined && micros !== null && (!Number.isFinite(micros) || micros <= 0)) {
+      throw new PortafolioError("El presupuesto mensual debe ser un número mayor que cero");
+    }
+    const moneda = (input.monthlyBudgetCurrency ?? "").trim().toUpperCase();
+    if (micros !== undefined && micros !== null && !/^[A-Z]{3}$/.test(moneda)) {
+      throw new PortafolioError("El presupuesto mensual necesita su moneda (por ejemplo CLP o USD)");
+    }
+    if (micros !== undefined) {
+      campos.push("monthly_budget_micros = ?", "monthly_budget_currency = ?");
+      valores.push(micros === null ? null : Math.round(micros), micros === null ? null : moneda);
+    }
+  }
+  if (input.segmentBudgets !== undefined) {
+    const moneda = (input.segmentBudgetCurrency ?? "").trim().toUpperCase();
+    const hayMonto = Object.values(input.segmentBudgets).some((v) => v !== null);
+    if (hayMonto && !/^[A-Z]{3}$/.test(moneda)) {
+      throw new PortafolioError("El presupuesto de un segmento necesita su moneda (por ejemplo CLP o USD)");
+    }
+    for (const v of Object.values(input.segmentBudgets)) {
+      if (v !== null && (!Number.isFinite(v) || v <= 0)) {
+        throw new PortafolioError("El presupuesto de un segmento debe ser un número mayor que cero");
+      }
+    }
+    const actual = await db
+      .prepare("SELECT segments FROM portfolios WHERE id = ? LIMIT 1")
+      .bind(id)
+      .first<{ segments: string | null }>();
+    const nuevos = conPresupuestos(parsearSegmentos(actual?.segments), input.segmentBudgets, moneda || "CLP");
+    campos.push("segments = ?");
+    valores.push(nuevos.length ? serializarSegmentos(nuevos) : null);
+  }
+  const errorDeMeta = validarMetas(input);
+  if (errorDeMeta) throw new PortafolioError(errorDeMeta);
+  if (input.targetCpmMicros !== undefined) {
+    campos.push("target_cpm_micros = ?");
+    valores.push(input.targetCpmMicros === null ? null : Math.round(input.targetCpmMicros));
+  }
+  if (input.targetCtr !== undefined) {
+    campos.push("target_ctr_bp = ?");
+    valores.push(input.targetCtr === null ? null : ctrABp(input.targetCtr));
+  }
+  if (input.maxFrequency !== undefined) {
+    campos.push("max_frequency_x10 = ?");
+    valores.push(input.maxFrequency === null ? null : frecuenciaAX10(input.maxFrequency));
   }
 
   if (campos.length > 0) {

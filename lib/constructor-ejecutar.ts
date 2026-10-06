@@ -6,6 +6,14 @@ import {
   type PlanStep,
 } from "@/lib/constructor";
 import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib/windsor";
+import {
+  crearAnuncioDisplay,
+  crearCampanaPmax,
+  crearCampanaBusqueda,
+  type DatosBusqueda,
+  GoogleAdsNativoError,
+  type CredencialesGoogle,
+} from "@/lib/google-ads-nativo";
 
 /**
  * El bucle real que ejecuta un plan del Constructor contra Windsor —
@@ -23,6 +31,7 @@ import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib
 const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   create_ad_group: { campo: "campaign_id", de: "campaign" },
   create_responsive_search_ad: { campo: "ad_group_id", de: "adGroup" },
+  "ads:create_display_ad": { campo: "ad_group_id", de: "adGroup" },
   push_keywords: { campo: "ad_group_id", de: "adGroup" },
   set_campaign_geo_targeting: { campo: "campaign_id", de: "campaign" },
   // Los tres de acá abajo faltaban: buildPlan (lib/constructor.ts) ya los
@@ -37,6 +46,7 @@ const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   set_cpc_bid_ceiling: { campo: "campaign_id", de: "campaign" },
   set_campaign_language_targeting: { campo: "campaign_id", de: "campaign" },
   create_adset: { campo: "campaign_id", de: "campaign" },
+  update_campaign: { campo: "campaign_id", de: "campaign" },
   create_ad: { campo: "adset_id", de: "adset" },
   boost_post: { campo: "adset_id", de: "adset" },
 };
@@ -132,10 +142,72 @@ export function cuentaDe(
   return delPlatform.length === 1 ? delPlatform[0] : null;
 }
 
+/** Pasos que Windsor no tiene y se hacen con la API de la propia plataforma. Hoy: el anuncio de Display de Google. */
+async function ejecutarPasoNativo(
+  accion: string,
+  accountId: string,
+  params: Record<string, unknown>,
+  cred: CredencialesGoogle | null,
+): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+  if (accion !== "ads:create_display_ad" && accion !== "ads:create_pmax" && accion !== "ads:create_search_campaign") {
+    return { ok: false, error: `Acción nativa desconocida: ${accion}`, raw: null };
+  }
+  if (!cred) {
+    return {
+      ok: false,
+      error: "Falta conectar tu cuenta de Google en Cuentas (con acceso a esta cuenta publicitaria) para crear con imagen.",
+      raw: null,
+    };
+  }
+  try {
+    if (accion === "ads:create_search_campaign") {
+      const r = await crearCampanaBusqueda(cred, accountId, params.datos as DatosBusqueda);
+      return { ok: true, error: null, raw: r };
+    }
+    if (accion === "ads:create_pmax") {
+      const r = await crearCampanaPmax(cred, accountId, {
+        nombre: String(params.name ?? ""),
+        presupuestoDiarioMicros: Number(params.daily_budget_micros ?? 0),
+        urlFinal: String(params.final_url ?? ""),
+        titulares: (params.headlines as string[]) ?? [],
+        titulosLargos: (params.long_headlines as string[]) ?? [],
+        descripciones: (params.descriptions as string[]) ?? [],
+        nombreNegocio: String(params.business_name ?? ""),
+        imagenPaisajeUrl: String(params.landscape_image_url ?? ""),
+        imagenCuadradaUrl: String(params.square_image_url ?? ""),
+        logoUrl: typeof params.logo_url === "string" ? params.logo_url : null,
+        ubicaciones: (params.locations as string[]) ?? [],
+        excluidas: (params.excluded_locations as string[]) ?? [],
+        fin: typeof params.end_date === "string" ? params.end_date : null,
+      });
+      return { ok: true, error: null, raw: r };
+    }
+    const r = await crearAnuncioDisplay(cred, accountId, String(params.ad_group_id), {
+      titulares: (params.headlines as string[]) ?? [],
+      tituloLargo: String(params.long_headline ?? ""),
+      descripciones: (params.descriptions as string[]) ?? [],
+      nombreNegocio: String(params.business_name ?? ""),
+      urlFinal: String(params.final_url ?? ""),
+      imagenPaisajeUrl: String(params.landscape_image_url ?? ""),
+      imagenCuadradaUrl: String(params.square_image_url ?? ""),
+      logoUrl: typeof params.logo_url === "string" ? params.logo_url : null,
+    });
+    return { ok: true, error: null, raw: r };
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof GoogleAdsNativoError ? e.message : "No se pudo crear el anuncio de Display en Google Ads.",
+      raw: e instanceof GoogleAdsNativoError ? e.detalle : String(e),
+    };
+  }
+}
+
 export async function ejecutarPasosDelPlan(
   steps: PlanStep[],
   draft: Pick<CampaignDraft, "accountByPlatform">,
   cuentas: CuentaCliente[],
+  /** Conexión directa a Google Ads de quien publica; la necesitan los pasos `via: "nativa"` (Display con imagen). */
+  credencialesGoogle: CredencialesGoogle | null = null,
 ): Promise<ResultadoEjecucion> {
   const ejecutables = steps.filter((step) => !step.informativo);
   const ids: Partial<Record<ClaveId, string>> = {};
@@ -198,12 +270,10 @@ export async function ejecutarPasosDelPlan(
       params.video_id = ids.video;
     }
 
-    const resultado = await executeWindsorAction(
-      step.platform as WindsorProvider,
-      cuenta.externalId,
-      step.action,
-      params,
-    );
+    const resultado =
+      step.via === "nativa"
+        ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
+        : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);
     realizados.push({
       ...resumen(step),
       params,

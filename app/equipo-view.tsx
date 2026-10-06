@@ -27,7 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { roleCan, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
+import { matrizDeRoles, roleCan, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
 import { PantallaDeCarga, Surface, OrbeDeBoton } from "./ui";
 
 type EquipoCargado = {
@@ -229,6 +229,38 @@ export function EquipoView({
           )}
         </Surface>
       )}
+
+      <details className="mb-4">
+        <summary className="cursor-pointer list-none rounded-xl border border-foreground/10 bg-foreground/[0.03] px-4 py-3 text-sm font-semibold text-foreground/70 hover:text-foreground">
+          Qué puede hacer cada rol
+        </summary>
+        <Surface className="mt-3 overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.04]">
+                <TableHead className="pl-4 text-xs text-foreground/58">Permiso</TableHead>
+                {ROLES.map((rol) => (
+                  <TableHead key={rol} className="text-center text-xs text-foreground/58">
+                    {ROLE_LABELS[rol]}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {matrizDeRoles().map((fila) => (
+                <TableRow key={fila.texto}>
+                  <TableCell className="pl-4 text-sm text-foreground/82">{fila.texto}</TableCell>
+                  {ROLES.map((rol) => (
+                    <TableCell key={rol} className="text-center text-sm">
+                      {fila.roles[rol] ? <span className="font-bold text-brand">Sí</span> : <span className="text-foreground/30">—</span>}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Surface>
+      </details>
 
       {error ? (
         <div className="rounded-[16px] border border-danger-deep/25 bg-danger-deep/10 px-4 py-3 text-sm text-danger">

@@ -1,12 +1,21 @@
 "use client";
 
+import { PresupuestoEnLinea } from "./presupuesto-mes";
+import { SegmentacionMeta } from "./segmentacion-meta";
+import { Campo, Seccion } from "./constructor-ui";
+import { LimiteDeGastoMeta, OptimizacionMeta } from "./meta-avanzado";
+import { CampanaGoogleBusqueda, GrupoGoogleBusqueda, RecursosGoogleBusqueda } from "./google-busqueda";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { toast } from "sonner";
 import {
   AlertCircle,
   Check,
+  ChevronLeft,
+  ChevronDown,
   ChevronRight,
   Flame,
+  ImageOff,
   Images,
   Info,
   Lock,
@@ -42,10 +51,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CTA_CODIGOS, CTA_COMUNES, esCta } from "@/lib/cta";
 import { Textarea } from "@/components/ui/textarea";
 import { nombreCompuesto } from "@/lib/nomenclatura";
 import {
@@ -53,7 +65,10 @@ import {
   META_OBJECTIVE_LABELS,
   META_PLACEMENTS,
   META_SURFACES,
+  CONFIG_BUSQUEDA_POR_DEFECTO,
   OBJECTIVES,
+  objetivoDe,
+  diasHastaFin,
   SPECIAL_AD_CATEGORIES,
   type CallToAction,
   type CampaignDraft,
@@ -64,12 +79,13 @@ import {
   type SemillaDeCampana,
   type SpecialAdCategory,
 } from "@/lib/constructor";
-import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
+import { ACTIVE_PLATFORMS, LECTURA_PLATFORMS, nombreDeNivel, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
 import {
   precargarPublicaciones,
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
+import { SelectorDeAnuncios } from "./selector-anuncios";
 import { CopilotoDeCreativos } from "./copiloto-creativos";
 import { GeneradorDeVariantes } from "./generador-variantes";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
@@ -108,7 +124,7 @@ type Cuenta = {
   countries: string[];
 };
 
-type Cliente = { id: string; name: string; accounts: Cuenta[] };
+type Cliente = { id: string; name: string; accounts: Cuenta[]; gtmEstado?: string | null };
 
 /** Contenido real ya publicado, tal como lo sirve `/api/creatividades`. */
 
@@ -170,6 +186,13 @@ const FASES: Array<{ id: Fase; label: string; detalle: string }> = [
     detalle: "Presupuesto, público y ubicaciones",
   },
   { id: "anuncio", label: "Anuncio", detalle: "Identidad, destino y contenido" },
+];
+
+/** Las mismas tres fases con el nombre y el contenido que les da Google Ads. */
+const FASES_GOOGLE: Array<{ id: Fase; label: string; detalle: string }> = [
+  { id: "campana", label: "Campaña", detalle: "Objetivo, tipo, presupuesto, puja, redes y alcance" },
+  { id: "conjunto", label: "Grupo de anuncios", detalle: "Nombre, puja del grupo y palabras clave" },
+  { id: "anuncio", label: "Anuncio", detalle: "Anuncio de búsqueda responsivo y recursos" },
 ];
 
 /**
@@ -289,24 +312,34 @@ function borradorInicial(
       : semilla?.platforms.length
         ? semilla.platforms
         : ["google"],
-    accountByPlatform:
-      attachTo?.accountId ? { [attachTo.platform]: attachTo.accountId } : {},
+    accountByPlatform: attachTo?.accountId
+      ? { [attachTo.platform]: attachTo.accountId }
+      : semilla?.boost
+        ? { meta: semilla.boost.accountId }
+        : {},
     metaPixelId: null,
     name: semilla?.name ?? "",
     details: semilla?.details ?? "",
     objective: semilla?.objective ?? "trafico",
+    objectiveByPlatform: semilla?.objectiveByPlatform ?? {},
+    // Una campaña nueva con Google nace con su estructura propia; adjuntar a algo existente no la usa.
+    googleBusqueda: !adjuntando && (semilla?.platforms.length ? semilla.platforms : ["google"]).includes("google") ? CONFIG_BUSQUEDA_POR_DEFECTO : null,
     metaObjective: null,
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
     dailyBudget: semilla?.dailyBudget ?? null,
-    budgetByPlatform: {},
-    budgetMode: "diaria",
-    endDate: null,
+    budgetByPlatform: semilla?.budgetByPlatform ?? {},
+    budgetMode: semilla?.budgetMode ?? "diaria",
+    endDate: semilla?.endDate ?? null,
     landingUrl: semilla?.landingUrl ?? "",
     headlines: semilla?.headlines ?? [],
     descriptions: semilla?.descriptions ?? [],
     pathDisplay1: "",
     pathDisplay2: "",
+    displaySquareUrl: "",
+    displayLogoUrl: "",
+    displayLongHeadline: "",
+    displayBusinessName: "",
     keywords: semilla?.keywords ?? [],
     negativeKeywords: [],
     cpcCeiling: null,
@@ -315,9 +348,11 @@ function borradorInicial(
     metaHeadline: semilla?.metaHeadline ?? "",
     metaDescription: semilla?.metaDescription ?? "",
     metaBudgetLevel: "campana",
-    mediaUrl: "",
-    mediaType: "none",
-    boostPostId: null,
+    // Impulsando un anuncio ya publicado, la pieza es la suya: se muestra para
+    // la vista previa y `boost_post` reutiliza la publicación real.
+    mediaUrl: semilla?.boost?.mediaUrl ?? semilla?.versionDeAnuncio?.mediaUrl ?? "",
+    mediaType: semilla?.boost?.mediaUrl || semilla?.versionDeAnuncio?.mediaUrl ? "image" : "none",
+    boostPostId: semilla?.boost?.postId ?? null,
     ageMin: 18,
     ageMax: 65,
     gender: "todos",
@@ -325,11 +360,18 @@ function borradorInicial(
     metaPlacements: [],
     metaSurfaces: [],
     metaInterests: [],
+    metaBidStrategy: "LOWEST_COST_WITHOUT_CAP",
+    metaBidAmount: null,
+    metaSpendCap: null,
+    metaAttribution: "default",
+    metaCustomAudiences: [],
+    metaExcludedAudiences: [],
     targetCountries: semilla?.targetCountries ?? [],
     targetPlaces: semilla?.targetPlaces ?? [],
     geoRadius: null,
     excludedCountries: [],
-    callToAction: "LEARN_MORE",
+    callToAction:
+      semilla?.versionDeAnuncio?.cta && esCta(semilla.versionDeAnuncio.cta) ? semilla.versionDeAnuncio.cta : "LEARN_MORE",
     brandSafety: "estandar",
     existingCampaign:
       adjuntando && attachTo
@@ -368,8 +410,14 @@ export function ConstructorView({
   onCambiarClienteGlobal,
   onPublicado,
   semillaIA,
+  verPlanTecnico = false,
+  soloEnviaARevision = false,
 }: {
   attachTo?: ConstructorAttachTo;
+  /** Analistas: arman el borrador pero no publican; lo envían a un supervisor para que lo apruebe. */
+  soloEnviaARevision?: boolean;
+  /** Solo administración ve los pasos y parámetros crudos del plan (y aun así, cerrados). */
+  verPlanTecnico?: boolean;
   /** Se llama cuando algo llegó a crearse, para que el resto de la app
    * relea sus datos y la campaña nueva aparezca sin recargar. */
   onPublicado?: () => void;
@@ -389,13 +437,28 @@ export function ConstructorView({
   const [draft, setDraft] = useState<CampaignDraft>(() =>
     borradorInicial(attachTo, clienteGlobal, semillaIA),
   );
+  // Qué parte del formulario se ve (0 campaña, 1 conjunto, 2 anuncio): una a la
+  // vez, como en Meta. Si se viene de "+ Añadir conjunto/anuncio", la campaña (y
+  // el conjunto) ya existen y se parte por lo que falta.
+  const [paso, setPaso] = useState<0 | 1 | 2>(() => {
+    const inicial = borradorInicial(attachTo, clienteGlobal, semillaIA);
+    return inicial.existingAdset ? 2 : inicial.existingCampaign ? 1 : 0;
+  });
+  // Los mapas (Leaflet) se miden al crearse: los de una parte oculta nacen sin
+  // tamaño. Al cambiar de parte se les avisa que recalculen.
+  useEffect(() => {
+    const t = window.setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    return () => window.clearTimeout(t);
+  }, [paso]);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [planAbierto, setPlanAbierto] = useState(false);
   // Con qué borrador se armó `plan` — si `draft` cambió desde entonces (se
   // tocó el presupuesto, la segmentación, etc.), el plan queda desactualizado
   // y no hay que confiar en su lista de bloqueantes ni mostrar "Publicar"
   // con un estado que ya no es el real.
   const [planDraftJson, setPlanDraftJson] = useState<string | null>(null);
   const [publicando, setPublicando] = useState(false);
+  const [enviado, setEnviado] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [duplicado, setDuplicado] = useState<{ creado: string[]; hace: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -409,14 +472,19 @@ export function ConstructorView({
   const plataformasElegidas = ACTIVE_PLATFORMS.filter((p) =>
     draft.platforms.includes(p),
   );
+  // Solo Google (campaña nueva): el formulario sigue la estructura de Google Ads, no la de Meta.
+  const soloGoogle = plataformasElegidas.length === 1 && plataformasElegidas[0] === "google" && !draft.existingCampaign;
+  const fases = soloGoogle ? FASES_GOOGLE : FASES;
 
   // Si la pestaña activa deja de estar entre las elegidas —se destildó esa
   // plataforma, o todavía no hay ninguna— se cae a la primera disponible acá
   // mismo, durante el render (React lo soporta y lo prefiere para esto), en
   // vez de confirmar un render con el formulario de algo que ya no aplica y
   // recién corregirlo un instante después en un efecto.
-  if (!plataformasElegidas.includes(plataformaActiva)) {
-    setPlataformaActiva(plataformasElegidas[0] ?? "google");
+  // Solo si hay alguna elegida: con ninguna (se desmarcó la única) no hay a cuál caer, y volver a fijar «google» en el
+  // render dejaba la condición cumplida para siempre → bucle de renders («Too many re-renders»).
+  if (plataformasElegidas.length > 0 && !plataformasElegidas.includes(plataformaActiva)) {
+    setPlataformaActiva(plataformasElegidas[0]);
   }
 
   // Llegando a añadir un anuncio o un conjunto sobre algo que ya existe, el
@@ -482,7 +550,14 @@ export function ConstructorView({
    * único presupuesto compartido terminaría siendo tan engañoso como el
    * número general que reemplaza.
    */
-  function usarPresupuestoSugerido(platform: Platform, monto: number) {
+  function usarPresupuestoSugerido(platform: Platform, sugeridoDiario: number) {
+    // La sugerencia es por día; en modo total se multiplica por los días que quedan hasta el término.
+    const dias = draft.budgetMode === "total" && draft.endDate ? diasHastaFin(draft.endDate) : 0;
+    if (draft.budgetMode === "total" && dias === 0) {
+      toast.info("Elige primero la fecha de término para convertir lo diario en total.");
+      return;
+    }
+    const monto = draft.budgetMode === "total" ? sugeridoDiario * dias : sugeridoDiario;
     if (draft.platforms.length > 1) {
       actualizar({ budgetByPlatform: { ...draft.budgetByPlatform, [platform]: monto } });
     } else {
@@ -496,6 +571,8 @@ export function ConstructorView({
       platforms: actual.platforms.includes(value)
         ? actual.platforms.filter((item) => item !== value)
         : [...actual.platforms, value],
+      // Google se crea con su propia estructura (puja, redes, programación, recursos) desde que se elige.
+      googleBusqueda: value === "google" && !actual.googleBusqueda ? CONFIG_BUSQUEDA_POR_DEFECTO : actual.googleBusqueda,
     }));
   }
 
@@ -554,6 +631,26 @@ export function ConstructorView({
     }
   }
 
+  /** Analistas: deja el borrador en la cola de un supervisor. No se crea nada en las plataformas. */
+  async function enviarARevision() {
+    setPublicando(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/solicitudes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ drafts: [draft] }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; solicitud?: { mensaje: string } };
+      if (!response.ok) throw new Error(body.error ?? "No se pudo enviar a revisión");
+      setEnviado(body.solicitud?.mensaje ?? "Tu creación fue enviada a revisión.");
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "No se pudo enviar a revisión");
+    } finally {
+      setPublicando(false);
+    }
+  }
+
   const planVigente = plan !== null && planDraftJson === JSON.stringify(draft);
   const bloqueantes = planVigente ? (plan?.issues.filter((i) => i.blocking) ?? []) : [];
   const avisos = planVigente ? (plan?.issues.filter((i) => !i.blocking) ?? []) : [];
@@ -597,22 +694,26 @@ export function ConstructorView({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_420px]">
-        {/* Índice de saltos, como el árbol izquierdo del creador de anuncios
-            de Meta — ya no es un asistente de pasos: todo el formulario está
-            visible de una, esto solo hace scroll hasta ese grupo. */}
+        {/* Las tres partes de Meta (Campaña, Conjunto, Anuncio): se ve una a la
+            vez y se puede saltar a cualquiera. El check dice si lo mínimo de
+            esa parte ya está puesto. */}
         <Surface className="h-fit overflow-hidden p-2">
-          {FASES.map((item) => {
+          {fases.map((item, indiceFase) => {
             const completo = grupoResuelto(item.id, draft);
+            const actual = paso === indiceFase;
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() =>
-                  document
-                    .getElementById(`grupo-${item.id}`)
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                }
-                className="flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-foreground/55 transition-colors hover:bg-foreground/6 hover:text-foreground"
+                aria-current={actual ? "step" : undefined}
+                onClick={() => {
+                  setPaso(indiceFase as 0 | 1 | 2);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className={cn(
+                  "flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-foreground/6 hover:text-foreground",
+                  actual ? "bg-brand/10 text-foreground ring-1 ring-brand/30" : "text-foreground/55",
+                )}
               >
                 <span
                   className={cn(
@@ -635,15 +736,17 @@ export function ConstructorView({
           })}
         </Surface>
 
-        {/* Todo el formulario, en un solo scroll — cada sección se abre y
-            cierra por su cuenta, y muestra su check cuando ya está resuelta. */}
+        {/* Una parte a la vez. Las otras quedan ocultas, no desmontadas, para no
+            perder lo que ya se llenó dentro de ellas. */}
         <div className="space-y-6">
+          <div className={paso === 0 ? "" : "hidden"}>
           <GrupoDeSecciones
             id="grupo-campana"
-            titulo={FASES[0].label}
-            detalle={FASES[0].detalle}
+            titulo={fases[0].label}
+            detalle={fases[0].detalle}
           >
             <FaseCampana
+              soloGoogle={soloGoogle}
               draft={draft}
               clientes={clientes}
               cargandoClientes={cargando}
@@ -653,13 +756,17 @@ export function ConstructorView({
               onCambiarClienteGlobal={onCambiarClienteGlobal}
             />
           </GrupoDeSecciones>
+          </div>
 
+          <div className={paso === 1 ? "" : "hidden"}>
           <GrupoDeSecciones
             id="grupo-conjunto"
-            titulo={FASES[1].label}
-            detalle={FASES[1].detalle}
+            titulo={fases[1].label}
+            detalle={fases[1].detalle}
           >
             <FaseConjunto
+              soloGoogle={soloGoogle}
+              sinConversionesMedidas={clientes.find((c) => c.id === draft.portfolioId)?.gtmEstado === "no_tiene"}
               draft={draft}
               cuentas={cuentas}
               onChange={actualizar}
@@ -668,11 +775,13 @@ export function ConstructorView({
               onPlataformaActiva={setPlataformaActiva}
             />
           </GrupoDeSecciones>
+          </div>
 
+          <div className={paso === 2 ? "" : "hidden"}>
           <GrupoDeSecciones
             id="grupo-anuncio"
-            titulo={FASES[2].label}
-            detalle={FASES[2].detalle}
+            titulo={fases[2].label}
+            detalle={fases[2].detalle}
           >
             <FaseAnuncio
               draft={draft}
@@ -683,8 +792,9 @@ export function ConstructorView({
               onPlataformaActiva={setPlataformaActiva}
             />
           </GrupoDeSecciones>
+          </div>
 
-          {!draft.existingCampaign && (
+          {paso === 2 && !draft.existingCampaign && (
             <label className="flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
               <Checkbox
                 checked={draft.activarConjuntoYAnuncio}
@@ -704,16 +814,43 @@ export function ConstructorView({
             </label>
           )}
 
-          <div className="flex justify-end border-t border-foreground/10 pt-4">
-            <Button
-              type="button"
-              onClick={() => void revisarPlan()}
-              disabled={busy}
-              className="font-extrabold"
-            >
-              {busy ? <ThinkingOrb size="xs" state="thinking" label="" /> : <Wand2 />}
-              Revisar el plan
-            </Button>
+          <div className="flex items-center justify-between gap-3 border-t border-foreground/10 pt-4">
+            {paso > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setPaso((paso - 1) as 0 | 1 | 2);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+              >
+                <ChevronLeft /> {fases[paso - 1].label}
+              </Button>
+            ) : (
+              <span />
+            )}
+            {paso < 2 ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  setPaso((paso + 1) as 0 | 1 | 2);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+                className="font-extrabold"
+              >
+                Siguiente: {fases[paso + 1].label} <ChevronRight />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => void revisarPlan()}
+                disabled={busy}
+                className="font-extrabold"
+              >
+                {busy ? <ThinkingOrb size="xs" state="thinking" label="" /> : <Wand2 />}
+                Revisar el plan
+              </Button>
+            )}
           </div>
         </div>
 
@@ -822,16 +959,23 @@ export function ConstructorView({
 
               {planVigente && (
                 <Surface className="overflow-hidden">
-                  <div className="border-b border-foreground/10 px-4 py-3">
-                    <h3 className="font-bold text-foreground">
-                      Lo que se ejecutaría
-                    </h3>
-                    <p className="mt-1 text-xs text-foreground/50">
-                      {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
-                      {resultado ? "ya ejecutado" : "todavía sin enviar"}
-                    </p>
-                  </div>
-                  <ol className="divide-y divide-foreground/8">
+                  {verPlanTecnico && (<>
+                  <button
+                    type="button"
+                    onClick={() => setPlanAbierto((v) => !v)}
+                    aria-expanded={planAbierto}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                  >
+                    <span>
+                      <span className="block font-bold text-foreground">Lo que se ejecutaría</span>
+                      <span className="mt-1 block text-xs text-foreground/50">
+                        {plan.steps.filter((s) => !s.informativo).length} pasos ·{" "}
+                        {resultado ? "ya ejecutado" : "todavía sin enviar"}
+                      </span>
+                    </span>
+                    <ChevronDown className={cn("size-4 shrink-0 text-foreground/50 transition-transform", planAbierto && "rotate-180")} />
+                  </button>
+                  <ol className={cn("divide-y divide-foreground/8 border-t border-foreground/10", !planAbierto && "hidden")}>
                     {plan.steps.map((step, index) => (
                       <li key={index} className="px-4 py-3">
                         <div className="flex items-center gap-2">
@@ -853,6 +997,7 @@ export function ConstructorView({
                       </li>
                     ))}
                   </ol>
+                  </>)}
 
                   {/*
                     El único punto del sistema que cambia algo fuera de acá.
@@ -860,7 +1005,24 @@ export function ConstructorView({
                     ejecuta es este mismo plan: el servidor lo vuelve a armar
                     con el borrador, no confía en lo que mande el navegador.
                   */}
-                  {bloqueantes.length === 0 && !resultado && (
+                  {bloqueantes.length === 0 && !resultado && soloEnviaARevision && (
+                    <div className="border-t border-foreground/10 p-4">
+                      {enviado ? (
+                        <p className="text-sm font-semibold text-foreground">{enviado} Mira su estado en «Solicitudes».</p>
+                      ) : (
+                        <>
+                          <Button type="button" onClick={() => void enviarARevision()} disabled={publicando} className="w-full font-extrabold">
+                            {publicando ? <OrbeDeBoton /> : <Rocket />}
+                            Enviar a revisión
+                          </Button>
+                          <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
+                            Un supervisor lo revisa y lo aprueba. Hasta entonces no se crea nada en la plataforma.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {bloqueantes.length === 0 && !resultado && !soloEnviaARevision && (
                     <div className="border-t border-foreground/10 p-4">
                       <Button
                         type="button"
@@ -1015,8 +1177,7 @@ const NIVELES_DE_CREACION: Array<{
   {
     id: "conjunto",
     acciones: ["create_adset", "create_ad_group"],
-    etiqueta: (plataforma) =>
-      plataforma === "google" ? "Grupo de anuncios" : "Conjunto de anuncios",
+    etiqueta: (plataforma) => nombreDeNivel(plataforma, "conjunto"),
   },
   {
     id: "anuncio",
@@ -1095,7 +1256,7 @@ function JerarquiaCreada({
             {faltaConjunto && (
               <p className="mt-2 flex items-start gap-1.5 text-xs leading-5 text-danger">
                 <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
-                {plataforma === "google" ? "El grupo de anuncios" : "El conjunto de anuncios"} no se
+                El {nombreDeNivel(plataforma, "conjunto").toLowerCase()} no se
                 creó: sin él la campaña no puede entregar nada. Usa &quot;+ Conjunto&quot; sobre la
                 campaña, o vuelve a publicar tras borrar la que quedó.
               </p>
@@ -1117,63 +1278,104 @@ function JerarquiaCreada({
  * `Seccion` con una regla simple sobre `draft`, la publicación real sigue
  * validándose aparte, en el servidor (`validateDraft`).
  */
-function Seccion({
-  id,
-  titulo,
-  soloPlataforma,
-  informativo,
-  completa,
-  children,
+/**
+ * Objetivos tal como los nombra cada plataforma. Cada opción dice a qué objetivo interno corresponde; las que todavía no
+ * se pueden crear desde aquí salen bloqueadas con el motivo (no se ocultan, para que se vea qué falta).
+ */
+const OBJETIVOS_DE_PLATAFORMA: Partial<
+  Record<Platform, Array<{ label: string; objetivo: Objective | null; motivo?: string }>>
+> = {
+  meta: [
+    { label: "Reconocimiento", objetivo: "alcance" },
+    { label: "Tráfico", objetivo: "trafico" },
+    { label: "Interacción", objetivo: "interaccion" },
+    { label: "Clientes potenciales", objetivo: "leads" },
+    { label: "Ventas", objetivo: "ventas" },
+    { label: "Promoción de la aplicación", objetivo: null, motivo: "Necesita una app registrada en Meta (tienda y evento de la app). Todavía no se puede crear desde aquí." },
+  ],
+  google: [
+    { label: "Ventas", objetivo: "ventas" },
+    { label: "Oportunidades de venta", objetivo: "leads" },
+    { label: "Tráfico al sitio web", objetivo: "trafico" },
+    { label: "Notoriedad y consideración", objetivo: "alcance" },
+    { label: "Promoción de la aplicación", objetivo: null, motivo: "Las campañas de app necesitan la app en una tienda y su registro de conversiones. Todavía no se pueden crear desde aquí." },
+    { label: "Visitas a tiendas locales", objetivo: null, motivo: "Necesita una ficha de Google Business Profile vinculada a la cuenta. Todavía no se puede crear desde aquí." },
+  ],
+};
+
+function ObjetivosPorPlataforma({
+  draft,
+  onChange,
 }: {
-  id?: string;
-  titulo: string;
-  /** Chip "Solo X" cuando la sección no aplica a todas las plataformas elegidas. */
-  soloPlataforma?: string;
-  informativo?: boolean;
-  /** Sin definir: la sección no lleva check (ni completa ni incompleta). */
-  completa?: boolean;
-  children: React.ReactNode;
+  draft: CampaignDraft;
+  onChange: (cambios: Partial<CampaignDraft>) => void;
 }) {
-  const [abierta, setAbierta] = useState(true);
+  const plataformas = draft.platforms.filter((p) => OBJETIVOS_DE_PLATAFORMA[p]);
+  if (plataformas.length === 0) return null;
+  const fijar = (plataforma: Platform, objetivo: Objective) => {
+    // Con una sola plataforma, el objetivo general es el de esa plataforma.
+    if (draft.platforms.length === 1) {
+      onChange({ objective: objetivo, objectiveByPlatform: {} });
+      return;
+    }
+    const siguiente = { ...draft.objectiveByPlatform };
+    if (objetivo === draft.objective) delete siguiente[plataforma];
+    else siguiente[plataforma] = objetivo;
+    onChange({ objectiveByPlatform: siguiente });
+  };
   return (
-    <Surface id={id} className="scroll-mt-4 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setAbierta((v) => !v)}
-        className="flex w-full items-center gap-2.5 px-5 py-4 text-left"
-      >
-        <span
-          className={cn(
-            "flex size-5 shrink-0 items-center justify-center rounded-full border",
-            completa === true
-              ? "border-[#3BFF00]/40 bg-[#3BFF00]/15 text-brand"
-              : "border-foreground/15 text-transparent",
-          )}
-        >
-          <Check className="size-3" />
-        </span>
-        <h3 className="flex-1 text-sm font-bold text-foreground">{titulo}</h3>
-        {soloPlataforma && (
-          <span className="font-micro rounded-full border border-foreground/12 px-2 py-0.5 text-[0.55rem] text-foreground/45">
-            SOLO {soloPlataforma.toUpperCase()}
-          </span>
-        )}
-        {informativo && (
-          <span className="font-micro rounded-full border border-brand/25 bg-brand/10 px-2 py-0.5 text-[0.55rem] text-brand">
-            INFORMATIVO
-          </span>
-        )}
-        <ChevronRight
-          className={cn(
-            "size-4 shrink-0 text-foreground/30 transition-transform",
-            abierta && "rotate-90",
-          )}
-        />
-      </button>
-      {abierta && (
-        <div className="border-t border-foreground/8 px-5 py-4">{children}</div>
-      )}
-    </Surface>
+    <div className="mt-4 space-y-3">
+      <p className="font-micro text-[0.65rem] text-foreground/45">OBJETIVO DE CADA PLATAFORMA</p>
+      {plataformas.map((plataforma) => {
+        const actual = objetivoDe(draft, plataforma);
+        return (
+          <div key={plataforma} className="rounded-xl border border-foreground/10 p-3">
+            <p className="text-xs font-bold text-foreground">{platformLabel(plataforma)}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {OBJETIVOS_DE_PLATAFORMA[plataforma]!.map((opcion) => {
+                const activa = opcion.objetivo !== null && opcion.objetivo === actual;
+                return (
+                  <button
+                    key={opcion.label}
+                    type="button"
+                    disabled={opcion.objetivo === null}
+                    title={opcion.motivo}
+                    onClick={() => opcion.objetivo && fijar(plataforma, opcion.objetivo)}
+                    className={cn(
+                      "flex items-center gap-1 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
+                      opcion.objetivo === null
+                        ? "cursor-not-allowed border-dashed border-foreground/12 text-foreground/30"
+                        : activa
+                          ? "border-brand bg-brand/12 text-foreground"
+                          : "border-foreground/12 text-foreground/55 hover:border-foreground/25",
+                    )}
+                  >
+                    {opcion.objetivo === null && <Lock className="size-3" />}
+                    {opcion.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">{OBJECTIVES[actual].description}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Separa, dentro de una parte del formulario, lo que vale para TODAS las
+ * plataformas elegidas de lo que existe solo en una (Meta, Google y, más
+ * adelante, TikTok o LinkedIn). Primero va siempre lo general.
+ */
+function EncabezadoDeBloque({ titulo, detalle }: { titulo: string; detalle?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 pt-3">
+      <h4 className="font-micro text-[0.65rem] tracking-wide text-foreground/60">{titulo.toUpperCase()}</h4>
+      {detalle && <span className="hidden text-[0.68rem] text-foreground/40 sm:inline">{detalle}</span>}
+      <span className="h-px flex-1 bg-foreground/10" />
+    </div>
   );
 }
 
@@ -1197,25 +1399,6 @@ function GrupoDeSecciones({
         <p className="text-xs text-foreground/45">{detalle}</p>
       </div>
       <div className="space-y-3">{children}</div>
-    </div>
-  );
-}
-
-function Campo({
-  etiqueta,
-  className,
-  children,
-}: {
-  etiqueta: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={className}>
-      <label className="font-micro mb-1.5 block text-[0.6rem] text-foreground/50">
-        {etiqueta}
-      </label>
-      {children}
     </div>
   );
 }
@@ -1364,6 +1547,7 @@ function SelectorPixel({
 }
 
 function FaseCampana({
+  soloGoogle = false,
   draft,
   clientes,
   cargandoClientes,
@@ -1372,6 +1556,8 @@ function FaseCampana({
   onTogglePlatform,
   onCambiarClienteGlobal,
 }: {
+  /** Solo Google: aquí van también los ajustes de campaña propios de Google (presupuesto, ubicaciones, tipo, puja, redes…). */
+  soloGoogle?: boolean;
   draft: CampaignDraft;
   clientes: Cliente[];
   cargandoClientes: boolean;
@@ -1412,6 +1598,7 @@ function FaseCampana({
 
   return (
     <>
+      <EncabezadoDeBloque titulo="General" detalle="Vale para todas las plataformas que elijas" />
       <Seccion
         id="grupo-campana-cliente"
         titulo="Cliente y objetivo"
@@ -1442,10 +1629,10 @@ function FaseCampana({
               </SelectContent>
             </Select>
           </Campo>
-          <Campo etiqueta="OBJETIVO">
+          <Campo etiqueta={draft.platforms.length > 1 ? "OBJETIVO GENERAL (PUNTO DE PARTIDA)" : "OBJETIVO"}>
             <Select
               value={draft.objective}
-              onValueChange={(value) => onChange({ objective: value as Objective })}
+              onValueChange={(value) => onChange({ objective: value as Objective, objectiveByPlatform: {} })}
             >
               <SelectTrigger className="w-full bg-field/60">
                 <SelectValue />
@@ -1463,6 +1650,8 @@ function FaseCampana({
             </p>
           </Campo>
         </div>
+
+        {draft.portfolioId && <PresupuestoEnLinea portfolioId={draft.portfolioId} className="mt-4" />}
 
         <Campo etiqueta="PLATAFORMAS" className="mt-4">
           <div className="flex flex-wrap gap-2">
@@ -1503,6 +1692,18 @@ function FaseCampana({
                 </button>
               );
             })}
+            {/* Plataformas que se leen pero no se pueden crear desde acá (LinkedIn): visibles y bloqueadas, con el motivo. */}
+            {LECTURA_PLATFORMS.filter((value) => !ACTIVE_PLATFORMS.includes(value)).map((value) => (
+              <span
+                key={value}
+                title={`${platformLabel(value)} se lee en la tabla de Cliente, pero no se pueden crear campañas desde acá: Windsor solo permite pausar, activar, cambiar presupuesto, nombre, fechas y público de las que ya existen.`}
+                className="flex cursor-not-allowed items-center gap-1.5 rounded-full border border-dashed border-foreground/12 px-4 py-2 text-sm font-bold text-foreground/30"
+              >
+                <Lock className="size-3.5" />
+                {platformLabel(value)}
+                <span className="text-[0.62rem] font-semibold text-foreground/35">solo lectura</span>
+              </span>
+            ))}
           </div>
           {ACTIVE_PLATFORMS.some(
             (value) =>
@@ -1532,6 +1733,7 @@ function FaseCampana({
         {draft.portfolioId && draft.platforms.includes("meta") && (
           <SelectorPixel cuentas={cuentas} draft={draft} onChange={onChange} />
         )}
+        {draft.platforms.length > 0 && <ObjetivosPorPlataforma draft={draft} onChange={onChange} />}
       </Seccion>
 
       <Seccion titulo="Nombre" completa={draft.name.trim() !== ""}>
@@ -1555,7 +1757,7 @@ function FaseCampana({
               {platformLabel(platform)}:{" "}
               <span className="text-brand">
                 {nombreCompuesto(
-                  OBJECTIVES[draft.objective].sigla,
+                  OBJECTIVES[objetivoDe(draft, platform)].sigla,
                   platform,
                   draft.name || "Nombre de la campaña",
                 )}
@@ -1579,6 +1781,9 @@ function FaseCampana({
         </p>
       </Seccion>
 
+      {draft.platforms.includes("meta") && (
+        <>
+      <EncabezadoDeBloque titulo="Solo Meta" detalle="Ajustes que existen únicamente en Meta" />
       <Seccion titulo="Categoría" soloPlataforma="meta" completa>
         <Select
           value={draft.specialAdCategory}
@@ -1619,7 +1824,7 @@ function FaseCampana({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="default">
-              Automático — {OBJECTIVES[draft.objective].label}
+              Automático — {OBJECTIVES[objetivoDe(draft, "meta")].label}
             </SelectItem>
             {(Object.keys(META_OBJECTIVE_LABELS) as MetaObjectiveOverride[]).map((key) => (
               <SelectItem key={key} value={key}>
@@ -1637,11 +1842,45 @@ function FaseCampana({
           no existe ahí, es puramente de Meta.
         </p>
       </Seccion>
+          <LimiteDeGastoMeta draft={draft} onChange={onChange} moneda={monedaDeMeta(draft, cuentas)} />
+        </>
+      )}
+      {soloGoogle && <CampanaDeGoogle draft={draft} cuentas={cuentas} onChange={onChange} />}
     </>
   );
 }
 
+/** Todo lo que en Google Ads se define en la CAMPAÑA, en el orden en que Google lo muestra. */
+function CampanaDeGoogle({ draft, cuentas, onChange }: { draft: CampaignDraft; cuentas: Cuenta[]; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <>
+      <EncabezadoDeBloque titulo="Ajustes de campaña de Google" detalle="Tipo, presupuesto, puja, redes, ubicaciones e idiomas" />
+      <SeccionTipoGoogle draft={draft} onChange={onChange} />
+      <SeccionPresupuesto draft={draft} cuentas={cuentas} onChange={onChange} />
+      {draft.googleChannel === "search" && draft.googleBusqueda && <CampanaGoogleBusqueda draft={draft} onChange={onChange} moneda={monedaDeGoogle(draft, cuentas)} />}
+      <SeccionGeografica draft={draft} onChange={onChange} />
+      <SeccionIdiomasGoogle draft={draft} onChange={onChange} />
+    </>
+  );
+}
+
+/** Moneda real de la cuenta de Meta elegida (o la única que tiene el cliente). */
+function monedaDeMeta(draft: CampaignDraft, cuentas: Cuenta[]): string | null {
+  const deMeta = cuentas.filter((c) => c.provider === "meta");
+  const elegida = draft.accountByPlatform.meta ? deMeta.find((c) => c.externalId === draft.accountByPlatform.meta) : deMeta.length === 1 ? deMeta[0] : undefined;
+  return elegida?.currency ?? null;
+}
+
+/** Moneda real de la cuenta de Google elegida (o la única que tiene el cliente). */
+function monedaDeGoogle(draft: CampaignDraft, cuentas: Cuenta[]): string | null {
+  const deGoogle = cuentas.filter((c) => c.provider === "google");
+  const elegida = draft.accountByPlatform.google ? deGoogle.find((c) => c.externalId === draft.accountByPlatform.google) : deGoogle.length === 1 ? deGoogle[0] : undefined;
+  return elegida?.currency ?? null;
+}
+
 function FaseConjunto({
+  soloGoogle = false,
+  sinConversionesMedidas = false,
   draft,
   cuentas,
   onChange,
@@ -1649,6 +1888,10 @@ function FaseConjunto({
   plataformaActiva,
   onPlataformaActiva,
 }: {
+  /** Solo Google: esta fase es el GRUPO DE ANUNCIOS de Google (lo de la campaña ya se definió antes). */
+  soloGoogle?: boolean;
+  /** El cliente no mide conversiones: Google parte con «Maximizar clics», así que el tope de CPC aplica. */
+  sinConversionesMedidas?: boolean;
   draft: CampaignDraft;
   cuentas: Cuenta[];
   onChange: (cambios: Partial<CampaignDraft>) => void;
@@ -1670,11 +1913,30 @@ function FaseConjunto({
     );
   }
 
+  if (soloGoogle) {
+    return draft.googleChannel === "search" ? (
+      <>
+        {draft.googleBusqueda && <GrupoGoogleBusqueda draft={draft} onChange={onChange} moneda={monedaDeGoogle(draft, cuentas)} />}
+        <SeccionPalabrasGoogle draft={draft} onChange={onChange} />
+        <SeccionNegativasGoogle draft={draft} onChange={onChange} />
+      </>
+    ) : (
+      <Seccion titulo="Grupo de anuncios" soloPlataforma="Google" completa>
+        <p className="text-sm leading-6 text-foreground/70">
+          {draft.googleChannel === "pmax"
+            ? "Performance Max no usa grupos de anuncios ni palabras clave: Google arma las combinaciones con el grupo de recursos (textos, imágenes y logo) que defines en el paso Anuncio."
+            : "La Red de Display no usa palabras clave en esta creación: el público lo elige Google según el contenido del anuncio. Pasa al paso Anuncio."}
+        </p>
+      </Seccion>
+    );
+  }
+
   const conGoogle = plataformaActiva === "google";
   const conMeta = plataformaActiva === "meta";
 
   return (
     <>
+      <EncabezadoDeBloque titulo="General" detalle="Vale para todas las plataformas que elijas" />
       {draft.existingCampaign && (
         <Seccion titulo="Nombre del conjunto de anuncios" completa={draft.name.trim() !== ""}>
           <Input
@@ -1691,12 +1953,7 @@ function FaseConjunto({
         entera, no de una plataforma — por eso vive fuera del selector de
         abajo y se ve sin importar cuál pestaña esté activa.
       */}
-      <Seccion
-        titulo="Presupuesto y calendario"
-        completa={draft.dailyBudget !== null || Object.keys(draft.budgetByPlatform).length > 0}
-      >
-        <PresupuestoPorPlataforma draft={draft} cuentas={cuentas} onChange={onChange} />
-      </Seccion>
+      <SeccionPresupuesto draft={draft} cuentas={cuentas} onChange={onChange} />
 
       {/*
         Igual que el presupuesto: la ubicación geográfica es del conjunto
@@ -1704,29 +1961,7 @@ function FaseConjunto({
         Meta y a Google en `buildPlan`, así que se ve sin importar cuál
         pestaña esté activa abajo.
       */}
-      <Seccion
-        titulo="Segmentación geográfica"
-        completa={
-          draft.targetCountries.length > 0 ||
-          (draft.targetPlaces?.length ?? 0) > 0 ||
-          Boolean(draft.geoRadius)
-        }
-      >
-        <SegmentacionGeografica
-          targetCountries={draft.targetCountries}
-          onTargetCountriesChange={(targetCountries) =>
-            onChange({ targetCountries })
-          }
-          targetPlaces={draft.targetPlaces}
-          onTargetPlacesChange={(targetPlaces) => onChange({ targetPlaces })}
-          geoRadius={draft.geoRadius}
-          onGeoRadiusChange={(geoRadius) => onChange({ geoRadius })}
-          excludedCountries={draft.excludedCountries}
-          onExcludedCountriesChange={(excludedCountries) =>
-            onChange({ excludedCountries })
-          }
-        />
-      </Seccion>
+      <SeccionGeografica draft={draft} onChange={onChange} />
 
       <SelectorPlataforma
         plataformas={plataformasElegidas}
@@ -1734,6 +1969,10 @@ function FaseConjunto({
         onChange={onPlataformaActiva}
       />
 
+      <EncabezadoDeBloque
+        titulo={`Solo ${platformLabel(plataformaActiva)}`}
+        detalle="Ajustes que existen únicamente en esta plataforma"
+      />
       {conMeta && (
         <>
           <Seccion titulo="Conversión" completa>
@@ -1753,77 +1992,6 @@ function FaseConjunto({
                 Mensajes
               </label>
             </RadioGroup>
-          </Seccion>
-
-          {!draft.existingCampaign && (
-            <Seccion titulo="Presupuesto de campaña" completa>
-              <RadioGroup
-                value={draft.metaBudgetLevel}
-                onValueChange={(value) =>
-                  onChange({ metaBudgetLevel: value as "campana" | "conjunto" })
-                }
-                className="gap-3"
-              >
-                <label className="flex items-start gap-2 text-sm text-foreground/80">
-                  <RadioGroupItem
-                    value="campana"
-                    className="mt-0.5 border-foreground/30"
-                  />
-                  <span>
-                    De campaña (Advantage Campaign Budget)
-                    <span className="block text-[0.68rem] text-foreground/45">
-                      La campaña reparte el gasto entre sus conjuntos. Es el
-                      default real de Meta hoy.
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-sm text-foreground/80">
-                  <RadioGroupItem
-                    value="conjunto"
-                    className="mt-0.5 border-foreground/30"
-                  />
-                  <span>
-                    De este conjunto
-                    <span className="block text-[0.68rem] text-foreground/45">
-                      Cada conjunto de la campaña tiene su propio monto, en vez
-                      de compartir uno.
-                    </span>
-                  </span>
-                </label>
-              </RadioGroup>
-            </Seccion>
-          )}
-
-          <Seccion
-            titulo="Calendario"
-            completa={draft.budgetMode === "diaria" || Boolean(draft.endDate)}
-          >
-            <Campo etiqueta="TIPO DE PRESUPUESTO" className="sm:w-60">
-              <Select
-                value={draft.budgetMode}
-                onValueChange={(value) =>
-                  onChange({ budgetMode: value as "diaria" | "total" })
-                }
-              >
-                <SelectTrigger className="w-full bg-field/60">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="diaria">Diaria</SelectItem>
-                  <SelectItem value="total">Total (vitalicio)</SelectItem>
-                </SelectContent>
-              </Select>
-            </Campo>
-            {draft.budgetMode === "total" && (
-              <Campo etiqueta="FECHA DE TÉRMINO" className="mt-3 sm:w-60">
-                <Input
-                  type="date"
-                  value={draft.endDate ?? ""}
-                  onChange={(e) => onChange({ endDate: e.target.value || null })}
-                  className="bg-field/60"
-                />
-              </Campo>
-            )}
           </Seccion>
 
           <Seccion titulo="Público" completa>
@@ -1868,27 +2036,22 @@ function FaseConjunto({
               Los países de segmentación se definen por cuenta en la ficha del
               cliente, no acá.
             </p>
-            <Campo etiqueta="INTERESES (AVANZADO, OPCIONAL)" className="mt-3">
-              <Input
-                value={draft.metaInterests.join(", ")}
-                onChange={(e) =>
-                  onChange({
-                    metaInterests: e.target.value
-                      .split(",")
-                      .map((id) => id.trim())
-                      .filter(Boolean),
-                  })
-                }
-                placeholder="ids de Meta separados por coma, ej. 6003107902433"
-                className="bg-field/60"
-              />
-            </Campo>
-            <p className="mt-2 flex items-start gap-2 text-[0.68rem] leading-5 text-foreground/40">
-              <Info className="mt-0.5 size-3 shrink-0" />
-              Son ids reales de interés de Meta, no el nombre — todavía no hay
-              forma de buscarlos por palabra desde acá. Se consiguen desde
-              Meta Ads Manager o Audience Insights.
-            </p>
+            <SegmentacionMeta
+              portfolioId={draft.portfolioId}
+              accountId={
+                cuentas.find(
+                  (c) =>
+                    c.provider === "meta" &&
+                    (draft.accountByPlatform.meta
+                      ? c.externalId === draft.accountByPlatform.meta
+                      : cuentas.filter((x) => x.provider === "meta").length === 1),
+                )?.externalId ?? null
+              }
+              intereses={draft.metaInterests}
+              incluidas={draft.metaCustomAudiences}
+              excluidas={draft.metaExcludedAudiences}
+              onChange={onChange}
+            />
           </Seccion>
 
           <Seccion titulo="Transparencia de anuncios" informativo completa>
@@ -1953,6 +2116,8 @@ function FaseConjunto({
             </div>
           </Seccion>
 
+          <OptimizacionMeta draft={draft} onChange={onChange} moneda={monedaDeMeta(draft, cuentas)} />
+
           <Seccion titulo="Seguridad" informativo completa>
             <Select
               value={draft.brandSafety}
@@ -1979,68 +2144,25 @@ function FaseConjunto({
       )}
 
       {conGoogle && (
-        <Seccion titulo="Ubicaciones" completa>
-          <RadioGroup
-            value={draft.googleChannel}
-            onValueChange={(value) =>
-              onChange({ googleChannel: value as GoogleChannel })
-            }
-            className="grid-flow-col justify-start gap-6"
-          >
-            <label className="flex items-center gap-2 text-sm text-foreground/80">
-              <RadioGroupItem value="search" className="border-foreground/30" />
-              Red de búsqueda
-            </label>
-            <label className="flex items-center gap-2 text-sm text-foreground/80">
-              <RadioGroupItem value="display" className="border-foreground/30" />
-              Red de Display
-            </label>
-          </RadioGroup>
-          {draft.budgetMode === "total" && (
-            <p className="mt-3 text-[0.68rem] leading-5 text-warn/80">
-              Google, por esta vía, solo crea presupuesto diario: el modo
-              total elegido en Meta no tiene efecto acá.
-            </p>
-          )}
-        </Seccion>
+        <SeccionTipoGoogle draft={draft} onChange={onChange} />
+      )}
+
+      {conGoogle && draft.googleChannel === "search" && draft.googleBusqueda && (
+        <>
+          <CampanaGoogleBusqueda draft={draft} onChange={onChange} moneda={monedaDeGoogle(draft, cuentas)} />
+          <GrupoGoogleBusqueda draft={draft} onChange={onChange} moneda={monedaDeGoogle(draft, cuentas)} />
+        </>
       )}
 
       {conGoogle && draft.googleChannel === "search" && (
-        <Seccion titulo="Palabras clave" completa={draft.keywords.some((k) => k.trim())}>
-          <Textarea
-            value={draft.keywords.join("\n")}
-            onChange={(e) => onChange({ keywords: e.target.value.split("\n") })}
-            rows={4}
-            placeholder={'zapatillas running\n"zapatillas running mujer"\n[comprar zapatillas running]'}
-            className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
-          />
-          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
-            Una por línea, con la sintaxis de Google Ads: <code>palabra</code>{" "}
-            es concordancia amplia, <code>&quot;palabra&quot;</code> de frase,{" "}
-            <code>[palabra]</code> exacta. Sin al menos una, el grupo de
-            anuncios no tiene qué lo dispare.
-          </p>
-        </Seccion>
+        <SeccionPalabrasGoogle draft={draft} onChange={onChange} />
       )}
 
       {conGoogle && draft.googleChannel === "search" && (
-        <Seccion titulo="Palabras clave negativas" completa>
-          <Textarea
-            value={draft.negativeKeywords.join("\n")}
-            onChange={(e) => onChange({ negativeKeywords: e.target.value.split("\n") })}
-            rows={3}
-            placeholder={"boleta\ntrabajo\nenel"}
-            className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
-          />
-          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
-            Opcional, misma sintaxis que las palabras clave de arriba. Van a
-            nivel de campaña — evitan que el anuncio salga en búsquedas de
-            soporte, empleo o de la competencia que nadie pidió pautar.
-          </p>
-        </Seccion>
+        <SeccionNegativasGoogle draft={draft} onChange={onChange} />
       )}
 
-      {conGoogle && OBJECTIVES[draft.objective].google !== "maximize_conversions" && (
+      {conGoogle && !(draft.googleChannel === "search" && draft.googleBusqueda) && (OBJECTIVES[objetivoDe(draft, "google")].google !== "maximize_conversions" || sinConversionesMedidas) && (
         <Seccion titulo="Tope de CPC" completa>
           <Input
             type="number"
@@ -2059,39 +2181,231 @@ function FaseConjunto({
       )}
 
       {conGoogle && (
-        <Seccion titulo="Idiomas" completa>
-          <div className="flex flex-wrap gap-4">
-            {(
-              [
-                ["es", "Español"],
-                ["en", "Inglés"],
-                ["pt", "Portugués"],
-              ] as const
-            ).map(([codigo, etiqueta]) => (
-              <label key={codigo} className="flex items-center gap-2 text-sm text-foreground/80">
-                <Checkbox
-                  checked={draft.targetLanguages.includes(codigo)}
-                  onCheckedChange={(checked) =>
-                    onChange({
-                      targetLanguages: checked
-                        ? [...draft.targetLanguages, codigo]
-                        : draft.targetLanguages.filter((l) => l !== codigo),
-                    })
-                  }
-                  className="border-foreground/30"
-                />
-                {etiqueta}
-              </label>
-            ))}
-          </div>
-          <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
-            Vacío es el default real de Google: todos los idiomas. Marcar
-            uno o más restringe a esos — útil en Chile porque hay
-            navegadores configurados en inglés que igual buscan en español.
-          </p>
-        </Seccion>
+        <SeccionIdiomasGoogle draft={draft} onChange={onChange} />
       )}
     </>
+  );
+}
+
+function SeccionPresupuesto({ draft, cuentas, onChange }: { draft: CampaignDraft; cuentas: Cuenta[]; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion
+  titulo="Presupuesto y calendario"
+  completa={draft.dailyBudget !== null || Object.keys(draft.budgetByPlatform).length > 0}
+>
+  <OpcionesDePresupuesto draft={draft} onChange={onChange} />
+  <PresupuestoPorPlataforma draft={draft} cuentas={cuentas} onChange={onChange} />
+</Seccion>
+  );
+}
+
+function SeccionGeografica({ draft, onChange }: { draft: CampaignDraft; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion
+  titulo="Segmentación geográfica"
+  completa={
+    draft.targetCountries.length > 0 ||
+    (draft.targetPlaces?.length ?? 0) > 0 ||
+    Boolean(draft.geoRadius)
+  }
+>
+  <SegmentacionGeografica
+    targetCountries={draft.targetCountries}
+    onTargetCountriesChange={(targetCountries) =>
+      onChange({ targetCountries })
+    }
+    targetPlaces={draft.targetPlaces}
+    onTargetPlacesChange={(targetPlaces) => onChange({ targetPlaces })}
+    geoRadius={draft.geoRadius}
+    onGeoRadiusChange={(geoRadius) => onChange({ geoRadius })}
+    excludedCountries={draft.excludedCountries}
+    onExcludedCountriesChange={(excludedCountries) =>
+      onChange({ excludedCountries })
+    }
+  />
+</Seccion>
+  );
+}
+
+function SeccionTipoGoogle({ draft, onChange }: { draft: CampaignDraft; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion soloPlataforma="Google" titulo="Tipo de campaña" completa>
+    <RadioGroup
+      value={draft.googleChannel}
+      onValueChange={(value) =>
+        onChange({ googleChannel: value as GoogleChannel })
+      }
+      className="grid-flow-col justify-start gap-6"
+    >
+      <label className="flex items-center gap-2 text-sm text-foreground/80">
+        <RadioGroupItem value="search" className="border-foreground/30" />
+        Red de búsqueda
+      </label>
+      <label className="flex items-center gap-2 text-sm text-foreground/80">
+        <RadioGroupItem value="display" className="border-foreground/30" />
+        Red de Display
+      </label>
+      <label className="flex items-center gap-2 text-sm text-foreground/80">
+        <RadioGroupItem value="pmax" className="border-foreground/30" />
+        Performance Max
+      </label>
+    </RadioGroup>
+  </Seccion>
+  );
+}
+
+function SeccionPalabrasGoogle({ draft, onChange }: { draft: CampaignDraft; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion titulo="Palabras clave" completa={draft.keywords.some((k) => k.trim())}>
+    <Textarea
+      value={draft.keywords.join("\n")}
+      onChange={(e) => onChange({ keywords: e.target.value.split("\n") })}
+      rows={4}
+      placeholder={'zapatillas running\n"zapatillas running mujer"\n[comprar zapatillas running]'}
+      className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
+    />
+    <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+      Una por línea, con la sintaxis de Google Ads: <code>palabra</code>{" "}
+      es concordancia amplia, <code>&quot;palabra&quot;</code> de frase,{" "}
+      <code>[palabra]</code> exacta. Sin al menos una, el grupo de
+      anuncios no tiene qué lo dispare.
+    </p>
+  </Seccion>
+  );
+}
+
+function SeccionNegativasGoogle({ draft, onChange }: { draft: CampaignDraft; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion titulo="Palabras clave negativas" completa>
+    <Textarea
+      value={draft.negativeKeywords.join("\n")}
+      onChange={(e) => onChange({ negativeKeywords: e.target.value.split("\n") })}
+      rows={3}
+      placeholder={"boleta\ntrabajo\nenel"}
+      className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
+    />
+    <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+      Opcional, misma sintaxis que las palabras clave de arriba. Van a
+      nivel de campaña — evitan que el anuncio salga en búsquedas de
+      soporte, empleo o de la competencia que nadie pidió pautar.
+    </p>
+  </Seccion>
+  );
+}
+
+function SeccionIdiomasGoogle({ draft, onChange }: { draft: CampaignDraft; onChange: (cambios: Partial<CampaignDraft>) => void }) {
+  return (
+    <Seccion titulo="Idiomas" completa>
+    <div className="flex flex-wrap gap-4">
+      {(
+        [
+          ["es", "Español"],
+          ["en", "Inglés"],
+          ["pt", "Portugués"],
+        ] as const
+      ).map(([codigo, etiqueta]) => (
+        <label key={codigo} className="flex items-center gap-2 text-sm text-foreground/80">
+          <Checkbox
+            checked={draft.targetLanguages.includes(codigo)}
+            onCheckedChange={(checked) =>
+              onChange({
+                targetLanguages: checked
+                  ? [...draft.targetLanguages, codigo]
+                  : draft.targetLanguages.filter((l) => l !== codigo),
+              })
+            }
+            className="border-foreground/30"
+          />
+          {etiqueta}
+        </label>
+      ))}
+    </div>
+    <p className="mt-2 text-[0.68rem] leading-5 text-foreground/40">
+      Vacío es el default real de Google: todos los idiomas. Marcar
+      uno o más restringe a esos — útil en Chile porque hay
+      navegadores configurados en inglés que igual buscan en español.
+    </p>
+  </Seccion>
+  );
+}
+
+/**
+ * Cómo se entiende el monto: por día o total de todo el flight, y dónde vive (campaña o conjunto). Vale para todas
+ * las plataformas elegidas; cada una lo traduce a lo que su API admite y el plan lo dice en vez de fingir.
+ *
+ * - Meta: diario o total, en la campaña (Advantage Campaign Budget) o en cada conjunto.
+ * - Google: el presupuesto siempre vive en la campaña (un grupo de anuncios no tiene) y por esta vía se crea
+ *   diario: un total se reparte en los días que quedan hasta la fecha de término.
+ */
+function OpcionesDePresupuesto({
+  draft,
+  onChange,
+}: {
+  draft: CampaignDraft;
+  onChange: (cambios: Partial<CampaignDraft>) => void;
+}) {
+  const conMeta = draft.platforms.includes("meta");
+  const conGoogle = draft.platforms.includes("google");
+  const total = draft.budgetMode === "total";
+  const hoy = new Date().toISOString().slice(0, 10);
+  const dias = total && draft.endDate ? Math.max(0, diasHastaFin(draft.endDate)) : null;
+  return (
+    <div className="mb-4 space-y-3">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Campo etiqueta="TIPO DE PRESUPUESTO">
+          <Select value={draft.budgetMode} onValueChange={(value) => onChange({ budgetMode: value as "diaria" | "total" })}>
+            <SelectTrigger className="w-full bg-field/60">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="diaria">Diario (por día)</SelectItem>
+              <SelectItem value="total">Total (toda la campaña)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Campo>
+        {total && (
+          <Campo etiqueta="FECHA DE TÉRMINO">
+            <Input
+              type="date"
+              min={hoy}
+              value={draft.endDate ?? ""}
+              onChange={(e) => onChange({ endDate: e.target.value || null })}
+              className="bg-field/60"
+            />
+          </Campo>
+        )}
+        {conMeta && !draft.existingCampaign && (
+          <Campo etiqueta="NIVEL DEL PRESUPUESTO · META">
+            <Select
+              value={draft.metaBudgetLevel}
+              onValueChange={(value) => onChange({ metaBudgetLevel: value as "campana" | "conjunto" })}
+            >
+              <SelectTrigger className="w-full bg-field/60">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="campana">De la campaña</SelectItem>
+                <SelectItem value="conjunto">De cada conjunto</SelectItem>
+              </SelectContent>
+            </Select>
+          </Campo>
+        )}
+      </div>
+      <ul className="space-y-1 text-[0.68rem] leading-5 text-foreground/45">
+        {conMeta && (
+          <li>
+            Meta: {total ? "el total se gasta hasta la fecha de término" : "el monto es por día"}; el presupuesto vive en la{" "}
+            {draft.metaBudgetLevel === "campana" || draft.existingCampaign ? "campaña, que lo reparte entre sus conjuntos" : "conjunto, cada uno con el suyo"}.
+          </li>
+        )}
+        {conGoogle && (
+          <li>
+            Google: el presupuesto vive en la campaña (un grupo de anuncios no tiene) y por esta vía se crea por día
+            {total && dias !== null && dias > 0 ? `; el total se reparte en ${dias} ${dias === 1 ? "día" : "días"} hasta el ${draft.endDate}` : ""}.
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
 
@@ -2112,6 +2426,7 @@ function PresupuestoPorPlataforma({
 }) {
   const varias = draft.platforms.length > 1;
   const distinto = Object.keys(draft.budgetByPlatform).length > 0;
+  const tipo = draft.budgetMode === "total" ? "PRESUPUESTO TOTAL" : "PRESUPUESTO DIARIO";
 
   // Misma cuenta que ya resuelven FaseAnuncio y VistaPrevia: la elegida a
   // mano, o la única que tiene esa plataforma si no hay más que una — nunca
@@ -2129,7 +2444,7 @@ function PresupuestoPorPlataforma({
 
   if (!varias) {
     return (
-      <Campo etiqueta="PRESUPUESTO DIARIO" className="sm:w-60">
+      <Campo etiqueta={tipo} className="sm:w-60">
         <CampoDinero
           value={draft.dailyBudget}
           moneda={monedaDe(draft.platforms[0])}
@@ -2146,7 +2461,7 @@ function PresupuestoPorPlataforma({
     <div>
       {!distinto ? (
         <>
-          <Campo etiqueta="PRESUPUESTO DIARIO · TODAS LAS PLATAFORMAS" className="sm:w-72">
+          <Campo etiqueta={`${tipo} · TODAS LAS PLATAFORMAS`} className="sm:w-72">
             <CampoDinero
               value={draft.dailyBudget}
               moneda={monedaCompartida}
@@ -2164,7 +2479,7 @@ function PresupuestoPorPlataforma({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {draft.platforms.map((platform) => (
-            <Campo key={platform} etiqueta={`PRESUPUESTO DIARIO · ${platformLabel(platform).toUpperCase()}`}>
+            <Campo key={platform} etiqueta={`${tipo} · ${platformLabel(platform).toUpperCase()}`}>
               <CampoDinero
                 value={draft.budgetByPlatform[platform] ?? null}
                 moneda={monedaDe(platform)}
@@ -2227,9 +2542,11 @@ function FaseAnuncio({
         : cuentas.filter((x) => x.provider === "meta").length === 1),
   );
   const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const [selectorAnunciosAbierto, setSelectorAnunciosAbierto] = useState(false);
 
   return (
     <>
+      <EncabezadoDeBloque titulo="General" detalle="Vale para todas las plataformas que elijas" />
       {draft.existingAdset && (
         <Seccion titulo="Nombre del anuncio" completa={draft.name.trim() !== ""}>
           <Input
@@ -2259,6 +2576,10 @@ function FaseAnuncio({
         onChange={onPlataformaActiva}
       />
 
+      <EncabezadoDeBloque
+        titulo={`Solo ${platformLabel(plataformaActiva)}`}
+        detalle="Ajustes que existen únicamente en esta plataforma"
+      />
       {conMeta && (
         <>
           <Seccion titulo="Identidad" completa>
@@ -2314,11 +2635,22 @@ function FaseAnuncio({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(CALL_TO_ACTIONS) as CallToAction[]).map((key) => (
-                      <SelectItem key={key} value={key}>
-                        {CALL_TO_ACTIONS[key]}
-                      </SelectItem>
-                    ))}
+                    <SelectGroup>
+                      <SelectLabel>Más usados</SelectLabel>
+                      {CTA_COMUNES.map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {CALL_TO_ACTIONS[key]}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    <SelectGroup>
+                      <SelectLabel>Todos los demás</SelectLabel>
+                      {CTA_CODIGOS.filter((key) => !(CTA_COMUNES as readonly string[]).includes(key)).map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {CALL_TO_ACTIONS[key]}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
               </Campo>
@@ -2361,7 +2693,7 @@ function FaseAnuncio({
             <CopilotoDeCreativos
               plataforma="meta"
               portfolioId={draft.portfolioId}
-              objetivoLabel={OBJECTIVES[draft.objective].label}
+              objetivoLabel={OBJECTIVES[objetivoDe(draft, "meta")].label}
               nombreCampana={draft.name}
               notaInterna={draft.details}
               landingUrl={draft.landingUrl}
@@ -2399,7 +2731,18 @@ function FaseAnuncio({
                       className="shrink-0 border-foreground/15 bg-card/60"
                     >
                       <Images className="size-4" />
-                      Elegir publicación
+                      Impulsar publicación de la red
+                    </Button>
+                  )}
+                  {cuentaMeta && draft.portfolioId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setSelectorAnunciosAbierto(true)}
+                      className="shrink-0 border-foreground/15 bg-card/60"
+                    >
+                      <Flame className="size-4" />
+                      Reutilizar un anuncio de campaña
                     </Button>
                   )}
                 </div>
@@ -2429,6 +2772,28 @@ function FaseAnuncio({
               </Campo>
             )}
           </Seccion>
+
+          {cuentaMeta && draft.portfolioId && (
+            <SelectorDeAnuncios
+              open={selectorAnunciosAbierto}
+              onOpenChange={setSelectorAnunciosAbierto}
+              portfolioId={draft.portfolioId}
+              accountId={cuentaMeta.externalId}
+              nombreCuenta={cuentaMeta.name}
+              onSeleccionar={(anuncio) => {
+                onChange({
+                  mediaUrl: anuncio.miniatura ?? draft.mediaUrl,
+                  mediaType: anuncio.miniatura ? "image" : draft.mediaType,
+                  message: draft.message.trim() ? draft.message : (anuncio.texto ?? draft.message),
+                  // El id de la publicación del anuncio, en el formato que pide
+                  // `boost_post`. Si se está dentro de una campaña o conjunto ya
+                  // existente, el servidor confirma con datos reales que lo admita.
+                  boostPostId: anuncio.postId,
+                });
+                setSelectorAnunciosAbierto(false);
+              }}
+            />
+          )}
 
           {cuentaMeta && draft.portfolioId && (
             <SelectorDePublicaciones
@@ -2477,7 +2842,7 @@ function FaseAnuncio({
               draft.descriptions.filter((d) => d.trim()).length >= 2
             }
           >
-            <Campo etiqueta="TÍTULOS · UNO POR LÍNEA, 3 A 15, MÁX 30 CARACTERES">
+            <Campo etiqueta={draft.googleChannel === "display" ? "TÍTULOS CORTOS · UNO POR LÍNEA, 1 A 5, MÁX 30 CARACTERES" : "TÍTULOS · UNO POR LÍNEA, 3 A 15, MÁX 30 CARACTERES"}>
               <Textarea
                 value={draft.headlines.join("\n")}
                 onChange={(e) =>
@@ -2491,9 +2856,9 @@ function FaseAnuncio({
                 placeholder={"Envío gratis en 24 horas\nCompra directa\nGarantía de un año"}
                 className="bg-field/60 field-sizing-fixed max-h-32 resize-none overflow-y-auto"
               />
-              <Contador lineas={draft.headlines} limite={30} minimo={3} maximo={15} />
+              <Contador lineas={draft.headlines} limite={30} minimo={draft.googleChannel === "display" ? 1 : 3} maximo={draft.googleChannel === "display" ? 5 : 15} />
             </Campo>
-            <Campo etiqueta="DESCRIPCIONES · 2 A 4, MÁX 90 CARACTERES" className="mt-3">
+            <Campo etiqueta={draft.googleChannel === "display" ? "DESCRIPCIONES · 1 A 5, MÁX 90 CARACTERES" : "DESCRIPCIONES · 2 A 4, MÁX 90 CARACTERES"} className="mt-3">
               <Textarea
                 value={draft.descriptions.join("\n")}
                 onChange={(e) =>
@@ -2502,12 +2867,15 @@ function FaseAnuncio({
                 rows={3}
                 className="bg-field/60 field-sizing-fixed max-h-28 resize-none overflow-y-auto"
               />
-              <Contador lineas={draft.descriptions} limite={90} minimo={2} maximo={4} />
+              <Contador lineas={draft.descriptions} limite={90} minimo={draft.googleChannel === "display" ? 1 : 2} maximo={draft.googleChannel === "display" ? 5 : 4} />
             </Campo>
+            {(draft.googleChannel === "display" || draft.googleChannel === "pmax") && (
+              <BloqueDisplay draft={draft} onChange={onChange} />
+            )}
             <CopilotoDeCreativos
               plataforma="google"
               portfolioId={draft.portfolioId}
-              objetivoLabel={OBJECTIVES[draft.objective].label}
+              objetivoLabel={OBJECTIVES[objetivoDe(draft, "google")].label}
               nombreCampana={draft.name}
               notaInterna={draft.details}
               landingUrl={draft.landingUrl}
@@ -2543,6 +2911,7 @@ function FaseAnuncio({
               {draft.pathDisplay2.trim() ? ` › ${draft.pathDisplay2.trim()}` : ""}
             </p>
           </Seccion>
+          {draft.googleChannel === "search" && draft.googleBusqueda && <RecursosGoogleBusqueda draft={draft} onChange={onChange} />}
         </>
       )}
     </>
@@ -2608,6 +2977,83 @@ function IdentidadMeta({
     <p className="text-sm text-foreground/75">
       Publica como {partes.join(" y ")}.
     </p>
+  );
+}
+
+/**
+ * Lo que un anuncio de Display responsivo necesita además de títulos y descripciones: título largo, nombre del
+ * negocio y las imágenes (horizontal 1,91:1 y cuadrada 1:1 obligatorias; logo opcional). Se crea con la API de
+ * Google Ads; las imágenes deben estar en una dirección pública https y se revisan (tamaño y proporción) al
+ * simular, antes de publicar.
+ */
+function BloqueDisplay({
+  draft,
+  onChange,
+}: {
+  draft: CampaignDraft;
+  onChange: (cambios: Partial<CampaignDraft>) => void;
+}) {
+  return (
+    <div className="mt-4 space-y-3 rounded-xl border border-foreground/10 bg-foreground/[0.03] p-3">
+      <p className="text-xs font-semibold text-foreground/80">
+        {draft.googleChannel === "pmax" ? "Performance Max (grupo de recursos)" : "Anuncio de Display (con imagen)"}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo etiqueta="TÍTULO LARGO · MÁX 90 CARACTERES">
+          <Input
+            value={draft.displayLongHeadline}
+            maxLength={90}
+            onChange={(e) => onChange({ displayLongHeadline: e.target.value })}
+            className="bg-field/60"
+          />
+        </Campo>
+        <Campo etiqueta="NOMBRE DEL NEGOCIO · MÁX 25 CARACTERES">
+          <Input
+            value={draft.displayBusinessName}
+            maxLength={25}
+            onChange={(e) => onChange({ displayBusinessName: e.target.value })}
+            className="bg-field/60"
+          />
+        </Campo>
+      </div>
+      <Campo etiqueta="IMAGEN HORIZONTAL 1,91:1 (EJ. 1200×628) · OBLIGATORIA">
+        <div className="flex flex-wrap gap-2">
+          <Input
+            value={draft.mediaUrl}
+            placeholder="https://"
+            onChange={(e) => onChange({ mediaUrl: e.target.value, mediaType: e.target.value.trim() ? "image" : "none", boostPostId: null })}
+            className="min-w-0 flex-1 bg-field/60"
+          />
+          <SubidaDeArchivo portfolioId={draft.portfolioId} onSubido={(url) => onChange({ mediaUrl: url, mediaType: "image", boostPostId: null })} />
+        </div>
+      </Campo>
+      <Campo etiqueta="IMAGEN CUADRADA 1:1 (EJ. 1200×1200) · OBLIGATORIA">
+        <div className="flex flex-wrap gap-2">
+          <Input
+            value={draft.displaySquareUrl}
+            placeholder="https://"
+            onChange={(e) => onChange({ displaySquareUrl: e.target.value })}
+            className="min-w-0 flex-1 bg-field/60"
+          />
+          <SubidaDeArchivo portfolioId={draft.portfolioId} onSubido={(url) => onChange({ displaySquareUrl: url })} />
+        </div>
+      </Campo>
+      <Campo etiqueta={draft.googleChannel === "pmax" ? "LOGO 1:1 (OBLIGATORIO, MÍN 128×128)" : "LOGO 1:1 (OPCIONAL, MÍN 128×128)"}>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            value={draft.displayLogoUrl}
+            placeholder="https://"
+            onChange={(e) => onChange({ displayLogoUrl: e.target.value })}
+            className="min-w-0 flex-1 bg-field/60"
+          />
+          <SubidaDeArchivo portfolioId={draft.portfolioId} onSubido={(url) => onChange({ displayLogoUrl: url })} />
+        </div>
+      </Campo>
+      <p className="text-[0.68rem] leading-5 text-foreground/45">
+        PNG o JPEG de hasta 5 MB, en una dirección pública https (Google las descarga desde ahí). Si la proporción o el tamaño no
+        cumplen, el plan lo avisa antes de publicar. El anuncio nace pausado.
+      </p>
+    </div>
   );
 }
 
@@ -2712,7 +3158,7 @@ function dominioDe(url: string): string {
  * ahí, igual que hace esta vista previa. Si la URL está rota, es mejor
  * mostrarlo acá, antes de publicar, que descubrirlo cuando Meta la rechace.
  */
-function ImagenDeLaPieza({ url, alto = "h-44" }: { url: string; alto?: string }) {
+function ImagenDeLaPieza({ url, alto = "aspect-[1.91/1] w-full" }: { url: string; alto?: string }) {
   // Sin efecto: si la URL cambió desde el render anterior, el estado se
   // ajusta acá mismo (React lo soporta y lo prefiere para esto) en vez de
   // confirmar un render con el estado viejo y recién corregirlo un instante
@@ -2730,18 +3176,19 @@ function ImagenDeLaPieza({ url, alto = "h-44" }: { url: string; alto?: string })
     return (
       <div
         className={cn(
-          "wa-m-media flex items-center justify-center px-4 text-center text-[0.68rem]",
+          "wa-m-media flex flex-col items-center justify-center gap-1.5 px-4 text-center text-[0.68rem] opacity-80",
           alto,
         )}
       >
+        <ImageOff className="size-5 opacity-60" />
         {url.trim()
           ? "No se pudo cargar la imagen desde esa URL"
-          : "Falta la URL de la pieza"}
+          : "Aquí irá la imagen del anuncio"}
       </div>
     );
   }
   return (
-    <div className={cn("wa-m-media relative", alto)}>
+    <div className={cn("wa-m-media relative overflow-hidden", alto)}>
       {estado === "cargando" && (
         <div className="absolute inset-0 flex items-center justify-center gap-2 text-[0.68rem]">
           <ThinkingOrb size="sm" state="thinking" label="" />
@@ -2752,7 +3199,7 @@ function ImagenDeLaPieza({ url, alto = "h-44" }: { url: string; alto?: string })
       <img
         src={url}
         alt="Pieza del anuncio"
-        className={cn("w-full object-cover", alto, estado !== "ok" && "invisible")}
+        className={cn("absolute inset-0 size-full object-cover", estado !== "ok" && "invisible")}
         onLoad={() => setEstado("ok")}
         onError={() => setEstado("error")}
       />
@@ -2847,7 +3294,7 @@ function TarjetaDeVista({
     // globals.css. Cambia de claro a oscuro con el interruptor de arriba,
     // pero siguiendo el modo oscuro real de Google, no el de WiWO.ADS.
     return (
-      <div className="wa-preview-google rounded-lg p-3 font-sans">
+      <div className="wa-preview-google mx-auto w-full max-w-[420px] rounded-xl p-3.5 font-sans">
         <div className="wa-g-domain flex items-center gap-1.5 text-[0.72rem]">
           <span className="wa-g-label rounded-[3px] border px-1 text-[0.6rem] font-bold">
             Anuncio
@@ -2873,13 +3320,13 @@ function TarjetaDeVista({
 
   if (formato === "historia") {
     return (
-      <div className="wa-preview-meta relative aspect-[9/16] overflow-hidden rounded-lg font-sans">
+      <div className="wa-preview-meta relative mx-auto aspect-[9/16] w-full max-w-[230px] overflow-hidden rounded-xl font-sans">
         {draft.mediaType === "video" ? (
           <div className="wa-m-media flex h-full items-center justify-center px-3 text-center text-[0.68rem]">
             Vista previa de video no disponible acá — se revisa en la plataforma
           </div>
         ) : (
-          <ImagenDeLaPieza url={draft.mediaUrl} alto="h-full" />
+          <ImagenDeLaPieza url={draft.mediaUrl} alto="h-full w-full" />
         )}
         <div className="absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/65 to-transparent p-3">
           <div className="wa-m-avatar grid size-7 shrink-0 place-items-center rounded-full text-[0.65rem] font-bold ring-2 ring-white/70">
@@ -2902,7 +3349,7 @@ function TarjetaDeVista({
   }
 
   return (
-    <div className="wa-preview-meta overflow-hidden rounded-lg font-sans">
+    <div className="wa-preview-meta mx-auto w-full max-w-[360px] overflow-hidden rounded-xl font-sans">
       <div className="flex items-center gap-2 p-3">
         <div className="wa-m-avatar grid size-9 shrink-0 place-items-center rounded-full text-xs font-bold">
           {inicial}
@@ -2912,11 +3359,13 @@ function TarjetaDeVista({
           <p className="wa-m-sub text-[0.68rem]">Patrocinado</p>
         </div>
       </div>
-      <p className="px-3 pb-2 text-[0.82rem] leading-5 whitespace-pre-line line-clamp-4">
-        {draft.message || "El texto principal aparecerá acá."}
-      </p>
+      <div className="px-3 pb-2">
+        <p className="line-clamp-3 text-[0.82rem] leading-5 whitespace-pre-line">
+          {draft.message || "El texto principal aparecerá acá."}
+        </p>
+      </div>
       {draft.mediaType === "video" ? (
-        <div className="wa-m-media flex h-44 items-center justify-center text-[0.68rem]">
+        <div className="wa-m-media flex aspect-[1.91/1] w-full items-center justify-center text-[0.68rem]">
           Vista previa de video no disponible acá — se revisa en la plataforma
         </div>
       ) : (
@@ -3023,7 +3472,7 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
       )}
 
       <Dialog open={ampliada} onOpenChange={setAmpliada}>
-        <DialogContent className="border-foreground/12 bg-card sm:max-w-3xl">
+        <DialogContent className="border-foreground/12 bg-card sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Vista previa</DialogTitle>
             <DialogDescription>
@@ -3050,15 +3499,15 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
             ))}
           </div>
 
-          <div className="scrollbar-thin grid max-h-[65vh] gap-5 overflow-y-auto pt-1 sm:grid-cols-2">
+          <div className="scrollbar-thin grid max-h-[68vh] justify-items-center gap-6 overflow-y-auto pt-2 sm:grid-cols-2 sm:items-start">
             {vistasFiltradas.length === 0 && (
               <p className="py-6 text-center text-sm text-foreground/45 sm:col-span-2">
                 No hay vistas para ese filtro.
               </p>
             )}
             {vistasFiltradas.map((v) => (
-              <div key={v.id}>
-                <p className="font-micro mb-1.5 text-[0.55rem] text-foreground/40">
+              <div key={v.id} className="w-full min-w-0">
+                <p className="font-micro mb-2 text-center text-[0.6rem] text-foreground/50">
                   {v.etiqueta.toUpperCase()}
                 </p>
                 <TarjetaDeVista id={v.id} draft={draft} cuentaMeta={cuentaMeta} />

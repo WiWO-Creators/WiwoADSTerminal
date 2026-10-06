@@ -1,6 +1,7 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
+import { cargarCompatibilidadBoost } from "@/lib/boost-compat-store";
 import { detalleClientes } from "@/lib/clientes-detalle";
 import { buildPlan, normalizeDraft, type CampaignDraft, type CuentaCliente } from "@/lib/constructor";
 import {
@@ -16,6 +17,7 @@ import { idDeResultado } from "@/lib/ids-de-resultado";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { can, enAlcance } from "@/lib/permisos";
 import { actualizarCatalogoDeCuentas, type WindsorProvider } from "@/lib/windsor";
+import { accesoNativoGoogle } from "@/lib/integration-store";
 
 /**
  * Nombres de campo de id que un anuncio recién creado puede devolver.
@@ -102,7 +104,12 @@ export async function POST(request: Request) {
   const cuentas: CuentaCliente[] = cliente?.accounts ?? [];
   const excluirCampanasDePresupuesto = await nombresDeCampanasRecientes(draft.portfolioId);
 
-  const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto);
+  // Se vuelve a leer de la plataforma al ejecutar, igual que el plan: lo que se
+  // aprobó es lo que corre, y la compatibilidad pudo cambiar desde la simulación.
+  const compatBoost = await cargarCompatibilidadBoost(draft);
+  const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto, compatBoost, {
+      sinConversionesMedidas: cliente?.gtmEstado === "no_tiene",
+    });
   const bloqueantes = plan.issues.filter((issue) => issue.blocking);
   if (bloqueantes.length > 0) {
     return Response.json(
@@ -138,10 +145,18 @@ export async function POST(request: Request) {
     return fail("El plan no tiene ningún paso que ejecutar", 422);
   }
 
+  // Solo si el plan trae un paso con la API de Google (Display con imagen): la conexión es la de quien publica.
+  let credencialesGoogle = null;
+  if (plan.steps.some((s) => s.via === "nativa")) {
+    const cuentaGoogle = cuentaDe({ platform: "google" }, draft, cuentas);
+    credencialesGoogle = cuentaGoogle ? await accesoNativoGoogle(session.actor, cuentaGoogle.externalId) : null;
+  }
+
   const { ok: todoBien, pasos: realizados, ids, campanaIncompleta } = await ejecutarPasosDelPlan(
     plan.steps,
     draft,
     cuentas,
+    credencialesGoogle,
   );
 
   await registrarEjecucion(draft, session.actor.email, realizados, todoBien);

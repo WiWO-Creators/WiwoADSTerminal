@@ -61,6 +61,7 @@ export function idDeResultado(
  *   Google campaña:  "Search campaign '…' (id 24271920233) created…"
  *   Google grupo:    "Ad group '…' (id 200046612869, type SEARCH_STANDARD) created…"
  *   Meta campaña:    "Campaign created successfully with id 52528989290637. Use…"
+ *   Meta boost:      "Post …_… boosted successfully as ad 52532282766237 in ad set 52532282752237."
  *
  * El orden importa: se prueba primero la forma entre paréntesis, que es la
  * que nombra el objeto recién creado, y solo después "with id"/"id N". Un
@@ -71,6 +72,8 @@ const PATRONES_DE_ID_EN_TEXTO = [
   /\(id[:\s]+(\d+)/gi,
   /\bwith id[:\s]+(\d+)/gi,
   /\b(?:video|adset|ad set|campaign|ad)[_ ]id[:\s=]+(\d+)/gi,
+  // Boost: "Post …_… boosted successfully as ad 52532282766237 in ad set 52532282752237."
+  /\bas (?:an? )?ad[:\s]+(\d{6,})/gi,
   /\bid[:\s=]+(\d{6,})/gi,
 ];
 

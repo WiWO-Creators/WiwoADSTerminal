@@ -1,7 +1,9 @@
+import "./_alias.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generarAlertas } from "../lib/alertas.ts";
+// `alertas.ts` importa el registro de plataformas con el alias `@/`.
+const { generarAlertas } = await import("../lib/alertas.ts");
 
 function portfolio(over = {}) {
   return {

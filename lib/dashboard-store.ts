@@ -110,31 +110,31 @@ const DECISION_SELECT = `
   FROM decisions
 `;
 
+/**
+ * Qué pide una pantalla del tablero.
+ *
+ * Los anuncios son el 90 % del peso del snapshot (casi 3.000 filas de TODOS los
+ * clientes, 4 MB), y solo la tabla de un cliente los usa: por defecto no viajan.
+ * Quien los necesita pide los de UN cliente.
+ */
+export type OpcionesDeSnapshot = {
+  /** Id del cliente cuyos anuncios se piden. Sin esto, no hay anuncios. */
+  anunciosDelCliente?: string;
+};
+
 export async function getDashboardSnapshot(
   identity: Actor,
-  /** Periodo de las métricas. Las decisiones y la bitácora no dependen de él. */
+  /** Periodo de las métricas. La bitácora no depende de él. */
   rango?: RangoId,
+  opciones: OpcionesDeSnapshot = {},
 ): Promise<DashboardSnapshot> {
   const db = getRawDb();
   const user = await upsertUser(db, identity);
-  const now = Date.now();
 
-  const [decisionResult, auditResult, performance] = await Promise.all([
-    db
-      .prepare(
-        `${DECISION_SELECT}
-         WHERE status = 'pending'
-           AND expires_at > ?
-           AND (snoozed_until IS NULL OR snoozed_until <= ?)
-         ORDER BY CASE severity
-           WHEN 'critical' THEN 1
-           WHEN 'high' THEN 2
-           WHEN 'medium' THEN 3
-           ELSE 4
-         END, generated_at ASC`,
-      )
-      .bind(now, now)
-      .all<DecisionRow>(),
+  // Las decisiones ya no viajan acá: ninguna pantalla del tablero las usa (las
+  // sugerencias se piden por cliente, con su propio control de alcance) y esta
+  // lista traía las de TODOS los clientes a cualquiera que abriera la app.
+  const [auditResult, performanceCompleto] = await Promise.all([
     db
       .prepare(
         `SELECT id, event_type, actor_name_snapshot, action_label, client_snapshot,
@@ -144,28 +144,42 @@ export async function getDashboardSnapshot(
          LIMIT 100`,
       )
       .all<AuditRow>(),
-    getPerformanceSnapshot(identity, new Date(), { rango }),
+    getPerformanceSnapshot(identity, new Date(), {
+      rango,
+      incluirAnuncios: opciones.anunciosDelCliente !== undefined,
+    }),
   ]);
 
-  const dataUpdatedAt = Math.max(
-    0,
-    ...decisionResult.results.map((row) => Number(row.updated_at)),
-    ...auditResult.results.map((row) => Number(row.created_at)),
-  );
+  let performance = performanceCompleto;
+  if (opciones.anunciosDelCliente !== undefined) {
+    const cuentas = new Set(
+      performanceCompleto.portfolios.find((p) => p.id === opciones.anunciosDelCliente)?.accounts.map((a) => a.id) ?? [],
+    );
+    performance = {
+      ...performanceCompleto,
+      ads: performanceCompleto.ads.filter((ad) => cuentas.has(ad.accountKey)),
+    };
+  }
+
+  const dataUpdatedAt = Math.max(0, ...auditResult.results.map((row) => Number(row.created_at)));
 
   return {
     user,
-    decisions: decisionResult.results.map(toDecision),
+    decisions: [],
     auditEvents: auditResult.results.map(toAuditEvent),
     dataUpdatedAt: dataUpdatedAt || null,
     performance,
   };
 }
 
-export async function applyDecisionAction(
+/**
+ * Firma, descarta, pospone, edita, escala o devuelve una decisión. No decide
+ * quién puede hacerlo: eso lo controla quien llama (ver `aprobar_cambios`).
+ */
+export async function resolverDecision(
   identity: Actor,
   input: DecisionAction,
-): Promise<DashboardSnapshot> {
+): Promise<void> {
   const db = getRawDb();
   const user = await upsertUser(db, identity);
   validateMutationInput(input);
@@ -174,7 +188,7 @@ export async function applyDecisionAction(
     .prepare("SELECT id FROM audit_events WHERE idempotency_key = ? LIMIT 1")
     .bind(input.idempotencyKey)
     .first<{ id: string }>();
-  if (duplicate) return getDashboardSnapshot(identity);
+  if (duplicate) return;
 
   const decision = await db
     .prepare(`${DECISION_SELECT} WHERE id = ? LIMIT 1`)
@@ -380,6 +394,13 @@ export async function applyDecisionAction(
     );
   }
 
+}
+
+export async function applyDecisionAction(
+  identity: Actor,
+  input: DecisionAction,
+): Promise<DashboardSnapshot> {
+  await resolverDecision(identity, input);
   return getDashboardSnapshot(identity);
 }
 
@@ -529,52 +550,6 @@ function validateMutationInput(input: DecisionAction) {
   if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
     throw new DashboardStoreError("Versión de decisión inválida", 400);
   }
-}
-
-function toDecision(row: DecisionRow): Decision {
-  return {
-    id: row.id,
-    severity: row.severity,
-    client: row.client,
-    platform: row.platform,
-    owner: row.owner_label,
-    autonomy: row.autonomy,
-    title: row.title,
-    diagnosis: row.diagnosis,
-    proposedAction: row.proposed_action,
-    impact: row.impact,
-    confidence: row.confidence,
-    agent: row.agent,
-    rule: row.rule,
-    age: formatElapsed(row.generated_at),
-    expires: formatRemaining(row.expires_at),
-    before: row.before_value,
-    after: row.after_value,
-    guardrail: row.guardrail,
-    metric: row.metric,
-    delta: row.delta,
-    primaryLabel: row.primary_label,
-    version: row.version,
-  };
-}
-
-function formatElapsed(value: number): string {
-  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - value) / 60_000));
-  if (elapsedMinutes < 1) return "Ahora";
-  if (elapsedMinutes < 60) return `Hace ${elapsedMinutes} min`;
-  const hours = Math.floor(elapsedMinutes / 60);
-  if (hours < 24) return `Hace ${hours} h`;
-  const days = Math.floor(hours / 24);
-  return `Hace ${days} ${days === 1 ? "día" : "días"}`;
-}
-
-function formatRemaining(value: number): string {
-  const remainingMinutes = Math.max(0, Math.ceil((value - Date.now()) / 60_000));
-  if (remainingMinutes < 60) return `Vence en ${remainingMinutes} min`;
-  const hours = Math.ceil(remainingMinutes / 60);
-  if (hours < 48) return `Vence en ${hours} h`;
-  const days = Math.ceil(hours / 24);
-  return `Vence en ${days} ${days === 1 ? "día" : "días"}`;
 }
 
 function toAuditEvent(row: AuditRow): AuditEvent {
