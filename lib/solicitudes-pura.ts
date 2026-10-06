@@ -42,24 +42,34 @@ export type SolicitudVisible = {
   notaDeRevision: string | null;
   titulo: string;
   error: string | null;
+  /** Es un cambio sobre algo que ya existe (no una creación). */
+  esEdicion?: boolean;
 };
 
 /** Lo que lee quien creó la solicitud, con las palabras del equipo. */
 export function mensajeParaElCreador(s: SolicitudVisible, supervisores: string[]): string {
   switch (s.estado) {
     case "pendiente":
+      if (s.esEdicion) {
+        return supervisores.length > 0
+          ? `Tu cambio quedó pendiente: nada se modificó todavía. Debe aprobarlo: ${supervisores.join(", ")}.`
+          : "Tu cambio quedó pendiente: nada se modificó todavía. Debe aprobarlo un supervisor.";
+      }
       return supervisores.length > 0
         ? `Tu creación fue enviada a revisión. Un supervisor debe aprobarla: ${supervisores.join(", ")}.`
         : "Tu creación fue enviada a revisión. Un supervisor debe aprobarla.";
     case "rechazada":
+      if (s.esEdicion) return `${s.revisorNombre ?? "Un supervisor"} rechazó el cambio: todo quedó tal como estaba${s.notaDeRevision ? `. Motivo: ${s.notaDeRevision}` : "."}`;
       return `${s.revisorNombre ?? "Un supervisor"} la rechazó${s.notaDeRevision ? `: ${s.notaDeRevision}` : "."}`;
     case "cancelada":
       return "La retiraste antes de que se revisara.";
     case "publicada":
+      if (s.esEdicion) return `${s.revisorNombre ?? "Un supervisor"} aprobó el cambio y ya se aplicó en la plataforma.`;
       return `${s.revisorNombre ?? "Un supervisor"} la aprobó y quedó creada en la plataforma, pausada. Te avisamos cuando esté activa y funcionando.`;
     case "activa":
       return "Aprobada y funcionando: ya está activa en la plataforma.";
     case "fallida":
+      if (s.esEdicion) return `Se aprobó, pero la plataforma no pudo aplicar el cambio${s.error ? `: ${s.error}` : "."}`;
       return `Se aprobó, pero la plataforma no la pudo crear${s.error ? `: ${s.error}` : "."}`;
   }
 }

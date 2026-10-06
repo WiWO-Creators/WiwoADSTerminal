@@ -8,7 +8,8 @@ import { armarAntes, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servi
 import { actualizarAnuncioRsa,
   actualizarCampanaGoogle, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
-import { can } from "@/lib/permisos";
+import { can, puedeArmarCampanas } from "@/lib/permisos";
+import { crearSolicitudDeEdicion, ErrorDeSolicitud } from "@/lib/solicitudes";
 import { puedeAdministrar, type NivelEntidad } from "@/lib/plataformas";
 import { WindsorError } from "@/lib/windsor";
 
@@ -56,12 +57,27 @@ export async function POST(request: Request) {
   const nivel = body.nivel as NivelEntidad;
   const id = (body.id ?? "").trim();
   const aplicar = body.modo === "aplicar";
+  const solicitar = body.modo === "solicitar";
 
   if (!puedeAdministrar(provider)) return fail("Plataforma no reconocida o todavía no activa", 400);
   if (!accountId) return fail("Falta la cuenta", 400);
   if (!(NIVELES as readonly string[]).includes(nivel)) return fail("Nivel no reconocido", 400);
   if (!id) return fail("Falta el identificador de la entidad", 400);
   if (!body.cambios || typeof body.cambios !== "object") return fail("Faltan los cambios", 400);
+
+  // Quien arma pero no aprueba (un Creator) no aplica: deja el cambio pendiente y alguien con permiso lo aprueba o lo rechaza.
+  if (solicitar) {
+    if (!puedeArmarCampanas(session.actor)) return fail("Tu rol no puede enviar cambios a revisión.", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
+    try {
+      const solicitud = await crearSolicitudDeEdicion(session.actor, { provider, accountId, nivel, id, cambios: body.cambios });
+      return Response.json({ solicitud }, { status: 201, headers: NO_STORE });
+    } catch (error) {
+      if (error instanceof ErrorDeSolicitud) return fail(error.message, error.status);
+      if (error instanceof ErrorDeEdicion) return Response.json({ error: error.message }, { status: error.status, headers: NO_STORE });
+      console.error("WiWO.ADS solicitar edición", error);
+      return fail("No se pudo enviar el cambio a revisión", 500);
+    }
+  }
 
   // Simular no escribe: lo puede hacer quien ve al cliente. Aplicar sí escribe.
   if (aplicar) {

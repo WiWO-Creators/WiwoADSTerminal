@@ -19,6 +19,7 @@ import type { AdSummary } from "@/lib/performance-store";
 import type { SugerenciaVista } from "@/lib/sugerencias-store";
 import { cn } from "@/lib/utils";
 import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
+import { ImpulsarView } from "./impulsar-view";
 
 type Datos = { pendientes: SugerenciaVista[]; puedeResolver: boolean };
 
@@ -53,7 +54,10 @@ async function pedir(cuerpo: unknown): Promise<{ ok: boolean; cuerpo: Record<str
 export function BotonDeSugerencias({
   clienteId,
   rango,
+  modo = "boton",
 }: {
+  /** `pagina`: las tarjetas ocupan la pantalla (Decisiones); `boton`: un botón que las abre en un diálogo. */
+  modo?: "boton" | "pagina";
   /** Cliente que se mira en el Dashboard; sin cliente, las de toda la cartera visible. */
   clienteId: string | null;
   rango: string;
@@ -67,6 +71,7 @@ export function BotonDeSugerencias({
   const [editor, setEditor] = useState<EntidadParaDetalle | null>(null);
   const [adsDelEditor, setAdsDelEditor] = useState<AdSummary[]>([]);
   const [resueltas, setResueltas] = useState(0);
+  const [subiendo, setSubiendo] = useState<SugerenciaVista | null>(null);
   const [dx, setDx] = useState(0);
   const [arrastrando, setArrastrando] = useState(false);
   const arrastre = useRef<{ x: number; id: number } | null>(null);
@@ -162,6 +167,11 @@ export function BotonDeSugerencias({
   /** ✓ */
   async function aprobar(s: SugerenciaVista) {
     if (!puede || trabajando) return;
+    if (s.accion?.tipo === "contenido") {
+      setDx(0);
+      setSubiendo(s);
+      return;
+    }
     if (s.accion?.tipo === "pausar") {
       setDx(0);
       setPausando(s);
@@ -232,7 +242,7 @@ export function BotonDeSugerencias({
 
   // Teclado: ← descartar, → aprobar, ↓ posponer.
   useEffect(() => {
-    if (!abierto || !actual || !puede || pausando || editor) return;
+    if ((!abierto && modo !== "pagina") || !actual || !puede || pausando || editor || subiendo) return;
     const onKey = (e: KeyboardEvent) => {
       if (eligiendoMotivo) return;
       if (e.key === "ArrowLeft") setEligiendoMotivo(true);
@@ -242,7 +252,7 @@ export function BotonDeSugerencias({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- las acciones leen `actual` y el estado vigente en cada tecla
-  }, [abierto, actual, puede, pausando, editor, eligiendoMotivo, trabajando]);
+  }, [abierto, modo, actual, puede, pausando, editor, subiendo, eligiendoMotivo, trabajando]);
 
   function alBajar(e: React.PointerEvent<HTMLDivElement>) {
     if (!puede || trabajando || eligiendoMotivo) return;
@@ -267,36 +277,8 @@ export function BotonDeSugerencias({
 
   const sev = actual ? SEVERIDAD[actual.severity] : null;
 
-  return (
+  const cuerpo = (
     <>
-      <button
-        type="button"
-        onClick={() => setAbierto(true)}
-        className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-brand/18"
-      >
-        <Lightbulb className="size-4 text-brand" />
-        Sugerencias pendientes
-        <span
-          className={cn(
-            "grid min-w-5 place-items-center rounded-full px-1.5 text-[0.7rem] font-bold",
-            total > 0 ? "bg-brand text-primary-foreground" : "bg-foreground/10 text-foreground/50",
-          )}
-        >
-          {datos ? total : "…"}
-        </span>
-      </button>
-
-      <Dialog open={abierto} onOpenChange={setAbierto}>
-        <DialogContent className="max-h-[92vh] overflow-hidden sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Sugerencias pendientes</DialogTitle>
-            <DialogDescription>
-              {puede
-                ? "Arrastra la tarjeta o usa los botones: ✕ descartar, ⏱ posponer, ✓ aprobar."
-                : "Solo un administrador o supervisor puede resolverlas; tú puedes revisarlas."}
-            </DialogDescription>
-          </DialogHeader>
-
           {error && <p className="rounded-xl border border-danger/25 bg-danger/8 p-3 text-sm text-danger">{error}</p>}
 
           {!actual && datos && !error && (
@@ -385,7 +367,17 @@ export function BotonDeSugerencias({
                       {actual.delta && actual.delta !== "—" && <span className="text-foreground/45">({actual.delta})</span>}
                     </div>
                   )}
-                  {actual.entityId && puede && (
+                  {actual.accion?.tipo === "contenido" && actual.clienteId && (
+                    <button
+                      type="button"
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => setSubiendo(actual)}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
+                    >
+                      Subir contenido a esta campaña
+                    </button>
+                  )}
+                  {actual.entityId && actual.accion?.tipo !== "contenido" && (
                     <button
                       type="button"
                       onClick={() => void abrirEnEditor(actual, false)}
@@ -469,6 +461,68 @@ export function BotonDeSugerencias({
               )}
             </div>
           )}
+    </>
+  );
+
+  return (
+    <>
+      {modo !== "pagina" && (
+        <>
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-brand/18"
+      >
+        <Lightbulb className="size-4 text-brand" />
+        Sugerencias pendientes
+        <span
+          className={cn(
+            "grid min-w-5 place-items-center rounded-full px-1.5 text-[0.7rem] font-bold",
+            total > 0 ? "bg-brand text-primary-foreground" : "bg-foreground/10 text-foreground/50",
+          )}
+        >
+          {datos ? total : "…"}
+        </span>
+      </button>
+
+      <Dialog open={abierto} onOpenChange={setAbierto}>
+        <DialogContent className="max-h-[92vh] overflow-hidden sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sugerencias pendientes</DialogTitle>
+            <DialogDescription>
+              {puede
+                ? "Arrastra la tarjeta o usa los botones: ✕ descartar, ⏱ posponer, ✓ aprobar."
+                : "Solo un administrador o supervisor puede resolverlas; tú puedes revisarlas."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {cuerpo}
+        </DialogContent>
+      </Dialog>
+        </>
+      )}
+
+      {modo === "pagina" && (
+        <div className="mx-auto w-full max-w-md space-y-4 px-4 py-6">
+          <div>
+            <h2 className="neo-section-title">Decisiones</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {puede
+                ? "Cambios que se pueden hacer ahora. Arrastra la tarjeta o usa los botones: ✕ descartar, ⏱ posponer, ✓ aprobar. Lo que toca presupuesto se ajusta en el editor antes de aplicarlo."
+                : "Tu rol propone: abre la campaña o sube contenido y se envía a revisión. Nada cambia hasta que lo apruebe quien corresponde."}
+            </p>
+          </div>
+          {cuerpo}
+        </div>
+      )}
+
+      <Dialog open={subiendo !== null} onOpenChange={(a) => !a && setSubiendo(null)}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Subir contenido a «{subiendo?.entityName}»</DialogTitle>
+            <DialogDescription>Elige el conjunto y la publicación, el anuncio o la imagen. Lo nuevo nace pausado y pasa por revisión.</DialogDescription>
+          </DialogHeader>
+          {subiendo?.clienteId && <ImpulsarView clienteId={subiendo.clienteId} puedeAprobar={puede} campanaInicial={subiendo.entityId ?? undefined} />}
         </DialogContent>
       </Dialog>
 

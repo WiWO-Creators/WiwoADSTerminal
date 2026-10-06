@@ -23,7 +23,7 @@ const campoClase = "h-11 w-full rounded-xl border border-border bg-background px
  * Impulsar desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
  * existente. Lo elegido pasa por la misma revisión que todo (queda pausado); quien aprueba cambios lo publica al instante.
  */
-export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | null; puedeAprobar: boolean }) {
+export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [cuenta, setCuenta] = useState("");
   const [arbol, setArbol] = useState<{ campanas: Campana[]; conjuntos: Conjunto[] } | null>(null);
@@ -72,13 +72,17 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
       .then(async (r) => {
         const j = (await r.json()) as { campanas?: Campana[]; conjuntos?: Conjunto[]; error?: string };
         if (!r.ok) throw new Error(j.error ?? "No se pudieron leer las campañas");
-        if (vivo) setArbol({ campanas: j.campanas ?? [], conjuntos: j.conjuntos ?? [] });
+        if (vivo) {
+          setArbol({ campanas: j.campanas ?? [], conjuntos: j.conjuntos ?? [] });
+          // Si se llegó desde una tarjeta de «subir contenido», la campaña ya viene elegida.
+          if (campanaInicial && (j.campanas ?? []).some((c: { id: string }) => c.id === campanaInicial)) setCampanaId(campanaInicial);
+        }
       })
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : "No se pudieron leer las campañas"));
     return () => {
       vivo = false;
     };
-  }, [cliente, cuenta]);
+  }, [cliente, cuenta, campanaInicial]);
 
   // Anuncios existentes (para «impulsar uno que ya existe»), solo si se pide.
   useEffect(() => {

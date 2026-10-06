@@ -105,6 +105,11 @@ export type CambiosEdicion = {
   sufijoUrl?: string;
 };
 
+/** ¿El cambio toca dinero (presupuesto o tope de gasto)? Esos cambios, si los propone un Creator, los aprueba un Director Digital o superior. */
+export function tocaPresupuesto(c: CambiosEdicion): boolean {
+  return c.presupuesto !== undefined || c.limiteGasto !== undefined;
+}
+
 export type AntesDeEdicion =
   | { nivel: "campana"; entidad: DetalleCampana }
   | { nivel: "conjunto"; entidad: DetalleConjunto; campana: DetalleCampana | null }

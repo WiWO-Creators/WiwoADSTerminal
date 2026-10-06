@@ -197,6 +197,26 @@ export async function copiarReglaMetaParaAnuncio(accountId: string, reglaId: str
   return creada.id;
 }
 
+/** Cuándo se creó el último anuncio de cada campaña de una cuenta (ms). Solo lectura. */
+export async function ultimoAnuncioPorCampana(accountId: string): Promise<Map<string, number>> {
+  const salida = new Map<string, number>();
+  let despues: string | undefined;
+  for (let pagina = 0; pagina < 4; pagina++) {
+    const j = await graph<{ data?: Array<{ campaign_id?: string; created_time?: string }>; paging?: { cursors?: { after?: string }; next?: string } }>(
+      `${cuenta(accountId)}/ads`,
+      "GET",
+      { fields: "campaign_id,created_time", limit: 500, after: despues },
+    );
+    for (const a of j.data ?? []) {
+      const t = a.created_time ? Date.parse(a.created_time) : NaN;
+      if (a.campaign_id && Number.isFinite(t) && t > (salida.get(a.campaign_id) ?? 0)) salida.set(a.campaign_id, t);
+    }
+    despues = j.paging?.next ? j.paging.cursors?.after : undefined;
+    if (!despues) break;
+  }
+  return salida;
+}
+
 /** Últimas publicaciones de una cuenta de Instagram, leídas directo de Meta (rápido; Windsor puede tardar minutos). Solo lectura. */
 export async function listarMediosInstagram(instagramId: string): Promise<OrganicPost[]> {
   const j = await graph<{ data?: Array<{ id: string; permalink?: string; caption?: string; media_type?: string; media_product_type?: string; timestamp?: string; media_url?: string; thumbnail_url?: string }> }>(

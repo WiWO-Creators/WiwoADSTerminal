@@ -24,6 +24,8 @@ import { ETIQUETA_RITMO, type ResumenPresupuesto } from "./presupuesto";
 export type AccionSugerida =
   | { tipo: "pausar" }
   | { tipo: "presupuesto"; monto: number; actual: number }
+  /** La campaña lleva días sin contenido nuevo: se resuelve subiendo contenido a sus conjuntos. */
+  | { tipo: "contenido"; dias: number }
   | { tipo: "revisar" };
 
 export type SeveridadSugerencia = "critical" | "high" | "medium" | "info";
@@ -493,4 +495,61 @@ export function sugerenciasDeMedicion(entradas: EntradaDeMedicion[], ahora: Date
       expiresAt: generatedAt + VENCE_EN_MS,
     })),
   );
+}
+
+/** Días sin anuncios nuevos a partir de los cuales una campaña activa pide contenido. */
+export const DIAS_SIN_CONTENIDO = 14;
+
+export type EntradaDeContenido = {
+  cliente: { id: string; nombre: string };
+  provider: string;
+  accountId: string;
+  campanaId: string;
+  campanaNombre: string;
+  /** Cuándo se creó el último anuncio de la campaña (ms); `null` si no se pudo saber. */
+  ultimoAnuncio: number | null;
+};
+
+/**
+ * «No has actualizado el contenido de [campaña]»: una campaña activa cuyo último anuncio nuevo tiene más de
+ * `DIAS_SIN_CONTENIDO` días. Una por campaña y semana, para que no se repita cada día. Sin la fecha del último
+ * anuncio no se sugiere nada: no se inventa un atraso.
+ */
+export function sugerenciasDeContenido(entradas: EntradaDeContenido[], ahora: Date): Sugerencia[] {
+  const semana = Math.floor(ahora.getTime() / (7 * 86_400_000));
+  const generatedAt = ahora.getTime();
+  const salida: Sugerencia[] = [];
+  for (const e of entradas) {
+    if (e.ultimoAnuncio === null) continue;
+    const dias = Math.floor((generatedAt - e.ultimoAnuncio) / 86_400_000);
+    if (dias < DIAS_SIN_CONTENIDO) continue;
+    salida.push({
+      id: `contenido-${e.campanaId}-${semana}`,
+      rule: "contenido_desactualizado",
+      severity: dias >= 30 ? "high" : "medium",
+      portfolioId: e.cliente.id,
+      client: e.cliente.nombre,
+      platform: plataforma(e.provider),
+      provider: e.provider,
+      accountId: e.accountId,
+      entityLevel: "campana",
+      entityId: e.campanaId,
+      entityName: e.campanaNombre,
+      title: `No has actualizado el contenido de "${e.campanaNombre}"`,
+      diagnosis: `Su último anuncio nuevo se creó hace ${dias} días. Con el mismo contenido la audiencia se cansa y el rendimiento cae.`,
+      proposedAction: "Subir contenido nuevo a sus conjuntos: una publicación, una imagen o un anuncio que ya funcione.",
+      impact: "Renueva el contenido antes de que el cansancio de la audiencia suba el costo por resultado.",
+      confidence: "Media",
+      before: `${dias} días sin contenido nuevo`,
+      after: "Contenido renovado",
+      guardrail: "Lo nuevo nace pausado y pasa por revisión: no cambia nada hasta que alguien lo apruebe.",
+      metric: "Antigüedad del último anuncio",
+      delta: `${dias} días`,
+      primaryLabel: "Subir contenido",
+      accion: { tipo: "contenido", dias },
+      generatedAt,
+      expiresAt: generatedAt + 7 * 86_400_000,
+    });
+  }
+  return salida;
 }

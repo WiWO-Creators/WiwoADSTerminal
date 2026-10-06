@@ -39,6 +39,16 @@ Leyenda de riesgo: 🔴 da acceso o permite actuar · 🟠 da acceso parcial o g
 | `META_SYSTEM_USER_TOKEN` 🔴 | Token del **usuario del sistema «WiwoAds»**. Admite varios, separados por coma (uno por portafolio dueño de cuentas). Es el que usa la lectura nativa de Meta. | `lib/meta-nativo.ts` | Es el más delicado: da acceso a los **activos asignados al usuario del sistema** (hoy ~44: cuentas publicitarias con acceso total, páginas, Instagram, WhatsApp) **sin depender de ninguna persona ni de 2FA**. Si se filtra, revócalo en Usuarios del sistema y genera otro. |
 | `META_GRAPH_VERSION` 🟢 | Versión de la Graph API. | `lib/integration-store.ts` | No es secreto. |
 
+## LinkedIn (opcional: LinkedIn también se lee por Windsor)
+
+| Variable | Qué hace | Dónde | Si se filtra |
+|---|---|---|---|
+| `LINKEDIN_CLIENT_ID` 🟢 | ID de la app «WiwoAds» de LinkedIn (también vale `LINKEDIN_APP_ID`). | `lib/linkedin-nativo.ts` | Es público: sale en la URL de login. |
+| `LINKEDIN_CLIENT_SECRET` 🔴 | Secreto de esa app (también vale `LINKEDIN_APP_SECRET`). Canjea el código OAuth y renueva tokens. | `lib/linkedin-nativo.ts` | Permite **hacerse pasar por la app** al canjear códigos. Regenerar en LinkedIn Developers → Auth. |
+| `LINKEDIN_API_VERSION` 🟢 | Versión de la API REST (cabecera `Linkedin-Version`, `AAAAMM`). Por defecto `202609` (la 202510 se retira el 2026-10-15). | `lib/linkedin-nativo.ts` | No es secreto. LinkedIn retira versiones viejas: si responde 426, subirla. |
+
+Sin las dos primeras, la vía nativa queda apagada y LinkedIn sigue leyéndose por Windsor.
+
 ## Windsor
 
 | Variable | Qué hace | Dónde | Si se filtra |

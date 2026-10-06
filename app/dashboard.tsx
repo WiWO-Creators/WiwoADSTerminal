@@ -21,6 +21,7 @@ import {
   Search,
   Sun,
   type LucideIcon,
+  Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -93,6 +94,7 @@ const Cargando = () => (
 const cargarVista = <T,>(importar: () => Promise<React.ComponentType<T>>) =>
   dynamic(async () => ({ default: await importar() }) as { default: React.ComponentType<T> }, { ssr: false, loading: Cargando });
 const ConstructorView = cargarVista(() => import("./constructor-view").then((m) => m.ConstructorView));
+const DecisionesView = cargarVista(() => import("./sugerencias-tinder").then((m) => m.BotonDeSugerencias));
 const ImpulsarView = cargarVista(() => import("./impulsar-view").then((m) => m.ImpulsarView));
 const ReglasView = cargarVista(() => import("./reglas-view").then((m) => m.ReglasView));
 const SolicitudesView = cargarVista(() => import("./solicitudes-view").then((m) => m.SolicitudesView));
@@ -121,6 +123,14 @@ type ItemDeMenu = {
 };
 
 const navItems: ItemDeMenu[] = [
+  {
+    // La primera ventana al entrar: lo que se puede resolver ahora, en tarjetas.
+    key: "decisiones",
+    label: "Decisiones",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: Lightbulb,
+    resumen: "Cambios que se pueden hacer ahora: pausar, ajustar presupuesto o subir contenido nuevo.",
+  },
   { key: "control", label: "Inicio", icono: Home },
   {
     key: "health",
@@ -325,7 +335,7 @@ function builderConstructorAttachTo(
 export default function WiwoDashboard({
   signOutPath,
   initialSnapshot,
-  initialView = "control",
+  initialView = "decisiones",
 }: {
   signOutPath: string;
   initialSnapshot: {
@@ -803,6 +813,7 @@ export default function WiwoDashboard({
             un control importante (un botón, la última fila de una tabla)
             justo detrás del orbe flotante al hacer scroll hasta el final. */}
         <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
+          {view === "decisiones" && <DecisionesView modo="pagina" clienteId={clienteSeleccionado} rango={performance.rango.id} />}
           {view === "control" && (
             <ControlRoomView
               nombre={initialSnapshot.user.displayName.trim().split(/\s+/)[0] || "equipo"}

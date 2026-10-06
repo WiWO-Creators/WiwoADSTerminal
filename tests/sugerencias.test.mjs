@@ -166,3 +166,29 @@ test("cada problema de medición es una sugerencia del cliente, siempre «revisa
   assert.equal(s[0].platform, "GA4");
   assert.deepEqual(sugerenciasDeMedicion([{ cliente: { id: "c", nombre: "C" }, hallazgos: [] }], AHORA), []);
 });
+
+const { sugerenciasDeContenido, DIAS_SIN_CONTENIDO } = await import("../lib/sugerencias.ts");
+
+test("una campaña sin anuncios nuevos desde hace más de 14 días pide contenido; una reciente o sin fecha, no", () => {
+  const ahora = new Date("2026-10-06T12:00:00Z");
+  const dia = 86_400_000;
+  const base = { cliente: { id: "anker", nombre: "Anker" }, provider: "meta", accountId: "1", campanaNombre: "[AE] Tráfico Perfil" };
+  const s = sugerenciasDeContenido(
+    [
+      { ...base, campanaId: "vieja", ultimoAnuncio: ahora.getTime() - 20 * dia },
+      { ...base, campanaId: "muy-vieja", ultimoAnuncio: ahora.getTime() - 40 * dia },
+      { ...base, campanaId: "reciente", ultimoAnuncio: ahora.getTime() - 3 * dia },
+      { ...base, campanaId: "sin-dato", ultimoAnuncio: null },
+    ],
+    ahora,
+  );
+  assert.equal(DIAS_SIN_CONTENIDO, 14);
+  assert.deepEqual(s.map((x) => x.entityId), ["vieja", "muy-vieja"]);
+  assert.equal(s[0].accion.tipo, "contenido");
+  assert.equal(s[0].accion.dias, 20);
+  assert.equal(s[0].severity, "medium");
+  assert.equal(s[1].severity, "high");
+  assert.match(s[0].title, /No has actualizado el contenido/);
+  // El mismo día y la misma semana: mismo id, no se duplica.
+  assert.equal(sugerenciasDeContenido([{ ...base, campanaId: "vieja", ultimoAnuncio: ahora.getTime() - 20 * dia }], new Date(ahora.getTime() + dia))[0].id, s[0].id);
+});

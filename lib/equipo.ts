@@ -4,6 +4,7 @@ import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { getRawDb } from "@/db";
 import {
   can,
+  esCargoProtegido,
   isRole,
   normalizeRole,
   puedeModificarMiembros,
@@ -57,6 +58,8 @@ export type TeamMember = {
   isActive: boolean;
   portfolioIds: string[];
   foundingAdmin: boolean;
+  /** Cargo en la agencia (Director Digital, Digital Lead…). Informativo: lo que decide los permisos es el rol. */
+  cargo: string | null;
   invitedBy: string | null;
   lastSeenAt: number | null;
 };
@@ -69,6 +72,7 @@ type UserRow = {
   is_active: number;
   invited_by: string | null;
   last_seen_at: number | null;
+  cargo?: string | null;
 };
 
 /**
@@ -186,7 +190,7 @@ export async function listTeam(actor: Actor): Promise<TeamMember[]> {
   const [users, links] = await Promise.all([
     db
       .prepare(
-        `SELECT id, email, display_name, role, is_active, invited_by, last_seen_at
+        `SELECT id, email, display_name, role, is_active, invited_by, last_seen_at, cargo
          FROM users ORDER BY email COLLATE NOCASE`,
       )
       .all<UserRow>(),
@@ -210,7 +214,8 @@ export async function listTeam(actor: Actor): Promise<TeamMember[]> {
     role: normalizeRole(row.role),
     isActive: Boolean(row.is_active),
     portfolioIds: byUser.get(row.id) ?? [],
-    foundingAdmin: isFoundingAdmin(row.email),
+    foundingAdmin: isFoundingAdmin(row.email) || esCargoProtegido(row.cargo),
+    cargo: row.cargo ?? null,
     invitedBy: row.invited_by,
     lastSeenAt: row.last_seen_at ? Number(row.last_seen_at) : null,
   }));
@@ -273,10 +278,13 @@ export async function updateMember(
   }
   const db = getRawDb();
   const row = await db
-    .prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
+    .prepare("SELECT id, email, cargo FROM users WHERE id = ? LIMIT 1")
     .bind(input.userId)
-    .first<{ id: string; email: string }>();
+    .first<{ id: string; email: string; cargo: string | null }>();
   if (!row) throw new EquipoError("Esa persona no existe", 404);
+  if (esCargoProtegido(row.cargo)) {
+    throw new EquipoError("Los jefes no se modifican desde la app", 403);
+  }
 
   // Un administrador fundador no se puede degradar ni desactivar desde acá:
   // sería la forma más fácil de dejar el sistema sin quién lo administre.

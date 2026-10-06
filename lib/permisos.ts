@@ -58,7 +58,9 @@ export type Capability =
   /** Entrar a Gestión → Cuentas (conexiones, inventario, credenciales). Solo administración. */
   | "ver_cuentas"
   /** Ver el detalle técnico de lo que ejecutaría un plan (pasos y parámetros crudos de la API). */
-  | "ver_plan_tecnico";
+  | "ver_plan_tecnico"
+  /** Aprobar un cambio de PRESUPUESTO que propone otra persona. Directores Digitales y jefes (administradores). */
+  | "aprobar_presupuesto";
 
 const CAPABILITIES: Record<Role, Capability[]> = {
   admin: [
@@ -70,6 +72,7 @@ const CAPABILITIES: Record<Role, Capability[]> = {
     "ver_operacion",
     "ver_cuentas",
     "ver_plan_tecnico",
+    "aprobar_presupuesto",
   ],
   // Todo lo operativo de admin (ve, crea, aprueba, conecta), pero sin poder
   // tocar a nadie que ya esté en el equipo — solo sumar gente nueva, y con
@@ -104,6 +107,7 @@ const FILAS_DE_MATRIZ: Array<{ capacidad: Capability; texto: string }> = [
   { capacidad: "administrar_conexiones", texto: "Actualizar datos y administrar conexiones" },
   { capacidad: "ver_cuentas", texto: "Ver Gestión → Cuentas conectadas" },
   { capacidad: "ver_plan_tecnico", texto: "Ver el plan técnico de un cambio (pasos y parámetros)" },
+  { capacidad: "aprobar_presupuesto", texto: "Aprobar los cambios de presupuesto que propone otra persona" },
 ];
 
 export function matrizDeRoles(): Array<{ texto: string; roles: Record<Role, boolean> }> {
@@ -139,6 +143,11 @@ export function rolesAsignables(actor: Actor): Role[] {
       return [];
   }
 }
+
+/** Cargos de los jefes: nadie, ni siquiera otro administrador, los modifica desde la app. */
+export const CARGOS_PROTEGIDOS = ["Director", "Director creativo"] as const;
+export const esCargoProtegido = (cargo: string | null | undefined): boolean =>
+  CARGOS_PROTEGIDOS.some((c) => c.toLowerCase() === (cargo ?? "").trim().toLowerCase());
 
 /**
  * Si puede modificar a alguien que YA está en el equipo (rol, estado,

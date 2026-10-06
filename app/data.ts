@@ -7,6 +7,7 @@
  */
 
 export type ViewKey =
+  | "decisiones"
   | "control"
   | "health"
   | "integrations"

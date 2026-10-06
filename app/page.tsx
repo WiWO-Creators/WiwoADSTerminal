@@ -50,7 +50,7 @@ export default async function Home({
     <WiwoDashboard
       signOutPath={signOutPath}
       initialSnapshot={initialSnapshot}
-      initialView={params.view === "integrations" ? "integrations" : "control"}
+      initialView={params.view === "integrations" ? "integrations" : session.actor.role === "client" ? "control" : "decisiones"}
     />
   );
 }

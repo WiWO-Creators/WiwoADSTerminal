@@ -24,7 +24,10 @@ import {
   type AccionSugerida,
   type ClienteParaSugerir,
   type Sugerencia,
+  sugerenciasDeContenido,
+  type EntradaDeContenido,
 } from "@/lib/sugerencias";
+import { metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
 
 export class ErrorDeSugerencias extends Error {
   status: number;
@@ -112,6 +115,7 @@ function accionDe(json: string | null): AccionSugerida | null {
   try {
     const dato = JSON.parse(json) as AccionSugerida;
     if (dato.tipo === "pausar" || dato.tipo === "revisar") return dato;
+    if (dato.tipo === "contenido" && Number.isFinite(dato.dias)) return dato;
     if (dato.tipo === "presupuesto" && Number.isFinite(dato.monto)) return dato;
   } catch {
     // Una acción ilegible se trata como "sin acción": se muestra, no se ejecuta.
@@ -279,7 +283,32 @@ export async function evaluarSugerencias(
     }
   }
 
+  // Contenido: campañas de Meta activas cuyo último anuncio es viejo. Una lectura por cuenta; si falla, no se sugiere nada.
+  const entradasDeContenido: EntradaDeContenido[] = [];
+  if (metaNativoConfigurado()) {
+    const porCuenta = new Map<string, Awaited<ReturnType<typeof ultimoAnuncioPorCampana>> | null>();
+    for (const c of clientes) {
+      for (const camp of actual.campaigns) {
+        if (camp.provider !== "meta" || !camp.campaignId || !camp.conActividad || !c.cuentas.has(camp.accountKey)) continue;
+        if (!["ACTIVE", "ENABLED"].includes((camp.status ?? "").toUpperCase())) continue;
+        if (!porCuenta.has(camp.accountId)) {
+          porCuenta.set(camp.accountId, await ultimoAnuncioPorCampana(camp.accountId).catch(() => null));
+        }
+        const fechas = porCuenta.get(camp.accountId);
+        entradasDeContenido.push({
+          cliente: { id: c.id, nombre: c.nombre },
+          provider: "meta",
+          accountId: camp.accountId,
+          campanaId: camp.campaignId,
+          campanaNombre: camp.name,
+          ultimoAnuncio: fechas?.get(camp.campaignId) ?? null,
+        });
+      }
+    }
+  }
+
   const candidatas = [
+    ...sugerenciasDeContenido(entradasDeContenido, ahora),
     ...generarSugerencias(
     clientes,
     // Solo plataformas donde el cambio se puede aplicar: LinkedIn se lee, pero no se escribe.
