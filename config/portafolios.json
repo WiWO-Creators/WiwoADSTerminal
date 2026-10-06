@@ -18,7 +18,8 @@
     },
     {
       "id": "colbun",
-      "nombre": "Colbún Energía",
+      "nombre": "Colbún Comunicaciones",
+      "_nota": "Colbún Comunicaciones lleva Meta y Google Ads. Colbún Marketing (LinkedIn) es otro cliente y se agrega cuando LinkedIn esté conectado.",
       "cuentas": [
         "423-204-0466",
         "2006250736667023"

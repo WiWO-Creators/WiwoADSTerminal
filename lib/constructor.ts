@@ -1,3 +1,7 @@
+import type { CompatibilidadBoost } from "@/lib/boost-compat";
+import { CTA_ETIQUETAS, esCta, type CallToAction } from "@/lib/cta";
+import { parsearPalabraClave } from "@/lib/palabras-clave";
+import type { DatosBusqueda, DiaDeSemana } from "@/lib/google-ads-nativo";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { ACTIVE_PLATFORMS, platformLabel } from "@/lib/plataformas";
 import type { Platform } from "@/lib/plataformas";
@@ -45,7 +49,7 @@ export type { Platform };
  */
 export const MARCADOR_PASO_ANTERIOR = "(del paso anterior)";
 
-export type Objective = "trafico" | "leads" | "ventas" | "alcance";
+export type Objective = "trafico" | "leads" | "ventas" | "alcance" | "interaccion";
 
 export const OBJECTIVES: Record<
   Objective,
@@ -96,7 +100,162 @@ export const OBJECTIVES: Record<
     meta: "OUTCOME_AWARENESS",
     sigla: "AE",
   },
+  interaccion: {
+    label: "Interacción (publicaciones y perfil)",
+    description:
+      "Prioriza mostrar el anuncio a quien tiene más probabilidad de reaccionar, comentar, guardar o visitar el perfil. Es el objetivo para promocionar redes y publicaciones.",
+    google: "maximize_clicks",
+    meta: "OUTCOME_ENGAGEMENT",
+    sigla: "AE",
+  },
 };
+
+/**
+ * Ajustes propios de una campaña de BÚSQUEDA de Google, con su estructura nativa (puja, redes, presencia, programación,
+ * grupo, recursos). Si está presente, la campaña se crea con la API de Google Ads en un solo paso atómico; si es `null`
+ * se usa la vía simple de siempre. Importes en unidades de la moneda de la cuenta.
+ */
+export type ConfigBusquedaGoogle = {
+  /** "auto": según el objetivo (conversiones si el cliente las mide; si no, clics). */
+  puja: "auto" | "clics" | "conversiones" | "valor_conversion" | "cpc_manual" | "cuota_impresiones";
+  cpcMaximo: number | null;
+  cpaObjetivo: number | null;
+  roasObjetivo: number | null;
+  mejorarCpc: boolean;
+  cuotaUbicacion: "TOP_OF_PAGE" | "ABSOLUTE_TOP_OF_PAGE" | "ANYWHERE_ON_PAGE";
+  cuotaPorcentaje: number;
+  redSocios: boolean;
+  redDisplay: boolean;
+  presencia: "presencia" | "presencia_o_interes";
+  programacion: Array<{ dias: DiaDeSemana[]; desde: number; hasta: number; ajuste: number | null }>;
+  inicio: string | null;
+  rotacion: "optimizar" | "indefinida";
+  plantillaSeguimiento: string;
+  sufijoUrl: string;
+  grupoNombre: string;
+  cpcGrupo: number | null;
+  enlaces: Array<{ texto: string; descripcion1: string; descripcion2: string; url: string }>;
+  destacados: string[];
+  fragmentoEncabezado: string;
+  fragmentoValores: string[];
+  llamadaPais: string;
+  llamadaTelefono: string;
+};
+
+export const CONFIG_BUSQUEDA_POR_DEFECTO: ConfigBusquedaGoogle = {
+  puja: "auto",
+  cpcMaximo: null,
+  cpaObjetivo: null,
+  roasObjetivo: null,
+  mejorarCpc: false,
+  cuotaUbicacion: "TOP_OF_PAGE",
+  cuotaPorcentaje: 50,
+  redSocios: true,
+  redDisplay: false,
+  presencia: "presencia_o_interes",
+  programacion: [],
+  inicio: null,
+  rotacion: "optimizar",
+  plantillaSeguimiento: "",
+  sufijoUrl: "",
+  grupoNombre: "",
+  cpcGrupo: null,
+  enlaces: [],
+  destacados: [],
+  fragmentoEncabezado: "",
+  fragmentoValores: [],
+  llamadaPais: "",
+  llamadaTelefono: "",
+};
+
+const DIAS_VALIDOS: DiaDeSemana[] = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
+const numeroOPositivo = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null);
+const textoCorto = (v: unknown, max: number): string => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const listaDeTextos = (v: unknown, max: number, tope: number): string[] =>
+  (Array.isArray(v) ? v : []).map((x) => textoCorto(x, max)).filter(Boolean).slice(0, tope);
+
+/** Limpia lo que llega del navegador o del asistente. `null` si no hay configuración. */
+export function normalizarBusquedaGoogle(raw: unknown): ConfigBusquedaGoogle | null {
+  if (!raw || typeof raw !== "object") return null;
+  const b = raw as Record<string, unknown>;
+  const d = CONFIG_BUSQUEDA_POR_DEFECTO;
+  const puja = (["auto", "clics", "conversiones", "valor_conversion", "cpc_manual", "cuota_impresiones"] as const).find((x) => x === b.puja) ?? d.puja;
+  const ubicacion = (["TOP_OF_PAGE", "ABSOLUTE_TOP_OF_PAGE", "ANYWHERE_ON_PAGE"] as const).find((x) => x === b.cuotaUbicacion) ?? d.cuotaUbicacion;
+  const fecha = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const programacion = (Array.isArray(b.programacion) ? b.programacion : []).slice(0, 14).flatMap((x) => {
+    if (!x || typeof x !== "object") return [];
+    const o = x as Record<string, unknown>;
+    const dias = (Array.isArray(o.dias) ? o.dias : []).filter((y): y is DiaDeSemana => DIAS_VALIDOS.includes(y as DiaDeSemana));
+    const desde = Number(o.desde);
+    const hasta = Number(o.hasta);
+    if (dias.length === 0 || !Number.isInteger(desde) || !Number.isInteger(hasta) || desde < 0 || hasta > 24 || hasta <= desde) return [];
+    const ajuste = typeof o.ajuste === "number" && o.ajuste >= 0.1 && o.ajuste <= 2 ? o.ajuste : null;
+    return [{ dias: [...new Set(dias)], desde, hasta, ajuste }];
+  });
+  const enlaces = (Array.isArray(b.enlaces) ? b.enlaces : []).slice(0, 6).flatMap((x) => {
+    if (!x || typeof x !== "object") return [];
+    const o = x as Record<string, unknown>;
+    const texto = textoCorto(o.texto, 25);
+    return texto ? [{ texto, descripcion1: textoCorto(o.descripcion1, 35), descripcion2: textoCorto(o.descripcion2, 35), url: textoCorto(o.url, 2000) }] : [];
+  });
+  return {
+    puja,
+    cpcMaximo: numeroOPositivo(b.cpcMaximo),
+    cpaObjetivo: numeroOPositivo(b.cpaObjetivo),
+    roasObjetivo: numeroOPositivo(b.roasObjetivo),
+    mejorarCpc: b.mejorarCpc === true,
+    cuotaUbicacion: ubicacion,
+    cuotaPorcentaje: typeof b.cuotaPorcentaje === "number" && b.cuotaPorcentaje > 0 && b.cuotaPorcentaje <= 100 ? b.cuotaPorcentaje : d.cuotaPorcentaje,
+    redSocios: b.redSocios !== false,
+    redDisplay: b.redDisplay === true,
+    presencia: b.presencia === "presencia" ? "presencia" : "presencia_o_interes",
+    programacion,
+    inicio: fecha(b.inicio),
+    rotacion: b.rotacion === "indefinida" ? "indefinida" : "optimizar",
+    plantillaSeguimiento: textoCorto(b.plantillaSeguimiento, 2000),
+    sufijoUrl: textoCorto(b.sufijoUrl, 1000),
+    grupoNombre: textoCorto(b.grupoNombre, 255),
+    cpcGrupo: numeroOPositivo(b.cpcGrupo),
+    enlaces,
+    destacados: listaDeTextos(b.destacados, 25, 10),
+    fragmentoEncabezado: textoCorto(b.fragmentoEncabezado, 50),
+    fragmentoValores: listaDeTextos(b.fragmentoValores, 25, 10),
+    llamadaPais: textoCorto(b.llamadaPais, 2).toUpperCase(),
+    llamadaTelefono: textoCorto(b.llamadaTelefono, 30),
+  };
+}
+
+/** Estrategias de puja del conjunto de anuncios de Meta, con los nombres que usa Ads Manager. */
+export const META_BID_STRATEGIES = {
+  LOWEST_COST_WITHOUT_CAP: { label: "Mayor volumen", detalle: "Meta gasta todo el presupuesto buscando los mejores resultados al menor costo.", pideImporte: false },
+  LOWEST_COST_WITH_BID_CAP: { label: "Límite de puja", detalle: "Meta no pujará más de este importe en cada subasta.", pideImporte: true },
+  COST_CAP: { label: "Costo por resultado objetivo", detalle: "Meta busca mantener el costo medio por resultado cerca de este importe.", pideImporte: true },
+  LOWEST_COST_WITH_MIN_ROAS: { label: "ROAS mínimo", detalle: "Meta busca un retorno mínimo del gasto publicitario (solo ventas con valor de compra).", pideImporte: true },
+} as const;
+export type MetaBidStrategy = keyof typeof META_BID_STRATEGIES;
+
+/** Ventana de atribución del conjunto de Meta (cuánto tiempo después de ver o hacer clic se cuenta un resultado). */
+export const META_ATTRIBUTION = {
+  default: { label: "Predeterminada de Meta (7 días tras el clic, 1 día tras la vista)", spec: null },
+  click_1d: { label: "1 día tras el clic", spec: [{ event_type: "CLICK_THROUGH", window_days: 1 }] },
+  click_7d: { label: "7 días tras el clic", spec: [{ event_type: "CLICK_THROUGH", window_days: 7 }] },
+  click_1d_view_1d: { label: "1 día tras el clic o la vista", spec: [{ event_type: "CLICK_THROUGH", window_days: 1 }, { event_type: "VIEW_THROUGH", window_days: 1 }] },
+} as const;
+export type MetaAttribution = keyof typeof META_ATTRIBUTION;
+
+/**
+ * Qué ventanas admite Meta según lo que optimiza el conjunto (verificado contra Meta: para tráfico solo acepta 1 día tras
+ * el clic). Con conversiones (leads, ventas) admite todas; con tráfico, interacción o alcance, solo la predeterminada o
+ * 1 día tras el clic.
+ */
+export function atribucionesAdmitidas(objetivo: Objective): MetaAttribution[] {
+  return objetivo === "leads" || objetivo === "ventas" ? (Object.keys(META_ATTRIBUTION) as MetaAttribution[]) : ["default", "click_1d"];
+}
+
+/** Objetivo que aplica a una plataforma: el propio de esa plataforma o, si no lo hay, el general del borrador. */
+export function objetivoDe(draft: Pick<CampaignDraft, "objective" | "objectiveByPlatform">, plataforma: Platform): Objective {
+  return draft.objectiveByPlatform?.[plataforma] ?? draft.objective;
+}
 
 /**
  * Categoría especial de Meta (`special_ad_categories`).
@@ -163,30 +322,10 @@ export type Gender = "todos" | "hombres" | "mujeres";
  * donaciones)— con los que corresponden a los objetivos que el sistema ya
  * maneja.
  */
-export type CallToAction =
-  | "LEARN_MORE"
-  | "SHOP_NOW"
-  | "SIGN_UP"
-  | "CONTACT_US"
-  | "DOWNLOAD"
-  | "SUBSCRIBE"
-  | "GET_QUOTE"
-  | "BOOK_NOW"
-  | "WHATSAPP_MESSAGE"
-  | "CALL_NOW";
-
-export const CALL_TO_ACTIONS: Record<CallToAction, string> = {
-  LEARN_MORE: "Más información",
-  SHOP_NOW: "Comprar ahora",
-  SIGN_UP: "Registrarse",
-  CONTACT_US: "Contáctanos",
-  DOWNLOAD: "Descargar",
-  SUBSCRIBE: "Suscribirse",
-  GET_QUOTE: "Cotizar",
-  BOOK_NOW: "Reservar",
-  WHATSAPP_MESSAGE: "Enviar WhatsApp",
-  CALL_NOW: "Llamar ahora",
-};
+// La lista completa de botones vive en `lib/cta.ts` (los más de 70 que acepta
+// Meta); acá se reexporta para no cambiar los imports del resto del código.
+export type { CallToAction };
+export const CALL_TO_ACTIONS: Record<CallToAction, string> = CTA_ETIQUETAS;
 
 /**
  * Ubicaciones de entrega. En Meta son redes dentro del mismo conjunto de
@@ -221,7 +360,7 @@ export const META_SURFACES: Record<
   reels: { label: "Reels", facebook: "facebook_reels", instagram: "reels" },
 };
 
-export type GoogleChannel = "search" | "display";
+export type GoogleChannel = "search" | "display" | "pmax";
 
 /**
  * Id de destino geográfico de Google Ads por país (columna "Criteria ID" de
@@ -484,6 +623,8 @@ export type SemillaDeCampana = {
   propuestaId?: string;
   name: string;
   objective: Objective;
+  /** Objetivo propio de una plataforma cuando no es el general. */
+  objectiveByPlatform?: Partial<Record<Platform, Objective>>;
   platforms: Platform[];
   /** Nota interna visible en "Detalles" — nunca se envía a ninguna plataforma. */
   details: string;
@@ -511,12 +652,43 @@ export type SemillaDeCampana = {
    * es agnóstico a eso.
    */
   dailyBudget?: number;
+  /** "total": `dailyBudget` trae el total del flight (no un monto por día) y `endDate` su término. */
+  budgetMode?: "diaria" | "total";
+  endDate?: string;
+  /** Monto propio de cada plataforma (en el mismo sentido que `dailyBudget`: por día o total del flight). */
+  budgetByPlatform?: Partial<Record<Platform, number>>;
   headlines?: string[];
   descriptions?: string[];
   keywords?: string[];
   metaMessage?: string;
   metaHeadline?: string;
   metaDescription?: string;
+  /**
+   * Impulsar un anuncio que ya está publicado: se reutiliza su publicación real
+   * (`boost_post`), así que conserva sus reacciones, comentarios y compartidos.
+   * `postId` es el `effective_object_story_id` que Meta entrega para todo
+   * anuncio (`{page_id}_{post_id}`), el formato que exige `boost_post`.
+   */
+  boost?: {
+    postId: string;
+    accountId: string;
+    /** Solo para la vista previa: la pieza real no se vuelve a subir. */
+    mediaUrl: string;
+    anuncioOrigen: string;
+  };
+  /**
+   * Una versión nueva de un anuncio que Meta no deja editar (porque usa una publicación existente): se
+   * precarga su texto, destino y pieza para armar un anuncio NUEVO en el mismo conjunto, con los cambios
+   * que se quieran. El anuncio original no se toca: se pausa a mano cuando el nuevo esté aprobado.
+   */
+  versionDeAnuncio?: {
+    /** URL pública de la pieza (puede caducar: se revisa en la vista previa). */
+    mediaUrl: string;
+    /** Botón actual del anuncio (`LEARN_MORE`, `VIEW_INSTAGRAM_PROFILE`…), si lo entrega Meta. */
+    cta: string | null;
+    /** Nombre del anuncio de origen, para la nota interna. */
+    anuncioOrigen: string;
+  };
 };
 
 /** Una región/estado/provincia o ciudad/comuna real, tal como la devuelve
@@ -539,6 +711,8 @@ export type LugarSegmentable = {
   lng?: number;
   radiusKm?: number;
   aproximado?: boolean;
+  /** El `key` real de Meta (`adgeolocation`): con él se segmenta por la región o ciudad de Meta, no por un círculo. */
+  metaKey?: string;
 };
 
 export type CampaignDraft = {
@@ -563,6 +737,13 @@ export type CampaignDraft = {
   /** Nota interna del equipo. No se envía a ninguna plataforma. */
   details: string;
   objective: Objective;
+  /**
+   * Objetivo propio de cada plataforma, cuando no es el mismo en todas (ej. Reconocimiento en Meta y Leads en Google).
+   * Lo que no esté aquí usa `objective`. Se lee siempre con `objetivoDe(draft, plataforma)`.
+   */
+  objectiveByPlatform: Partial<Record<Platform, Objective>>;
+  /** Ajustes nativos de una campaña de Búsqueda de Google (ver `ConfigBusquedaGoogle`). `null`: vía simple. */
+  googleBusqueda: ConfigBusquedaGoogle | null;
   /**
    * Objetivo real de Meta, cuando se quiere ser más preciso que el objetivo
    * de negocio de arriba (que ya trae uno mapeado por defecto en
@@ -608,6 +789,15 @@ export type CampaignDraft = {
    */
   pathDisplay1: string;
   pathDisplay2: string;
+  /**
+   * Google, Red de Display: lo que un anuncio de Display responsivo necesita además de títulos y
+   * descripciones. La imagen horizontal (1,91:1) es `mediaUrl`; la cuadrada (1:1) y el logo (opcional) van acá.
+   * Se crean con la API de Google Ads (Windsor no tiene una acción para esto).
+   */
+  displaySquareUrl: string;
+  displayLogoUrl: string;
+  displayLongHeadline: string;
+  displayBusinessName: string;
   /**
    * Google: palabras clave del grupo de anuncios. Sin esto una campaña de
    * Búsqueda no tiene qué disparar los anuncios — no es un campo opcional,
@@ -696,6 +886,18 @@ export type CampaignDraft = {
    * acá; sin eso, la segmentación por interés queda fuera de esta pantalla.
    */
   metaInterests: string[];
+  /** Estrategia de puja del conjunto de Meta (por defecto, mayor volumen). */
+  metaBidStrategy: MetaBidStrategy;
+  /** Importe de la puja, costo objetivo o ROAS mínimo según la estrategia (en unidades de la moneda; ROAS como número). */
+  metaBidAmount: number | null;
+  /** Límite de gasto de la campaña (Meta `spend_cap`), en unidades de la moneda. `null`: sin límite. */
+  metaSpendCap: number | null;
+  /** Ventana de atribución del conjunto. */
+  metaAttribution: MetaAttribution;
+  /** Audiencias personalizadas o similares de Meta a INCLUIR (ids reales, de la cuenta elegida). */
+  metaCustomAudiences: string[];
+  /** Audiencias de Meta a EXCLUIR (ids reales). */
+  metaExcludedAudiences: string[];
   /**
    * Países a segmentar, código ISO-3166-1 alfa-2 (`CL`, `PE`...), elegidos en
    * el mapa. Vacío: se usan los países que la cuenta elegida ya trae
@@ -812,6 +1014,8 @@ export type PlanStep = {
   params: Record<string, unknown>;
   /** true: informativo — Windsor no tiene una acción que reciba esto. */
   informativo?: boolean;
+  /** "nativa": se ejecuta con la API de la propia plataforma (Google Ads) y no con Windsor. */
+  via?: "nativa";
 };
 
 export type BuildResult = {
@@ -899,15 +1103,24 @@ export function recommendBudget(
   }
   const currency = todasLasCampanas.find((c) => c.currency)?.currency ?? null;
 
-  const conGasto = todasLasCampanas.filter((c) => c.conActividad);
-  const spendMicros = conGasto.reduce((sum, c) => sum + c.spendMicros, 0);
-  if (spendMicros > 0) {
-    const days = daysElapsed(snapshot.rangeStart, snapshot.rangeEnd);
-    const daily = spendMicros / 1_000_000 / Math.max(days, 1);
+  // Lo típico POR CAMPAÑA, no el gasto de toda la cuenta: una campaña nueva se parece a las que ya corren, no a
+  // la suma de todas. Mediana del gasto diario de cada campaña con gasto en el periodo.
+  const conGasto = todasLasCampanas.filter((c) => c.conActividad && c.spendMicros > 0);
+  if (conGasto.length > 0) {
+    const days = Math.max(daysElapsed(snapshot.rangeStart, snapshot.rangeEnd), 1);
+    const diarios = conGasto.map((c) => c.spendMicros / 1_000_000 / days).sort((a, b) => a - b);
+    const mitad = Math.floor(diarios.length / 2);
+    const mediana = diarios.length % 2 ? diarios[mitad] : (diarios[mitad - 1] + diarios[mitad]) / 2;
+    const rango =
+      diarios.length > 1
+        ? ` (de ${Math.round(diarios[0]).toLocaleString("es-CL")} a ${Math.round(diarios[diarios.length - 1]).toLocaleString("es-CL")} por día)`
+        : "";
     return {
-      suggested: Math.round(daily),
+      suggested: Math.max(1, Math.round(mediana)),
       currency,
-      basis: `Promedio diario de ${portfolio.name} en el mes: ${days} ${days === 1 ? "día" : "días"} de inversión real`,
+      basis: `Gasto diario típico por campaña de ${portfolio.name} en ${platformLabel(platform)}: mediana de ${conGasto.length} ${
+        conGasto.length === 1 ? "campaña" : "campañas"
+      } con gasto en el periodo${rango}`,
     };
   }
 
@@ -993,7 +1206,10 @@ function paisesEfectivos(
  * formato, pero Meta no puede descargarla, y descubrirlo recién al ejecutar
  * dejaría una campaña y un conjunto ya creados sin anuncio.
  */
-export function problemaDeUrlPublica(valor: string): string | null {
+export function problemaDeUrlPublica(
+  valor: string,
+  tipo?: "image" | "video",
+): string | null {
   const texto = valor.trim();
   if (!texto) {
     return "Falta la URL de la pieza: pega una dirección que empiece con https:// (o sube el archivo)";
@@ -1020,6 +1236,9 @@ export function problemaDeUrlPublica(valor: string): string | null {
   if (privado) {
     return `La pieza está en una dirección local (${host}): Meta no puede descargarla desde ahí. Usa una URL pública`;
   }
+  if (tipo === "image" && /\.hei[cf](\?|$)/i.test(url.pathname)) {
+    return "Esa imagen es .heic/.heif (el formato nativo de fotos de iPhone): Meta suele rechazarlo al crear el anuncio. Elige otra publicación o sube una versión en .jpg/.png";
+  }
   return null;
 }
 
@@ -1032,6 +1251,8 @@ export function problemaDeUrlPublica(valor: string): string | null {
 export function validateDraft(
   draft: CampaignDraft,
   cuentas: CuentaCliente[],
+  /** Ver `buildPlan`: `true` cuando el impulso dentro de algo existente está confirmado. */
+  boostEnExistente = false,
 ): Issue[] {
   const issues: Issue[] = [];
   const add = (field: string, message: string, blocking = true) =>
@@ -1128,42 +1349,45 @@ export function validateDraft(
 
   if (draft.platforms.includes("google")) {
     const titulos = draft.headlines.filter((t) => t.trim());
-    if (titulos.length < 3) {
-      add("headlines", "Google pide entre 3 y 15 títulos");
+    const esDisplay = draft.googleChannel === "display";
+    const esPmax = draft.googleChannel === "pmax";
+    if (esDisplay ? titulos.length < 1 || titulos.length > 5 : titulos.length < 3) {
+      add("headlines", esDisplay ? "Display pide entre 1 y 5 títulos cortos" : "Google pide entre 3 y 15 títulos");
     }
     if (titulos.some((t) => t.length > 30)) {
       add("headlines", "Cada título de Google admite hasta 30 caracteres");
     }
     const descripciones = draft.descriptions.filter((d) => d.trim());
-    if (descripciones.length < 2) {
-      add("descriptions", "Google pide entre 2 y 4 descripciones");
+    if (esDisplay ? descripciones.length < 1 || descripciones.length > 5 : esPmax ? descripciones.length < 2 || descripciones.length > 5 : descripciones.length < 2) {
+      add("descriptions", esDisplay ? "Display pide entre 1 y 5 descripciones" : esPmax ? "Performance Max pide entre 2 y 5 descripciones" : "Google pide entre 2 y 4 descripciones");
+    }
+    if (esPmax && descripciones.length > 0 && !descripciones.some((d) => d.length <= 60)) {
+      add("descriptions", "Performance Max necesita al menos una descripción de 60 caracteres o menos");
     }
     if (descripciones.some((d) => d.length > 90)) {
       add("descriptions", "Cada descripción admite hasta 90 caracteres");
     }
-    if (draft.mediaType !== "none") {
+    if (esDisplay || esPmax) {
+      // Display responsivo y Performance Max (API de Google Ads): textos y las imágenes obligatorias.
+      if (!draft.displayLongHeadline.trim()) add("displayLongHeadline", "Display necesita un título largo (hasta 90 caracteres)");
+      if (!draft.displayBusinessName.trim()) add("displayBusinessName", "Display necesita el nombre del negocio (hasta 25 caracteres)");
+      if (draft.mediaType !== "image" || !draft.mediaUrl.trim()) {
+        add("mediaUrl", "Display necesita una imagen horizontal (1,91:1, por ejemplo 1200×628)");
+      }
+      if (!draft.displaySquareUrl.trim()) add("displaySquareUrl", "Display necesita también una imagen cuadrada (1:1, por ejemplo 1200×1200)");
+      if (!/^https?:\/\//i.test(draft.landingUrl.trim())) add("landingUrl", "Display y Performance Max necesitan la URL de destino completa (https://…)");
+      if (esPmax && !draft.displayLogoUrl.trim()) add("displayLogoUrl", "Performance Max necesita el logo (cuadrado 1:1): Google lo exige junto con el nombre del negocio");
+      if (esPmax && draft.budgetMode === "total" && !draft.endDate) add("endDate", "Performance Max con presupuesto total necesita fecha de término");
+    } else if (draft.mediaType !== "none") {
       add(
         "mediaUrl",
-        "Google Ads no crea anuncios con imagen por esta vía: la pieza solo se usará en Meta",
+        "El anuncio de búsqueda de Google no lleva imagen: la pieza se usa solo en Meta. Para un anuncio de Google con imagen, elige «Red de Display» en Ubicaciones de Google.",
         false,
       );
     }
-    // Verificado contra `list_actions` real de Windsor para `google_ads`
-    // (2026-09-23): la única acción que crea un anuncio es
-    // `create_responsive_search_ad` — texto puro, para un grupo de anuncios
-    // de Búsqueda. No existe ninguna acción de escritura para un anuncio de
-    // Display con imagen (`create_ad_asset` solo crea extensiones: sitelink,
-    // callout, snippet estructurado, llamada — no una pieza creativa). Elegir
-    // "Red de Display" igual crearía la campaña, pero el anuncio de texto que
-    // este sistema arma después fallaría contra la API real de Google (un RSA
-    // no es válido en un grupo de Display). Se bloquea acá, antes de publicar
-    // algo que se rompe a mitad de camino.
-    if (draft.googleChannel === "display") {
-      add(
-        "googleChannel",
-        "Google Ads en Red de Display no se puede publicar por esta vía: Windsor no tiene ninguna acción para crear un anuncio de Display con imagen. Usa Red de búsqueda, o crea la campaña de Display directo en Google Ads.",
-      );
-    }
+    // Display con imagen: Windsor no tiene acción para crearlo (verificado con `list_actions` de `google_ads`,
+    // 2026-09-23 y 2026-10-05), así que el anuncio se crea con la API de Google Ads (`crearAnuncioDisplay`).
+    // La campaña y el grupo sí los crea Windsor. Un anuncio de búsqueda no sirve en un grupo de Display.
     // Solo en Búsqueda: en Display las palabras clave no son la segmentación
     // principal, y exigirlas ahí bloquearía un caso válido sin necesidad.
     if (draft.googleChannel === "search" && draft.keywords.filter((k) => k.trim()).length === 0) {
@@ -1209,7 +1433,7 @@ export function validateDraft(
     // (lat/lng/radio, ver `lib/geocoding.ts`) — si eso falló, avisa en vez de
     // dejar que la persona crea que quedó cubierto y no.
     const sinGeocodificar = draft.targetPlaces.filter(
-      (lugar) => lugar.lat === undefined || lugar.lng === undefined || !lugar.radiusKm,
+      (lugar) => !lugar.metaKey && (lugar.lat === undefined || lugar.lng === undefined || !lugar.radiusKm),
     );
     if (sinGeocodificar.length > 0) {
       add(
@@ -1219,7 +1443,7 @@ export function validateDraft(
       );
     }
     const aproximados = draft.targetPlaces.filter(
-      (lugar) => lugar.aproximado && lugar.lat !== undefined,
+      (lugar) => !lugar.metaKey && lugar.aproximado && lugar.lat !== undefined,
     );
     if (aproximados.length > 0) {
       add(
@@ -1241,7 +1465,7 @@ export function validateDraft(
     // país — cuenta acá para no pedir un país de más cuando `paisesEfectivos`
     // ya lo dejó vacío a propósito por haber una segmentación más fina.
     const hayLugaresGeocodificados = draft.targetPlaces.some(
-      (lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm,
+      (lugar) => lugar.metaKey || (lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm),
     );
     if (paisesMeta.length === 0 && !draft.geoRadius && !hayLugaresGeocodificados) {
       add(
@@ -1254,8 +1478,26 @@ export function validateDraft(
     // plan válido (por ejemplo, una publicación real sin descripción).
     const boosteandoValidacion =
       Boolean(draft.boostPostId) &&
-      !draft.existingCampaign &&
-      !draft.existingAdset;
+      ((!draft.existingCampaign && !draft.existingAdset) || boostEnExistente);
+    if (boosteandoValidacion && ["leads", "ventas", "trafico"].includes(objetivoDe(draft, "meta"))) {
+      add(
+        "objective",
+        `Impulsar una publicación crea una campaña de INTERACCIÓN en Meta (lo exige Meta), no de ${OBJECTIVES[objetivoDe(draft, "meta")].label.toLowerCase()}: no va a captar ${objetivoDe(draft, "meta") === "leads" ? "leads" : objetivoDe(draft, "meta") === "ventas" ? "ventas" : "visitas al sitio"}. Para eso, quita la publicación y arma un anuncio normal que lleve a la landing.`,
+        false,
+      );
+    }
+    if (!boosteandoValidacion) {
+      const estrategia = META_BID_STRATEGIES[draft.metaBidStrategy];
+      if (estrategia.pideImporte && !draft.metaBidAmount) {
+        add("metaBidAmount", `Meta: «${estrategia.label}» necesita un importe (sin él, Meta rechaza el conjunto).`);
+      }
+      if (!atribucionesAdmitidas(objetivoDe(draft, "meta")).includes(draft.metaAttribution)) {
+        add("metaAttribution", `Meta: con el objetivo «${OBJECTIVES[objetivoDe(draft, "meta")].label}» solo admite la ventana predeterminada o «1 día tras el clic». Elige una de esas.`);
+      }
+      if (draft.metaBidStrategy === "LOWEST_COST_WITH_MIN_ROAS" && objetivoDe(draft, "meta") !== "ventas") {
+        add("metaBidStrategy", "Meta: el ROAS mínimo solo existe para campañas de ventas.");
+      }
+    }
     if (!boosteandoValidacion && !draft.message.trim()) {
       add("message", "Meta necesita el texto principal del anuncio");
     }
@@ -1263,13 +1505,32 @@ export function validateDraft(
       add("mediaUrl", "Meta necesita una imagen o un video");
     } else if (!boosteandoValidacion) {
       // Windsor no recibe archivos: va a buscar la pieza a una URL pública.
-      const problema = problemaDeUrlPublica(draft.mediaUrl);
+      const problema = problemaDeUrlPublica(draft.mediaUrl, draft.mediaType === "image" ? "image" : "video");
       if (problema) add("mediaUrl", problema);
     }
-    if (draft.budgetMode === "total" && !draft.endDate) {
+  }
+  if (
+    draft.budgetMode === "total" &&
+    draft.platforms.length > 1 &&
+    draft.dailyBudget !== null &&
+    draft.platforms.some((p) => draft.budgetByPlatform[p] === undefined)
+  ) {
+    add(
+      "dailyBudget",
+      `El mismo total (${draft.dailyBudget.toLocaleString("es-CL")}) se aplica a CADA plataforma: en conjunto se gastaría ${(draft.dailyBudget * draft.platforms.length).toLocaleString("es-CL")}. Si ese monto es para todas, usa «presupuesto distinto por plataforma» y reparte.`,
+      false,
+    );
+  }
+  if (draft.budgetMode === "total" && draft.platforms.length > 0) {
+    if (!draft.endDate) {
+      add("endDate", "El presupuesto total exige una fecha de término: es lo que permite repartirlo en días");
+    } else if (diasHastaFin(draft.endDate) < 1) {
+      add("endDate", "La fecha de término ya pasó");
+    } else if (draft.platforms.includes("google")) {
       add(
-        "endDate",
-        "El presupuesto total de Meta exige una fecha de término",
+        "dailyBudget",
+        `Google, por esta vía, solo crea presupuesto diario: el total se reparte en ${diasHastaFin(draft.endDate)} días hasta el ${draft.endDate} (el tope exacto no se puede fijar).`,
+        false,
       );
     }
   }
@@ -1290,10 +1551,40 @@ export function buildPlan(
   cuentas: CuentaCliente[],
   snapshot: PerformanceSnapshot,
   excluirCampanasDePresupuesto: ReadonlySet<string> = new Set(),
+  /**
+   * Si se puede impulsar la publicación dentro de la campaña o el conjunto que
+   * ya existe. Lo calcula el SERVIDOR con datos reales de la plataforma
+   * (`boost-compat.ts`); sin esto, adjuntar a algo existente nunca impulsa.
+   */
+  compatBoost: CompatibilidadBoost | null = null,
+  opciones: {
+    /** El cliente no mide conversiones (p. ej. sin Tag Manager): «Maximizar conversiones» no tendría con qué optimizar. */
+    sinConversionesMedidas?: boolean;
+  } = {},
 ): BuildResult {
-  const issues = validateDraft(draft, cuentas);
+  const boostEnExistente = Boolean(
+    draft.boostPostId &&
+      draft.existingCampaign?.platform === "meta" &&
+      compatBoost &&
+      (draft.existingAdset ? compatBoost.conjunto : compatBoost.campana),
+  );
+  const issues = validateDraft(draft, cuentas, boostEnExistente);
   const steps: PlanStep[] = [];
-  const objective = OBJECTIVES[draft.objective];
+  const objective = OBJECTIVES[objetivoDe(draft, "google")];
+  const objetivoMeta = objetivoDe(draft, "meta");
+  // Maximizar conversiones necesita conversiones medidas: sin ellas Google no tiene con qué optimizar y rinde mal.
+  // Si el cliente no las mide, se parte con «Maximizar clics» (`target_spend`) y se avisa.
+  const googleSinConversiones = objective.google === "maximize_conversions" && opciones.sinConversionesMedidas === true;
+  const estrategiaGoogle = objective.google === "maximize_conversions" && !googleSinConversiones ? "maximize_conversions" : "target_spend";
+  // Con la Búsqueda nativa la puja se elige a propósito: ese aviso propio (más abajo) reemplaza a este.
+  if (draft.platforms.includes("google") && googleSinConversiones && !(draft.googleChannel === "search" && draft.googleBusqueda)) {
+    issues.push({
+      field: "bidding",
+      message:
+        "Este cliente no tiene medición de conversiones (sin Tag Manager): la campaña de Google parte con «Maximizar clics» en vez de «Maximizar conversiones», que sin conversiones no tendría con qué optimizar. Instala la medición y cámbiala después.",
+      blocking: false,
+    });
+  }
   // Cada plataforma resuelve su propio monto: el suyo si se definió aparte,
   // si no el compartido. Así elegir $10.000 solo para Meta no toca lo que
   // Google va a usar.
@@ -1311,7 +1602,120 @@ export function buildPlan(
     !enCampanaExistente && draft.activarConjuntoYAnuncio ? "enabled" : "paused";
   const etiquetaEstadoGoogle = statusHijoGoogle === "enabled" ? "activo" : "pausado";
 
-  if (draft.platforms.includes("google")) {
+  if (draft.platforms.includes("google") && draft.googleChannel === "pmax") {
+    // Performance Max: Windsor no lo crea. Un solo paso con la API de Google Ads arma todo de forma atómica
+    // (presupuesto, campaña, ubicación, textos, imágenes y grupo de recursos), pausado.
+    const dias = draft.budgetMode === "total" && draft.endDate ? Math.max(1, diasHastaFin(draft.endDate)) : 1;
+    const cuentaPmax = cuentaElegida(draft, cuentas, "google");
+    steps.push({
+      platform: "google",
+      action: "ads:create_pmax",
+      via: "nativa",
+      label: cuentaPmax ? `Crear campaña de Performance Max en ${cuentaPmax.name} (pausada)` : "Crear campaña de Performance Max (pausada)",
+      params: {
+        name: nombreCompuesto(objective.sigla, "google", draft.name),
+        daily_budget_micros: Math.max(1, Math.round(presupuestoDe("google") / dias)) * 1_000_000,
+        final_url: draft.landingUrl.trim(),
+        headlines: draft.headlines.filter((t) => t.trim()),
+        long_headlines: [draft.displayLongHeadline.trim()].filter(Boolean),
+        descriptions: draft.descriptions.filter((d) => d.trim()),
+        business_name: draft.displayBusinessName.trim(),
+        landscape_image_url: draft.mediaUrl.trim(),
+        square_image_url: draft.displaySquareUrl.trim(),
+        logo_url: draft.displayLogoUrl.trim(),
+        locations: paisesEfectivos(draft, cuentaPmax)
+          .filter((p) => GOOGLE_GEO_TARGET_IDS[p])
+          .map((p) => GOOGLE_GEO_TARGET_IDS[p]),
+        excluded_locations: draft.excludedCountries.filter((p) => GOOGLE_GEO_TARGET_IDS[p]).map((p) => GOOGLE_GEO_TARGET_IDS[p]),
+        ...(draft.budgetMode === "total" && draft.endDate ? { end_date: draft.endDate } : {}),
+        status: "paused",
+      },
+    });
+    if (googleSinConversiones) {
+      issues.push({
+        field: "bidding",
+        message:
+          "Performance Max solo optimiza por conversiones, y este cliente no las mide: sin medición rinde mal. Instala Tag Manager y define las conversiones antes de activarla.",
+        blocking: false,
+      });
+    }
+  } else if (draft.platforms.includes("google") && draft.googleChannel === "search" && draft.googleBusqueda && !enCampanaExistente) {
+    // Búsqueda con la estructura propia de Google: un solo paso con la API de Google Ads (atómico, pausado).
+    const cfg = draft.googleBusqueda;
+    const cuentaBusqueda = cuentaElegida(draft, cuentas, "google");
+    const dias = draft.budgetMode === "total" && draft.endDate ? Math.max(1, diasHastaFin(draft.endDate)) : 1;
+    const micros = (valor: number | null): number | null => (valor ? Math.round(valor * 1_000_000) : null);
+    const paises = paisesEfectivos(draft, cuentaBusqueda);
+    const IDIOMAS: Record<string, string> = { es: "1003", en: "1000", pt: "1014" };
+    // «Automática»: conversiones si el objetivo lo pide y el cliente las mide; si no, clics.
+    const pujaElegida = cfg.puja === "auto" ? (estrategiaGoogle === "maximize_conversions" ? "conversiones" : "clics") : cfg.puja;
+    const puja: DatosBusqueda["puja"] =
+      pujaElegida === "clics"
+        ? { tipo: "clics", cpcMaximoMicros: micros(cfg.cpcMaximo) }
+        : pujaElegida === "conversiones"
+          ? { tipo: "conversiones", cpaObjetivoMicros: micros(cfg.cpaObjetivo) }
+          : pujaElegida === "valor_conversion"
+            ? { tipo: "valor_conversion", roasObjetivo: cfg.roasObjetivo }
+            : pujaElegida === "cpc_manual"
+              ? { tipo: "cpc_manual", mejorarCpc: cfg.mejorarCpc }
+              : { tipo: "cuota_impresiones", ubicacion: cfg.cuotaUbicacion, porcentaje: cfg.cuotaPorcentaje, cpcMaximoMicros: micros(cfg.cpcMaximo) ?? 0 };
+    const datos: DatosBusqueda = {
+      nombre: nombreCompuesto(objective.sigla, "google", draft.name),
+      presupuestoDiarioMicros: Math.max(1, Math.round(presupuestoDe("google") / dias)) * 1_000_000,
+      puja,
+      redes: { socios: cfg.redSocios, display: cfg.redDisplay },
+      presencia: cfg.presencia,
+      ubicaciones: [
+        ...paises.filter((p) => GOOGLE_GEO_TARGET_IDS[p]).map((p) => GOOGLE_GEO_TARGET_IDS[p]),
+        ...draft.targetPlaces.filter((l) => /^\d+$/.test(l.id)).map((l) => l.id),
+      ],
+      excluidas: draft.excludedCountries.filter((p) => GOOGLE_GEO_TARGET_IDS[p]).map((p) => GOOGLE_GEO_TARGET_IDS[p]),
+      proximidad: draft.geoRadius ? { lat: draft.geoRadius.lat, lng: draft.geoRadius.lng, radioKm: draft.geoRadius.radiusKm } : null,
+      idiomas: draft.targetLanguages.map((l) => IDIOMAS[l]).filter(Boolean),
+      programacion: cfg.programacion,
+      inicio: cfg.inicio,
+      fin: draft.endDate,
+      rotacion: cfg.rotacion,
+      plantillaSeguimiento: cfg.plantillaSeguimiento,
+      sufijoUrl: cfg.sufijoUrl,
+      grupo: { nombre: cfg.grupoNombre, cpcMicros: micros(cfg.cpcGrupo) },
+      palabras: draft.keywords.map((l) => l.trim()).filter(Boolean).map(parsearPalabraClave).map((k) => ({ texto: k.text, tipo: k.match_type })),
+      negativas: draft.negativeKeywords.map((l) => l.trim()).filter(Boolean).map(parsearPalabraClave).map((k) => ({ texto: k.text, tipo: k.match_type })),
+      anuncio: {
+        urlFinal: draft.landingUrl.trim(),
+        titulares: draft.headlines.filter((t) => t.trim()),
+        descripciones: draft.descriptions.filter((x) => x.trim()),
+        path1: draft.pathDisplay1.trim(),
+        path2: draft.pathDisplay2.trim(),
+      },
+      enlaces: cfg.enlaces,
+      destacados: cfg.destacados,
+      fragmento: cfg.fragmentoEncabezado && cfg.fragmentoValores.length > 0 ? { encabezado: cfg.fragmentoEncabezado, valores: cfg.fragmentoValores } : null,
+      llamada: cfg.llamadaPais && cfg.llamadaTelefono ? { pais: cfg.llamadaPais, telefono: cfg.llamadaTelefono } : null,
+      activarHijos: statusHijoGoogle === "enabled",
+    };
+    steps.push({
+      platform: "google",
+      action: "ads:create_search_campaign",
+      via: "nativa",
+      label: cuentaBusqueda ? `Crear campaña de Búsqueda en ${cuentaBusqueda.name} (pausada)` : "Crear campaña de Búsqueda (pausada)",
+      params: { datos },
+    });
+    if (cfg.puja === "auto" && googleSinConversiones) {
+      issues.push({
+        field: "bidding",
+        message: "Este cliente no tiene medición de conversiones: la campaña de Google parte con «Maximizar clics» en vez de «Maximizar conversiones». Instala la medición y cámbiala después.",
+        blocking: false,
+      });
+    }
+    if ((cfg.puja === "conversiones" || cfg.puja === "valor_conversion") && opciones.sinConversionesMedidas === true) {
+      issues.push({
+        field: "bidding",
+        message: "Este cliente no tiene medición de conversiones: esta puja necesita conversiones para optimizar. Instala la medición, o usa «Maximizar clics».",
+        blocking: false,
+      });
+    }
+  } else if (draft.platforms.includes("google")) {
     const cuenta = cuentaElegida(draft, cuentas, "google");
 
     if (!enCampanaExistente) {
@@ -1327,12 +1731,19 @@ export function buildPlan(
           // una cuenta que también maneja otra agencia.
           name: nombreCompuesto(objective.sigla, "google", draft.name),
           // Google trabaja en micros: 1.000.000 = una unidad de la moneda.
-          budget_amount_micros: Math.round(presupuestoDe("google") * 1_000_000),
+          // Siempre en unidades enteras de la moneda: Google rechaza un monto que no sea múltiplo de su unidad mínima
+          // ("A money amount was not a multiple of a minimum unit"), y un total repartido en días rara vez da entero.
+          budget_amount_micros:
+            Math.max(
+              1,
+              Math.round(
+                draft.budgetMode === "total" && draft.endDate
+                  ? presupuestoDe("google") / Math.max(1, diasHastaFin(draft.endDate))
+                  : presupuestoDe("google"),
+              ),
+            ) * 1_000_000,
           channel_type: draft.googleChannel,
-          bidding_strategy:
-            objective.google === "maximize_conversions"
-              ? "maximize_conversions"
-              : "target_spend",
+          bidding_strategy: estrategiaGoogle,
           status: "paused",
         },
       });
@@ -1355,7 +1766,26 @@ export function buildPlan(
       });
     }
 
-    steps.push({
+    if (draft.googleChannel === "display") {
+      steps.push({
+        platform: "google",
+        action: "ads:create_display_ad",
+        via: "nativa",
+        label: `Crear anuncio de Display responsivo con imagen (${etiquetaEstadoGoogle})`,
+        params: {
+          ad_group_id: enConjuntoExistente?.adsetId ?? MARCADOR_PASO_ANTERIOR,
+          headlines: draft.headlines.filter((t) => t.trim()),
+          long_headline: draft.displayLongHeadline.trim(),
+          descriptions: draft.descriptions.filter((d) => d.trim()),
+          business_name: draft.displayBusinessName.trim(),
+          final_url: draft.landingUrl.trim(),
+          landscape_image_url: draft.mediaUrl.trim(),
+          square_image_url: draft.displaySquareUrl.trim(),
+          ...(draft.displayLogoUrl.trim() ? { logo_url: draft.displayLogoUrl.trim() } : {}),
+          status: "paused",
+        },
+      });
+    } else steps.push({
       platform: "google",
       action: "create_responsive_search_ad",
       label: enConjuntoExistente
@@ -1382,7 +1812,7 @@ export function buildPlan(
       .map((linea) => linea.trim())
       .filter(Boolean)
       .map(parsearPalabraClave);
-    if (palabrasClave.length > 0) {
+    if (palabrasClave.length > 0 && draft.googleChannel === "search") {
       steps.push({
         platform: "google",
         action: "push_keywords",
@@ -1421,7 +1851,7 @@ export function buildPlan(
     if (
       draft.cpcCeiling !== null &&
       draft.cpcCeiling > 0 &&
-      objective.google !== "maximize_conversions"
+      estrategiaGoogle !== "maximize_conversions"
     ) {
       steps.push({
         platform: "google",
@@ -1514,8 +1944,29 @@ export function buildPlan(
   // interacción que `boost_post` exige. Adjuntando a algo que ya existe no
   // hay forma de confirmar ese objetivo sin arriesgarse a que Meta rechace
   // el boost — ahí se arma un anuncio nuevo con la imagen, como antes.
+  // Salvo que el servidor haya confirmado, con datos reales, que la campaña o el
+  // conjunto de destino admiten impulsar (ver `boost-compat.ts`): entonces sí.
   const boosteando =
-    Boolean(draft.boostPostId) && !enCampanaMetaExistente && !enConjuntoMetaExistente;
+    Boolean(draft.boostPostId) &&
+    ((!enCampanaMetaExistente && !enConjuntoMetaExistente) || boostEnExistente);
+  // Adjuntar una publicación a impulsar en algo que NO lo admite no puede caer en
+  // crear un anuncio distinto en silencio (perdería las reacciones y comentarios
+  // que son el punto de impulsar): se bloquea con el motivo real de Meta.
+  const boostBloqueado = Boolean(
+    draft.boostPostId &&
+      (enCampanaMetaExistente || enConjuntoMetaExistente) &&
+      !boostEnExistente,
+  );
+  if (boostBloqueado) {
+    issues.push({
+      field: "boostPostId",
+      message: `No se puede impulsar esta publicación ahí: ${
+        compatBoost?.motivo ??
+        "no se pudo confirmar con la plataforma que esa campaña admita impulsar publicaciones"
+      }`,
+      blocking: true,
+    });
+  }
   // Mismo criterio que statusHijoGoogle: solo activo de entrada cuando la
   // campaña de Meta es 100% nueva en este plan — la campaña pausada es el
   // freno, nunca el conjunto o el anuncio adjuntados a algo que ya existe.
@@ -1542,13 +1993,15 @@ export function buildPlan(
           ? `Crear campaña en ${cuenta.name} (pausada)`
           : "Crear campaña (pausada)",
         params: {
-          name: nombreCompuesto(objective.sigla, "meta", draft.name),
+          // Impulsar una publicación crea una campaña de INTERACCIÓN (lo exige Meta): la sigla del nombre debe decir
+          // lo mismo, porque los reportes clasifican el objetivo por la sigla. Antes quedaba «[LDS]» sobre una de interacción.
+          name: nombreCompuesto(boosteando ? "AE" : OBJECTIVES[objetivoMeta].sigla, "meta", draft.name),
           // Boostear exige una campaña de interacción — ni el objetivo de
           // negocio ni el override de acá aplican, igual que en Meta Ads
           // Manager al usar "Impulsar publicación".
           objective: boosteando
             ? "OUTCOME_ENGAGEMENT"
-            : (draft.metaObjective ?? objective.meta),
+            : (draft.metaObjective ?? OBJECTIVES[objetivoMeta].meta),
           special_ad_categories: categoria ? [categoria] : [],
           // Meta trabaja en la unidad menor: 5000 = 50,00.
           ...(conCBO
@@ -1561,13 +2014,26 @@ export function buildPlan(
                 // Ads Manager — no pide bid_amount, a diferencia de "con
                 // límite de puja" o "costo objetivo", que sí lo exigen y que
                 // nadie puede inventar sin conocer la cuenta.
-                bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+                bid_strategy: boosteando ? "LOWEST_COST_WITHOUT_CAP" : draft.metaBidStrategy,
               }
             : // Sin presupuesto de campaña, Windsor avisa que algunas cuentas
               // exigen declarar esto explícito: que el gasto NO se comparte
               // entre conjuntos, porque cada uno trae el suyo propio.
               { is_adset_budget_sharing_enabled: false }),
           status: "paused",
+        },
+      });
+    }
+
+    // Límite de gasto de la campaña: `create_campaign` no lo admite, `update_campaign` sí (`spend_cap`, unidad menor).
+    if (!enCampanaMetaExistente && !boosteando && draft.metaSpendCap) {
+      steps.push({
+        platform: "meta",
+        action: "update_campaign",
+        label: "Definir el límite de gasto de la campaña",
+        params: {
+          campaign_id: MARCADOR_PASO_ANTERIOR,
+          spend_cap: Math.round(draft.metaSpendCap * unidadesMenoresMeta(cuenta?.currency)),
         },
       });
     }
@@ -1595,7 +2061,7 @@ export function buildPlan(
           ]
         : []),
       ...draft.targetPlaces
-        .filter((lugar) => lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm)
+        .filter((lugar) => !lugar.metaKey && lugar.lat !== undefined && lugar.lng !== undefined && lugar.radiusKm)
         .map((lugar) => ({
           latitude: lugar.lat!,
           longitude: lugar.lng!,
@@ -1604,6 +2070,11 @@ export function buildPlan(
         })),
     ];
     if (circulos.length > 0) geoLocations.custom_locations = circulos;
+    // Lugares con key real de Meta: la región o la ciudad de Meta tal cual (más precisa que un círculo).
+    const regionesMeta = draft.targetPlaces.filter((l) => l.metaKey && l.tier === "region").map((l) => ({ key: l.metaKey! }));
+    const ciudadesMeta = draft.targetPlaces.filter((l) => l.metaKey && l.tier === "city").map((l) => ({ key: l.metaKey! }));
+    if (regionesMeta.length > 0) geoLocations.regions = regionesMeta;
+    if (ciudadesMeta.length > 0) geoLocations.cities = ciudadesMeta;
     const targeting: Record<string, unknown> = {
       geo_locations: geoLocations,
       age_min: draft.ageMin,
@@ -1648,6 +2119,12 @@ export function buildPlan(
         { interests: draft.metaInterests.map((id) => ({ id })) },
       ];
     }
+    if (draft.metaCustomAudiences.length > 0) {
+      targeting.custom_audiences = draft.metaCustomAudiences.map((id) => ({ id }));
+    }
+    if (draft.metaExcludedAudiences.length > 0) {
+      targeting.excluded_custom_audiences = draft.metaExcludedAudiences.map((id) => ({ id }));
+    }
 
     const aMensajes = draft.conversionLocation === "mensajes";
     // Meta exige un `custom_event_type` por objetivo, no un "conversión"
@@ -1656,7 +2133,7 @@ export function buildPlan(
     // desde antes de esta corrección, cayendo en el mismo OFFSITE_CONVERSIONS
     // que leads y ventas — así que pasa a REACH, que no exige píxel.
     const eventoDeConversion: "LEAD" | "PURCHASE" | null =
-      draft.objective === "leads" ? "LEAD" : draft.objective === "ventas" ? "PURCHASE" : null;
+      objetivoMeta === "leads" ? "LEAD" : objetivoMeta === "ventas" ? "PURCHASE" : null;
     // OFFSITE_CONVERSIONS exige `promoted_object` (pixel_id +
     // custom_event_type): verificado contra `create_adset` real en Windsor
     // ("some optimization goals require promoted_object ... for
@@ -1683,14 +2160,14 @@ export function buildPlan(
     if (faltaPixel) {
       issues.push({
         field: "accountByPlatform",
-        message: `Meta: para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"} hace falta el píxel de esta cuenta de Meta (configúralo en la ficha del cliente), o cambia el destino de conversión a Mensajes.`,
+        message: `Meta: para optimizar a ${objetivoMeta === "leads" ? "leads" : "ventas"} hace falta el píxel de esta cuenta de Meta (configúralo en la ficha del cliente), o cambia el destino de conversión a Mensajes.`,
         blocking: true,
       });
     }
     if (pixelAmbiguo) {
       issues.push({
         field: "metaPixelId",
-        message: `Meta: esta cuenta tiene ${pixelesDeLaCuenta.length} píxeles configurados (${pixelesDeLaCuenta.map((p) => p.label ?? p.pixelId).join(", ")}) — elige cuál usar para optimizar a ${draft.objective === "leads" ? "leads" : "ventas"}.`,
+        message: `Meta: esta cuenta tiene ${pixelesDeLaCuenta.length} píxeles configurados (${pixelesDeLaCuenta.map((p) => p.label ?? p.pixelId).join(", ")}) — elige cuál usar para optimizar a ${objetivoMeta === "leads" ? "leads" : "ventas"}.`,
         blocking: true,
       });
     }
@@ -1708,7 +2185,7 @@ export function buildPlan(
             : {}),
           optimization_goal: boosteando
             ? "POST_ENGAGEMENT"
-            : aMensajes && draft.objective === "leads"
+            : aMensajes && objetivoMeta === "leads"
               ? // Verificado en vivo contra Colbún (2026-09-24): "CONVERSATIONS"
                 // lo rechaza Meta acá con "el objetivo de rendimiento no está
                 // disponible" (code 100, subcode 2490408), a pesar de que la
@@ -1719,11 +2196,13 @@ export function buildPlan(
                 "LEAD_GENERATION"
               : aMensajes
                 ? "CONVERSATIONS"
-                : draft.objective === "trafico"
+                : objetivoMeta === "trafico"
                 ? "LINK_CLICKS"
-                : draft.objective === "alcance"
+                : objetivoMeta === "alcance"
                   ? "REACH"
-                  : "OFFSITE_CONVERSIONS",
+                  : objetivoMeta === "interaccion"
+                    ? "POST_ENGAGEMENT"
+                    : "OFFSITE_CONVERSIONS",
           ...(eventoDeConversion !== null && !boosteando && !aMensajes && pixelElegido
             ? {
                 promoted_object: {
@@ -1733,6 +2212,23 @@ export function buildPlan(
               }
             : {}),
           billing_event: "IMPRESSIONS",
+          // Estrategia de puja y control de costo. Con presupuesto de campaña la estrategia vive en la campaña; el
+          // importe (límite de puja, costo objetivo o ROAS) siempre va en el conjunto.
+          ...(!boosteando && !conCBO ? { bid_strategy: draft.metaBidStrategy } : {}),
+          ...(!boosteando && draft.metaBidStrategy !== "LOWEST_COST_WITHOUT_CAP" && draft.metaBidAmount
+            ? draft.metaBidStrategy === "LOWEST_COST_WITH_MIN_ROAS"
+              ? { extra_params: { bid_constraints: { roas_average_floor: Math.round(draft.metaBidAmount * 10000) } } }
+              : { bid_amount: Math.round(draft.metaBidAmount * unidadesMenoresMeta(cuenta?.currency)) }
+            : {}),
+          // Ventana de atribución, como `attribution_spec` (parámetro directo de Meta que Windsor pasa tal cual).
+          ...(!boosteando && META_ATTRIBUTION[draft.metaAttribution].spec
+            ? {
+                extra_params: {
+                  ...(draft.metaBidStrategy === "LOWEST_COST_WITH_MIN_ROAS" && draft.metaBidAmount ? { bid_constraints: { roas_average_floor: Math.round(draft.metaBidAmount * 10000) } } : {}),
+                  attribution_spec: META_ATTRIBUTION[draft.metaAttribution].spec,
+                },
+              }
+            : {}),
           status: statusHijoMeta,
           // Con presupuesto de campaña se omiten los dos: Windsor lo pide
           // así — "omit both only when the campaign uses campaign budget
@@ -1748,7 +2244,7 @@ export function buildPlan(
           // mismo problema original si ese default exige bid_amount — sin
           // otra acción de Windsor que lo permita, no hay arreglo real acá
           // todavía.
-          ...(conCBO
+          ...(conCBO || (boosteando && enCampanaMetaExistente && compatBoost?.presupuestoEnCampana)
             ? {}
             : draft.budgetMode === "total"
               ? { lifetime_budget: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) }
@@ -1795,10 +2291,11 @@ export function buildPlan(
         action: "boost_post",
         label: `Boostear la publicación (${etiquetaEstadoMeta})`,
         params: {
-          // El conjunto siempre se crea en este mismo plan cuando se boostea
-          // (ver `boosteando` arriba), así que su id real solo existe
+          // Impulsando directo en un conjunto que ya existe y es compatible, el
+          // id es ese. En cualquier otro caso el conjunto se crea en este mismo
+          // plan (ver `boosteando` arriba), así que su id real solo existe
           // después de ejecutar ese paso.
-          adset_id: MARCADOR_PASO_ANTERIOR,
+          adset_id: enConjuntoMetaExistente?.adsetId ?? MARCADOR_PASO_ANTERIOR,
           post_id: draft.boostPostId,
           name: draft.name,
           status: statusHijoMeta,
@@ -1871,6 +2368,15 @@ export function buildPlan(
     });
   }
 
+  // Con el impulso bloqueado no se muestra ningún paso de Meta: quedaría a la
+  // vista un anuncio de reemplazo (sin las reacciones de la publicación) que
+  // nadie pidió y que no se va a ejecutar.
+  if (boostBloqueado) {
+    const sinMeta = steps.filter((paso) => paso.platform !== "meta");
+    steps.length = 0;
+    steps.push(...sinMeta);
+  }
+
   const budgets: Partial<Record<Platform, BudgetAdvice>> = {};
   for (const plataforma of draft.platforms) {
     budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot, excluirCampanasDePresupuesto);
@@ -1891,23 +2397,16 @@ export function buildPlan(
  * una inventada para este sistema — para que quien ya sabe usar Google Ads no
  * tenga que aprender una sintaxis nueva acá.
  */
-/**
- * Sintaxis real de Google Ads para palabras clave: `[palabra]` es
- * concordancia exacta, `"palabra"` de frase, cualquier otra cosa es amplia.
- * Se usa tanto para las positivas del constructor como para las negativas de
- * la gestión de una campaña ya publicada — es la misma sintaxis en las dos.
- */
-export function parsearPalabraClave(
-  linea: string,
-): { text: string; match_type: "BROAD" | "PHRASE" | "EXACT" } {
-  const limpia = linea.trim();
-  if (limpia.startsWith("[") && limpia.endsWith("]")) {
-    return { text: limpia.slice(1, -1).trim(), match_type: "EXACT" };
-  }
-  if (limpia.startsWith('"') && limpia.endsWith('"')) {
-    return { text: limpia.slice(1, -1).trim(), match_type: "PHRASE" };
-  }
-  return { text: limpia, match_type: "BROAD" };
+// La sintaxis de palabras clave vive en `lib/palabras-clave.ts` (la comparte
+// con la edición de un grupo ya publicado); se reexporta para no mover imports.
+export { parsearPalabraClave };
+
+/** Días que quedan desde hoy hasta la fecha de término, contando ambos extremos (mínimo 0 si ya pasó). */
+export function diasHastaFin(endDate: string, hoy: Date = new Date()): number {
+  const fin = Date.parse(`${endDate}T00:00:00Z`);
+  if (!Number.isFinite(fin)) return 0;
+  const inicio = Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate());
+  return Math.max(0, Math.floor((fin - inicio) / 86_400_000) + 1);
 }
 
 function daysElapsed(start: string, end: string): number {
@@ -1924,15 +2423,32 @@ function daysElapsed(start: string, end: string): number {
  * real. Si cada una tuviera su copia, podrían divergir — y el día que
  * divergieran, lo que se aprueba en pantalla dejaría de ser lo que se ejecuta.
  */
+/** Lista de ids numéricos de Meta (audiencias, intereses), sin repetidos ni basura. */
+function idsNumericos(valor: unknown): string[] {
+  if (!Array.isArray(valor)) return [];
+  return [...new Set(valor.map((v) => String(v).trim()).filter((v) => /^\d{5,}$/.test(v)))];
+}
+
 export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
   const platforms = (Array.isArray(body.platforms) ? body.platforms : []).filter(
     (value): value is Platform => ACTIVE_PLATFORMS.includes(value as Platform),
   );
   const objective: Objective = (
-    ["trafico", "leads", "ventas", "alcance"] as const
+    ["trafico", "leads", "ventas", "alcance", "interaccion"] as const
   ).includes(body.objective as Objective)
     ? (body.objective as Objective)
     : "trafico";
+
+  const objetivosValidos = ["trafico", "leads", "ventas", "alcance", "interaccion"];
+  const objectiveByPlatform: Partial<Record<Platform, Objective>> = {};
+  if (body.objectiveByPlatform && typeof body.objectiveByPlatform === "object") {
+    for (const platform of ACTIVE_PLATFORMS) {
+      const valor = (body.objectiveByPlatform as Record<string, unknown>)[platform];
+      if (typeof valor === "string" && objetivosValidos.includes(valor) && valor !== objective) {
+        objectiveByPlatform[platform] = valor as Objective;
+      }
+    }
+  }
 
   const accountByPlatform: Partial<Record<Platform, string>> = {};
   if (body.accountByPlatform && typeof body.accountByPlatform === "object") {
@@ -1958,22 +2474,10 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     ? (body.metaObjective as MetaObjectiveOverride)
     : null;
 
-  const callToAction = (
-    [
-      "LEARN_MORE",
-      "SHOP_NOW",
-      "SIGN_UP",
-      "CONTACT_US",
-      "DOWNLOAD",
-      "SUBSCRIBE",
-      "GET_QUOTE",
-      "BOOK_NOW",
-      "WHATSAPP_MESSAGE",
-      "CALL_NOW",
-    ] as const
-  ).includes(body.callToAction as CampaignDraft["callToAction"])
-    ? (body.callToAction as CampaignDraft["callToAction"])
-    : "LEARN_MORE";
+  const callToAction: CallToAction =
+    typeof body.callToAction === "string" && esCta(body.callToAction)
+      ? body.callToAction
+      : "LEARN_MORE";
 
   const ageMin =
     typeof body.ageMin === "number" && Number.isFinite(body.ageMin)
@@ -1995,6 +2499,8 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     name: String(body.name ?? ""),
     details: String(body.details ?? ""),
     objective,
+    objectiveByPlatform,
+    googleBusqueda: normalizarBusquedaGoogle(body.googleBusqueda),
     metaObjective,
     specialAdCategory,
     conversionLocation: body.conversionLocation === "mensajes" ? "mensajes" : "sitio_web",
@@ -2015,6 +2521,10 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     ),
     pathDisplay1: String(body.pathDisplay1 ?? "").slice(0, 15),
     pathDisplay2: String(body.pathDisplay2 ?? "").slice(0, 15),
+    displaySquareUrl: String(body.displaySquareUrl ?? "").trim().slice(0, 2000),
+    displayLogoUrl: String(body.displayLogoUrl ?? "").trim().slice(0, 2000),
+    displayLongHeadline: String(body.displayLongHeadline ?? "").slice(0, 90),
+    displayBusinessName: String(body.displayBusinessName ?? "").slice(0, 25),
     keywords: (Array.isArray(body.keywords) ? body.keywords : []).map(String),
     negativeKeywords: (Array.isArray(body.negativeKeywords) ? body.negativeKeywords : []).map(
       String,
@@ -2045,7 +2555,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
       body.gender === "hombres" || body.gender === "mujeres"
         ? body.gender
         : "todos",
-    googleChannel: body.googleChannel === "display" ? "display" : "search",
+    googleChannel: body.googleChannel === "display" ? "display" : body.googleChannel === "pmax" ? "pmax" : "search",
     metaPlacements: (Array.isArray(body.metaPlacements)
       ? body.metaPlacements
       : []
@@ -2053,6 +2563,12 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     metaSurfaces: (Array.isArray(body.metaSurfaces) ? body.metaSurfaces : []).map(
       String,
     ),
+    metaBidStrategy: (Object.keys(META_BID_STRATEGIES) as MetaBidStrategy[]).find((k) => k === body.metaBidStrategy) ?? "LOWEST_COST_WITHOUT_CAP",
+    metaBidAmount: typeof body.metaBidAmount === "number" && Number.isFinite(body.metaBidAmount) && body.metaBidAmount > 0 ? body.metaBidAmount : null,
+    metaSpendCap: typeof body.metaSpendCap === "number" && Number.isFinite(body.metaSpendCap) && body.metaSpendCap > 0 ? body.metaSpendCap : null,
+    metaAttribution: (Object.keys(META_ATTRIBUTION) as MetaAttribution[]).find((k) => k === body.metaAttribution) ?? "default",
+    metaCustomAudiences: idsNumericos(body.metaCustomAudiences),
+    metaExcludedAudiences: idsNumericos(body.metaExcludedAudiences),
     metaInterests: (Array.isArray(body.metaInterests) ? body.metaInterests : [])
       .map(String)
       .map((id) => id.trim())
@@ -2105,7 +2621,7 @@ function normalizeTargetPlaces(value: unknown): LugarSegmentable[] {
   const salida: LugarSegmentable[] = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const { id, nombre, countryCode, tier, lat, lng, radiusKm, aproximado } =
+    const { id, nombre, countryCode, tier, lat, lng, radiusKm, aproximado, metaKey } =
       item as Record<string, unknown>;
     if (typeof id !== "string" || !id.trim()) continue;
     if (typeof nombre !== "string" || !nombre.trim()) continue;
@@ -2127,6 +2643,8 @@ function normalizeTargetPlaces(value: unknown): LugarSegmentable[] {
       ...(tieneCoordenadas
         ? { lat, lng, radiusKm, aproximado: aproximado === true }
         : {}),
+      // El key de Meta son solo dígitos: cualquier otra cosa se descarta en vez de mandársela a Meta.
+      ...(typeof metaKey === "string" && /^\d{1,12}$/.test(metaKey) ? { metaKey } : {}),
     });
   }
   return salida;

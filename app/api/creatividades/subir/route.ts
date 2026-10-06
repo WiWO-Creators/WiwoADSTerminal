@@ -6,7 +6,7 @@ import {
   subirCreativo,
   TAMANO_MAXIMO_BYTES,
 } from "@/lib/almacenamiento";
-import { can, enAlcance } from "@/lib/permisos";
+import { enAlcance, puedeArmarCampanas } from "@/lib/permisos";
 
 /**
  * Sube un archivo de creativo a R2 y devuelve la URL pública que el resto
@@ -22,7 +22,7 @@ const NO_STORE = { "cache-control": "no-store" };
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
-  if (!can(session.actor, "crear_campanas")) {
+  if (!puedeArmarCampanas(session.actor)) {
     return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 

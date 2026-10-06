@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Bell, Check, RotateCcw } from "lucide-react";
+import { AlertTriangle, Bell, Check, ExternalLink, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -29,6 +29,8 @@ const ESTILO_SEVERIDAD: Record<Severidad, string> = {
 
 type EstadoDeAlerta = "pendiente" | "aplicando" | "aplicada";
 
+type SolicitudPendiente = { id: string; clienteNombre: string; titulo: string; destino: string; creador: { nombre: string } };
+
 /**
  * Alertas proactivas: el sistema vigila solo y avisa, sin que nadie pregunte.
  *
@@ -55,6 +57,8 @@ export function BotonDeAlertas({
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [estados, setEstados] = useState<Record<string, EstadoDeAlerta>>({});
+  const [solicitudes, setSolicitudes] = useState<SolicitudPendiente[]>([]);
+  const [ocupada, setOcupada] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -67,6 +71,9 @@ export function BotonDeAlertas({
       if (!response.ok) throw new Error(body.error ?? "No se pudieron leer las alertas");
       setAlertas(body.alertas ?? []);
       setEstados({});
+      // Lo que otras personas quieren publicar y espera la aprobación de quien lee esto.
+      const rs = await fetch("/api/solicitudes", { cache: "no-store" });
+      if (rs.ok) setSolicitudes(((await rs.json()) as { porRevisar: SolicitudPendiente[] }).porRevisar);
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "No se pudieron leer las alertas");
     } finally {
@@ -111,8 +118,28 @@ export function BotonDeAlertas({
     }
   }
 
+  async function resolver(s: SolicitudPendiente, accion: "aprobar" | "rechazar") {
+    setOcupada(s.id);
+    try {
+      const response = await fetch(`/api/solicitudes/${s.id}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accion }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; solicitud?: { estado: string; enlaces: Array<{ url: string }> } };
+      if (!response.ok) throw new Error(body.error ?? "No se pudo completar");
+      setSolicitudes((actual) => actual.filter((x) => x.id !== s.id));
+      toast.success(accion === "aprobar" ? (body.solicitud?.estado === "fallida" ? "Se aprobó, pero la plataforma rechazó un paso" : "Aprobada y creada, pausada") : "Rechazada");
+      onCambioAplicado();
+    } catch (issue) {
+      toast.error(issue instanceof Error ? issue.message : "No se pudo completar");
+    } finally {
+      setOcupada(null);
+    }
+  }
+
   const visibles = (alertas ?? []).filter((a) => estados[a.id] !== "aplicada");
-  const total = visibles.length;
+  const total = visibles.length + solicitudes.length;
   const hayCritica = visibles.some((a) => a.severidad === "critica");
 
   return (
@@ -145,7 +172,7 @@ export function BotonDeAlertas({
       </button>
 
       <Dialog open={abierto} onOpenChange={setAbierto}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <div className="flex items-center justify-between gap-3">
               <DialogTitle>Alertas{clienteNombre ? ` · ${clienteNombre}` : ""}</DialogTitle>
@@ -185,6 +212,24 @@ export function BotonDeAlertas({
             </p>
           ) : (
             <ul className="space-y-2.5">
+              {solicitudes.map((s) => (
+                <li key={s.id} className="rounded-xl border border-brand/30 bg-brand/5 p-3">
+                  <span className="font-micro inline-flex rounded-full border border-brand/30 px-2 py-0.5 text-[0.6rem] font-bold text-brand">Por aprobar</span>
+                  <p className="mt-1.5 text-sm font-semibold break-words text-foreground">
+                    {s.creador.nombre} quiere subir {s.titulo}
+                    {s.destino ? ` a ${s.destino}` : ""}.
+                  </p>
+                  <p className="text-xs text-muted-foreground">{s.clienteNombre}</p>
+                  <div className="mt-2.5 flex gap-2">
+                    <button type="button" disabled={ocupada === s.id} onClick={() => void resolver(s, "aprobar")} className="rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-60">
+                      {ocupada === s.id ? "Publicando…" : "Aprobar"}
+                    </button>
+                    <button type="button" disabled={ocupada === s.id} onClick={() => void resolver(s, "rechazar")} className="rounded-full border border-border px-3 py-1.5 text-xs font-bold text-foreground disabled:opacity-60">
+                      Rechazar
+                    </button>
+                  </div>
+                </li>
+              ))}
               {visibles.map((alerta) => {
                 const estado = estados[alerta.id] ?? "pendiente";
                 return (
@@ -203,16 +248,33 @@ export function BotonDeAlertas({
                           {alerta.severidad === "critica" && <AlertTriangle className="size-3" />}
                           {ETIQUETA_SEVERIDAD[alerta.severidad]}
                         </span>
-                        <p className="mt-1.5 truncate text-sm font-semibold text-foreground">
+                        <p className="mt-1.5 text-sm font-semibold break-words text-foreground">
                           {alerta.campana}
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          {alerta.clienteNombre} · {alerta.plataforma === "google" ? "Google Ads" : "Meta Ads"} ·{" "}
+                        <p className="text-xs break-words text-muted-foreground">
+                          {alerta.clienteNombre}
+                          {alerta.plataforma ? ` · ${alerta.plataforma === "google" ? "Google Ads" : "Meta Ads"}` : ""} ·{" "}
                           {alerta.cuenta}
                         </p>
                       </div>
                     </div>
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">{alerta.diagnostico}</p>
+                    <p className="mt-2 text-xs leading-5 break-words text-muted-foreground">{alerta.diagnostico}</p>
+                    {alerta.enlaces && alerta.enlaces.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        {alerta.enlaces.map((e) => (
+                          <a
+                            key={e.url}
+                            href={e.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                          >
+                            {e.etiqueta}
+                            <ExternalLink className="size-3" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                     {alerta.accion && puedeAprobar && (
                       <button
                         type="button"

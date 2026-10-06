@@ -1,3 +1,6 @@
+import { crearAnuncioDisplay, crearCampanaBusqueda, crearCampanaPmax, GoogleAdsNativoError, validarBusqueda, type DatosBusqueda } from "@/lib/google-ads-nativo";
+import { accesoNativoGoogle } from "@/lib/integration-store";
+import { cuentaDe } from "@/lib/constructor-ejecutar";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
@@ -8,9 +11,10 @@ import {
   type CampaignDraft,
   type CuentaCliente,
 } from "@/lib/constructor";
+import { cargarCompatibilidadBoost } from "@/lib/boost-compat-store";
 import { nombresDeCampanasRecientes } from "@/lib/constructor-ejecutar";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
-import { can, enAlcance } from "@/lib/permisos";
+import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +64,7 @@ async function avisoDeLandingCaida(url: string): Promise<string | null> {
 export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
-  if (!can(session.actor, "crear_campanas")) {
+  if (!puedeArmarCampanas(session.actor)) {
     return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
@@ -104,7 +108,111 @@ export async function POST(request: Request) {
       ? await nombresDeCampanasRecientes(draft.portfolioId)
       : new Set<string>();
 
-    const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto);
+    // Impulsar dentro de algo que ya existe: lo decide Meta, se lee de la plataforma.
+    const compatBoost = await cargarCompatibilidadBoost(draft);
+    const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto, compatBoost, {
+      sinConversionesMedidas: cliente?.gtmEstado === "no_tiene",
+    });
+    // Display con imagen: se descargan las imágenes y se comprueba tamaño y proporción antes de publicar
+    // (no toca ninguna cuenta). Un error de Google por una imagen mal cortada aparecería recién al publicar.
+    const pasoDisplay = plan.steps.find((s) => s.action === "ads:create_display_ad");
+    if (pasoDisplay && plan.issues.every((i) => !i.blocking)) {
+      try {
+        await crearAnuncioDisplay(
+          { accessToken: "", developerToken: "", apiVersion: "", managerId: null },
+          "0",
+          "0",
+          {
+            titulares: (pasoDisplay.params.headlines as string[]) ?? [],
+            tituloLargo: String(pasoDisplay.params.long_headline ?? ""),
+            descripciones: (pasoDisplay.params.descriptions as string[]) ?? [],
+            nombreNegocio: String(pasoDisplay.params.business_name ?? ""),
+            urlFinal: String(pasoDisplay.params.final_url ?? ""),
+            imagenPaisajeUrl: String(pasoDisplay.params.landscape_image_url ?? ""),
+            imagenCuadradaUrl: String(pasoDisplay.params.square_image_url ?? ""),
+            logoUrl: typeof pasoDisplay.params.logo_url === "string" ? pasoDisplay.params.logo_url : null,
+          },
+          { soloValidar: true },
+        );
+      } catch (error) {
+        const mensaje = error instanceof GoogleAdsNativoError ? error.message : "No se pudieron revisar las imágenes de Display.";
+        plan.issues.push({ field: "mediaUrl", message: mensaje, blocking: true });
+      }
+    }
+    // Performance Max: Google valida la campaña entera (textos, imágenes, ubicación) contra la cuenta real con
+    // `validateOnly`: no crea nada. Sin la conexión de Google no se puede, y se dice.
+    const pasoPmax = plan.steps.find((s) => s.action === "ads:create_pmax");
+    if (pasoPmax && plan.issues.every((i) => !i.blocking)) {
+      const cuentaGoogle = cuentaDe({ platform: "google" }, draft, cuentas);
+      const cred = cuentaGoogle ? await accesoNativoGoogle(session.actor, cuentaGoogle.externalId) : null;
+      if (!cuentaGoogle || !cred) {
+        plan.issues.push({
+          field: "accountByPlatform",
+          message: "No se pudo validar la campaña de Performance Max contra Google: falta la conexión de Google con acceso a esa cuenta (Cuentas → Usar para todo el equipo).",
+          blocking: false,
+        });
+      } else {
+        const q = pasoPmax.params;
+        try {
+          await crearCampanaPmax(
+            cred,
+            cuentaGoogle.externalId,
+            {
+              nombre: String(q.name ?? ""),
+              presupuestoDiarioMicros: Number(q.daily_budget_micros ?? 0),
+              urlFinal: String(q.final_url ?? ""),
+              titulares: (q.headlines as string[]) ?? [],
+              titulosLargos: (q.long_headlines as string[]) ?? [],
+              descripciones: (q.descriptions as string[]) ?? [],
+              nombreNegocio: String(q.business_name ?? ""),
+              imagenPaisajeUrl: String(q.landscape_image_url ?? ""),
+              imagenCuadradaUrl: String(q.square_image_url ?? ""),
+              logoUrl: typeof q.logo_url === "string" ? q.logo_url : null,
+              ubicaciones: (q.locations as string[]) ?? [],
+              excluidas: (q.excluded_locations as string[]) ?? [],
+              fin: typeof q.end_date === "string" ? q.end_date : null,
+            },
+            { soloValidar: true },
+          );
+        } catch (error) {
+          plan.issues.push({
+            field: "mediaUrl",
+            message: error instanceof GoogleAdsNativoError ? `Google no validó la campaña: ${error.message}` : "No se pudo validar la campaña de Performance Max.",
+            blocking: true,
+          });
+        }
+      }
+    }
+    // Búsqueda con la estructura de Google: se revisan los límites propios y Google valida la campaña entera contra la
+    // cuenta real con `validateOnly` (no crea nada).
+    const pasoBusqueda = plan.steps.find((s) => s.action === "ads:create_search_campaign");
+    if (pasoBusqueda) {
+      const datos = pasoBusqueda.params.datos as DatosBusqueda;
+      for (const problema of validarBusqueda(datos)) {
+        plan.issues.push({ field: "googleBusqueda", message: problema, blocking: true });
+      }
+      if (plan.issues.every((i) => !i.blocking)) {
+        const cuentaGoogle = cuentaDe({ platform: "google" }, draft, cuentas);
+        const cred = cuentaGoogle ? await accesoNativoGoogle(session.actor, cuentaGoogle.externalId) : null;
+        if (!cuentaGoogle || !cred) {
+          plan.issues.push({
+            field: "accountByPlatform",
+            message: "No se pudo validar la campaña de Búsqueda contra Google: falta la conexión de Google con acceso a esa cuenta (Cuentas → Usar para todo el equipo).",
+            blocking: false,
+          });
+        } else {
+          try {
+            await crearCampanaBusqueda(cred, cuentaGoogle.externalId, datos, { soloValidar: true });
+          } catch (error) {
+            plan.issues.push({
+              field: "googleBusqueda",
+              message: error instanceof GoogleAdsNativoError ? `Google no validó la campaña: ${error.message}` : "No se pudo validar la campaña de Búsqueda.",
+              blocking: true,
+            });
+          }
+        }
+      }
+    }
     const landing = draft.landingUrl.trim();
     if (landing) {
       const aviso = await avisoDeLandingCaida(landing);

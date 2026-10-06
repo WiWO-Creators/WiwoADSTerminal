@@ -1,21 +1,25 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   Cog,
   History,
   Home,
+  ClipboardCheck,
+  ShieldAlert,
+  FlaskConical,
   LineChart,
   Megaphone,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
+  UsersRound,
   RefreshCw,
   Search,
   Sun,
-  Target,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,10 +27,13 @@ import { toast } from "sonner";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { agruparPorEmpresa } from "@/lib/empresas";
 import {
   Sidebar,
   SidebarContent,
@@ -45,37 +52,56 @@ import {
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import type {
+  AdSummary,
   PerformanceAccountSummary,
   PerformanceSnapshot,
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
 import { ROLE_LABELS, type Role } from "@/lib/permisos";
 import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
+import { fetchConReintento } from "@/lib/fetch-reintento";
 import { haceTiempo } from "@/lib/tiempo";
 import { cn } from "@/lib/utils";
 import type { SemillaDeCampana } from "@/lib/constructor";
 import { type HealthCheck, type ViewKey } from "./data";
 import type { AttachToCampana, AttachToConjunto } from "./anuncios-view";
 import { ClientesView } from "./clientes-view";
-import {
-  ConstructorView,
-  type ConstructorAttachTo as ConstructorViewAttachTo,
-} from "./constructor-view";
-import { EjecucionesView } from "./ejecuciones-view";
-import { AudienciasView } from "./audiencias-view";
-import { EquipoView } from "./equipo-view";
-import { IntegrationsView } from "./integrations-view";
+import type { ConstructorAttachTo as ConstructorViewAttachTo } from "./constructor-view";
 import {
   ControlRoomView,
   HealthView,
   type ModuloInicio,
 } from "./secondary-views";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { BotonDeAlertas } from "./alertas";
-import { AsistenteFlotante } from "./asistente";
 import { PaletaDeComandos } from "./paleta-comandos";
 import { PuertaDeCliente } from "./puerta-cliente";
 import { SelectorDeFechas } from "./selector-fechas";
 import { ThinkingOrb } from "./ui";
+
+/**
+ * Las pantallas pesadas se bajan solo cuando se abren. Antes todo viajaba junto en un único paquete de ~700 KB
+ * (el Creador de campañas solo son ~3.000 líneas) aunque la persona entrara solo a mirar el dashboard.
+ * Se renderizan en el navegador (`ssr: false`): ninguna necesita estar en el HTML inicial.
+ */
+const Cargando = () => (
+  <div className="flex items-center gap-3 p-8 text-sm text-foreground/50">
+    <ThinkingOrb size="md" state="thinking" label="" />
+    Cargando…
+  </div>
+);
+const cargarVista = <T,>(importar: () => Promise<React.ComponentType<T>>) =>
+  dynamic(async () => ({ default: await importar() }) as { default: React.ComponentType<T> }, { ssr: false, loading: Cargando });
+const ConstructorView = cargarVista(() => import("./constructor-view").then((m) => m.ConstructorView));
+const ImpulsarView = cargarVista(() => import("./impulsar-view").then((m) => m.ImpulsarView));
+const ReglasView = cargarVista(() => import("./reglas-view").then((m) => m.ReglasView));
+const SolicitudesView = cargarVista(() => import("./solicitudes-view").then((m) => m.SolicitudesView));
+const EjecucionesView = cargarVista(() => import("./ejecuciones-view").then((m) => m.EjecucionesView));
+const SimuladorView = cargarVista(() => import("./simulador-view").then((m) => m.SimuladorView));
+const EquipoView = cargarVista(() => import("./equipo-view").then((m) => m.EquipoView));
+const IntegrationsView = cargarVista(() => import("./integrations-view").then((m) => m.IntegrationsView));
+const AudienciasView = cargarVista(() => import("./audiencias-view").then((m) => m.AudienciasView));
+const AsistenteFlotante = dynamic(() => import("./asistente").then((m) => m.AsistenteFlotante), { ssr: false, loading: () => null });
 
 type ItemDeMenu = {
   key: ViewKey;
@@ -117,17 +143,23 @@ const navItems: ItemDeMenu[] = [
   {
     key: "builder",
     label: "Creador de campañas",
-    roles: ["admin", "supervisor"],
+    roles: ["admin", "supervisor", "analyst"],
     icono: Megaphone,
-    resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado.",
+    resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado. Los analistas la envían a revisión.",
   },
   {
-    key: "audiencias",
-    label: "Audiencias",
-    roles: ["admin", "supervisor"],
-    icono: Target,
-    resumen: "Segmentos y cobertura geográfica por cuenta.",
-    bloqueado: true,
+    key: "solicitudes",
+    label: "Solicitudes",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: ClipboardCheck,
+    resumen: "Lo que se envió a revisión: aprobar, rechazar y seguir su estado.",
+  },
+  {
+    key: "simulador",
+    label: "Simulador",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: FlaskConical,
+    resumen: "Proyecta qué podría dar un monto, con el historial real del cliente.",
   },
 ];
 
@@ -142,10 +174,26 @@ const navItemsGestion: ItemDeMenu[] = [
     resumen: "Qué se publicó, quién lo mandó y qué respondió cada paso.",
   },
   {
+    key: "reglas",
+    label: "Reglas",
+    roles: ["admin", "supervisor"],
+    icono: ShieldAlert,
+    resumen: "Reglas como las de Meta y Google: por ejemplo pausar un anuncio al llegar a cierto gasto.",
+  },
+  {
     key: "integrations",
     label: "Cuentas",
+    // Solo administración: las conexiones y sus credenciales no son para el resto del equipo.
+    roles: ["admin"],
     icono: Plug,
     resumen: "Conecta Google y Meta, y elige qué cuentas se leen.",
+  },
+  {
+    key: "audiencias",
+    label: "Lookalike",
+    roles: ["admin", "supervisor"],
+    icono: UsersRound,
+    resumen: "Carga una base de clientes (Excel o CSV) para audiencias y lookalike.",
   },
 ];
 
@@ -204,6 +252,17 @@ const TODOS_LOS_CLIENTES = "__todos__";
  * navegador (ver `PuertaDeCliente` más abajo). */
 const PUERTA_CLIENTE_STORAGE_KEY = "wiwo-ads-puerta-cliente-resuelta";
 
+/**
+ * Fetch con reintento y backoff, para tolerar los cortes de red pasajeros
+ * del servidor compartido (otro proceso del VPS satura la CPU un momento,
+ * ver docs/DESPLIEGUE_VPS.md) sin que el dashboard se vea "colgado" a la
+ * primera. Cada intento tiene su propio timeout: sin esto, un intento que
+ * nunca responde bloquearía todos los reintentos siguientes.
+ *
+ * Solo reintenta fallos de RED (fetch que ni siquiera consigue respuesta).
+ * Una respuesta HTTP de error (404, 500…) es una respuesta válida del
+ * servidor y se devuelve tal cual — reintentarla a ciegas no la arregla.
+ */
 export type DashboardIdentity = {
   id: string;
   email: string;
@@ -216,7 +275,7 @@ export type DashboardIdentity = {
  * desde una propuesta del asistente de IA. */
 type BuilderContexto =
   | { modo: "nueva"; portfolioId: string; semilla?: SemillaDeCampana }
-  | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto };
+  | { modo: "adjuntar"; attachTo: AttachToCampana | AttachToConjunto; semilla?: SemillaDeCampana };
 
 /**
  * Fuerza a que el Constructor se reinicie al cambiar de contexto de destino
@@ -240,7 +299,8 @@ function builderConstructorKey(
   }
   const attachTo = contexto.attachTo;
   const adsetId = "adsetId" in attachTo ? attachTo.adsetId : "";
-  return `${attachTo.campaignId}:${adsetId}`;
+  // Una versión nueva de un anuncio (con su semilla) no debe reusar el borrador de otra del mismo conjunto.
+  return `${attachTo.campaignId}:${adsetId}:${contexto.semilla?.propuestaId ?? ""}`;
 }
 
 function builderConstructorAttachTo(
@@ -276,6 +336,10 @@ export default function WiwoDashboard({
   initialView?: ViewKey;
 }) {
   const [view, setView] = useState<ViewKey>(initialView);
+  const abrirCuentas = () => {
+    if (initialSnapshot.user.role === "admin") setView("integrations");
+    else toast.info("Las cuentas conectadas las administra un administrador.");
+  };
   /**
    * A qué cliente está mirando Clientes — vive acá, no adentro de
    * `ClientesView`, precisamente para que sobreviva a salir de esa vista y
@@ -298,11 +362,59 @@ export default function WiwoDashboard({
   // Constructor entero (no publicar: la API ya lo bloqueaba, pero sí ver la
   // interfaz completa, que es justo lo que no debía pasar).
   const puedeCrearCampanas =
-    initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor";
+    initialSnapshot.user.role === "admin" ||
+    initialSnapshot.user.role === "supervisor" ||
+    initialSnapshot.user.role === "analyst";
+  // Los analistas arman pero no publican: lo suyo va a revisión de un supervisor.
+  const soloEnviaARevision = initialSnapshot.user.role === "analyst";
+  // Pendientes por revisar + novedades sin leer: el número que se ve junto a «Solicitudes».
+  const [avisoSolicitudes, setAvisoSolicitudes] = useState(0);
+  // «Impulsar» vive dentro de Cliente: se abre en un panel sobre la tabla.
+  const [impulsarAbierto, setImpulsarAbierto] = useState(false);
+  // Reglas automáticas: quien aprueba cambios las evalúa cada pocos minutos mientras tiene la app abierta.
+  const puedeEvaluarReglas = initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor";
+  useEffect(() => {
+    if (!puedeEvaluarReglas) return;
+    const evaluar = () =>
+      fetch("/api/reglas", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ evaluar: true }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { disparadas?: Array<{ entidad: string; resultado: string }> } | null) => {
+          if (j?.disparadas?.length) toast.warning(`Regla cumplida: ${j.disparadas.map((d) => `${d.entidad} — ${d.resultado}`).join(" · ")}`);
+        })
+        .catch(() => undefined);
+    const primera = window.setTimeout(evaluar, 20000);
+    const t = window.setInterval(evaluar, 300000);
+    return () => {
+      window.clearTimeout(primera);
+      window.clearInterval(t);
+    };
+  }, [puedeEvaluarReglas]);
+  useEffect(() => {
+    let vivo = true;
+    const leer = () =>
+      fetch("/api/solicitudes?resumen=1", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j: { porRevisar: number; novedades: number } | null) => {
+          if (vivo && j) setAvisoSolicitudes(j.porRevisar + j.novedades);
+        })
+        .catch(() => undefined);
+    void leer();
+    const t = window.setInterval(leer, 120000);
+    return () => {
+      vivo = false;
+      window.clearInterval(t);
+    };
+  }, [view]);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<
     string | null
   >(initialSnapshot.user.portfolioIds[0] ?? null);
   const [performance, setPerformance] = useState(initialSnapshot.performance);
+  // Los anuncios (casi 3.000 filas, el 90 % del peso) no viajan con el tablero:
+  // se piden solo del cliente que se está mirando en la tabla de Cliente.
+  // Anuncios ya leídos por cliente: al volver a un cliente se ven al instante y se refrescan en segundo plano.
+  const [cacheAnuncios, setCacheAnuncios] = useState<Record<string, { ads: AdSummary[]; at: number }>>({});
+  const cacheAnunciosRef = useRef(cacheAnuncios);
+  const [versionDeDatos, setVersionDeDatos] = useState(0);
   const [rango, setRango] = useState<RangoId>(
     initialSnapshot.performance.rango?.id ?? RANGO_POR_DEFECTO,
   );
@@ -324,7 +436,7 @@ export default function WiwoDashboard({
 
   // Solo los clientes declarados tienen sentido para elegir acá — una cuenta
   // suelta sin cliente asignado no es algo que alguien "elija" al entrar.
-  const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
+  const clientesDeclarados = performance.portfolios.filter((p) => p.declared && !p.archivado);
   const [mostrarPuertaCliente, setMostrarPuertaCliente] = useState(false);
   useEffect(() => {
     // Una vez por sesión de navegador (no en cada recarga dentro de la misma
@@ -532,12 +644,61 @@ export default function WiwoDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
   }, []);
 
+  // Se piden en cuanto hay un cliente elegido (no solo al abrir «Cliente»): cuando la persona llega a la tabla,
+  // los anuncios ya están. Con datos recientes en memoria no se vuelve a pedir nada.
+  const claveDeAnuncios = clienteSeleccionado ? `${clienteSeleccionado}|${rango}|${versionDeDatos}` : null;
+  useEffect(() => {
+    cacheAnunciosRef.current = cacheAnuncios;
+  }, [cacheAnuncios]);
+  useEffect(() => {
+    if (!claveDeAnuncios || !clienteSeleccionado) return;
+    const reciente = cacheAnunciosRef.current[claveDeAnuncios];
+    if (reciente && Date.now() - reciente.at < 120_000) return;
+    const control = new AbortController();
+    fetchConReintento(
+      `/api/dashboard?anuncios=1&cliente=${encodeURIComponent(clienteSeleccionado)}&rango=${encodeURIComponent(rango)}`,
+      { headers: { accept: "application/json" }, signal: control.signal },
+    )
+      .then(async (respuesta) => {
+        const cuerpo = (await respuesta.json().catch(() => null)) as { performance?: PerformanceSnapshot } | null;
+        if (!respuesta.ok || !cuerpo?.performance) throw new Error("sin anuncios");
+        const ads = cuerpo.performance.ads;
+        setCacheAnuncios((actual) => {
+          // Se guardan pocos clientes: cada uno son cientos de filas.
+          const claves = Object.keys(actual).filter((k) => k !== claveDeAnuncios);
+          const conservar = claves.slice(-5);
+          return { ...Object.fromEntries(conservar.map((k) => [k, actual[k]])), [claveDeAnuncios]: { ads, at: Date.now() } };
+        });
+      })
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        // Sin lectura: si ya había datos se dejan; si no, la tabla muestra el aviso de que no se pudieron leer.
+        setCacheAnuncios((actual) => (actual[claveDeAnuncios] ? actual : { ...actual, [claveDeAnuncios]: { ads: [], at: 0 } }));
+      });
+    return () => control.abort();
+  }, [claveDeAnuncios, clienteSeleccionado, rango]);
+  // Lo exacto si ya llegó; si no, lo último que se leyó de este cliente y periodo (otra versión): así una
+  // relectura no vacía la tabla ni cierra el editor que está encima.
+  const anunciosDeLaClave = useMemo(() => {
+    if (!claveDeAnuncios || !clienteSeleccionado) return undefined;
+    if (cacheAnuncios[claveDeAnuncios]) return cacheAnuncios[claveDeAnuncios];
+    const prefijo = `${clienteSeleccionado}|${rango}|`;
+    const versiones = Object.keys(cacheAnuncios).filter((k) => k.startsWith(prefijo));
+    return versiones.length ? cacheAnuncios[versiones[versiones.length - 1]] : undefined;
+  }, [cacheAnuncios, claveDeAnuncios, clienteSeleccionado, rango]);
+  const anunciosVigentes = anunciosDeLaClave !== undefined;
+  const performanceConAnuncios = useMemo(
+    () => ({ ...performance, ads: view === "clients" && anunciosDeLaClave ? anunciosDeLaClave.ads : [] }),
+    [performance, anunciosDeLaClave, view],
+  );
+  const cargandoAnuncios = view === "clients" && claveDeAnuncios !== null && !anunciosVigentes;
+
   async function refreshOperationalData(
     periodo: RangoId = rango,
     solicitud: number = ++rangoSolicitadoRef.current,
   ) {
     try {
-      const response = await fetch(
+      const response = await fetchConReintento(
         `/api/dashboard?rango=${encodeURIComponent(periodo)}`,
         { headers: { accept: "application/json" } },
       );
@@ -549,6 +710,8 @@ export default function WiwoDashboard({
       if (solicitud !== rangoSolicitadoRef.current) return;
       if (!response.ok || !body.performance) return;
       setPerformance(body.performance);
+      // Los anuncios cargados quedaron viejos: se vuelven a pedir.
+      setVersionDeDatos((v) => v + 1);
       // Si el cliente elegido deja de existir en la lectura nueva, se limpia
       // la selección en vez de dejarla apuntando a un cliente que ya no está.
       setClienteSeleccionado((current) =>
@@ -558,7 +721,16 @@ export default function WiwoDashboard({
           : null,
       );
     } catch {
-      // The integration surface already reports provider errors.
+      // Ya se reintentó solo (fetchConReintento) — esto es un corte real,
+      // no uno pasajero. Antes quedaba en silencio total: el dashboard se
+      // veía "colgado" sin decir por qué. Un id fijo evita apilar el mismo
+      // aviso si dos actualizaciones fallan casi juntas.
+      if (solicitud === rangoSolicitadoRef.current) {
+        toast.error("No se pudo actualizar los datos", {
+          id: "refresh-operational-data-error",
+          description: "Puede ser un corte de red pasajero — reintenta en unos segundos.",
+        });
+      }
     }
   }
 
@@ -582,6 +754,7 @@ export default function WiwoDashboard({
         theme={theme}
         onThemeChange={changeTheme}
         onNavigate={setView}
+        avisoSolicitudes={avisoSolicitudes}
         onBuscar={() => setPaletaAbierta(true)}
         clienteId={clienteSeleccionado}
         clienteNombre={
@@ -636,14 +809,14 @@ export default function WiwoDashboard({
               performance={performance}
               modulos={modulosDeInicio(initialSnapshot.user.role)}
               onNavigate={setView}
-              onOpenIntegrations={() => setView("integrations")}
+              onOpenIntegrations={abrirCuentas}
             />
           )}
           {view === "health" && (
             <HealthView
               client={clienteSeleccionado}
               performance={performance}
-              onOpenIntegrations={() => setView("integrations")}
+              onOpenIntegrations={abrirCuentas}
               checks={healthChecks}
               okCount={healthOk}
               totalCount={healthChecks.length}
@@ -653,13 +826,26 @@ export default function WiwoDashboard({
               puedeVerResumen={
                 initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
               }
+              puedeVerAlertas={
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
+              }
+              puedeEditarFicha={
+                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
+              }
+              puedeVerSugerencias={initialSnapshot.user.role !== "client"}
             />
           )}
           {view === "clients" && (
             <ClientesView
-              performance={performance}
+              performance={performanceConAnuncios}
+              cargandoAnuncios={cargandoAnuncios}
+              onDatosCambiaron={() => {
+                // Se vuelve a leer en segundo plano; mientras llega, la tabla sigue mostrando lo anterior.
+                setVersionDeDatos((v) => v + 1);
+              }}
               seleccionado={clienteSeleccionado}
               onSeleccionar={setClienteSeleccionado}
+              onAbrirImpulsar={puedeCrearCampanas ? () => setImpulsarAbierto(true) : undefined}
               onCrearCampana={
                 puedeCrearCampanas
                   ? (portfolioId) => {
@@ -684,6 +870,33 @@ export default function WiwoDashboard({
                     }
                   : undefined
               }
+              onVersionNueva={
+                puedeCrearCampanas
+                  ? (attachTo, semilla) => {
+                      // Un anuncio nuevo en el mismo conjunto, con el contenido del original para editarlo.
+                      setBuilderContexto({
+                        modo: "adjuntar",
+                        attachTo,
+                        semilla: { ...semilla, propuestaId: `version:${semilla.versionDeAnuncio?.anuncioOrigen ?? Date.now()}` },
+                      });
+                      setView("builder");
+                    }
+                  : undefined
+              }
+              onImpulsar={
+                puedeCrearCampanas
+                  ? (portfolioId, semilla) => {
+                      // `propuestaId` propio: dos impulsos seguidos del mismo
+                      // cliente no deben reusar el borrador del anterior.
+                      setBuilderContexto({
+                        modo: "nueva",
+                        portfolioId,
+                        semilla: { ...semilla, propuestaId: `impulso:${semilla.boost?.postId ?? Date.now()}` },
+                      });
+                      setView("builder");
+                    }
+                  : undefined
+              }
             />
           )}
           {view === "builder" && puedeCrearCampanas && (
@@ -694,13 +907,23 @@ export default function WiwoDashboard({
               key={builderConstructorKey(builderContexto, clienteSeleccionado)}
               attachTo={builderConstructorAttachTo(builderContexto)}
               semillaIA={
-                builderContexto?.modo === "nueva" ? builderContexto.semilla : undefined
+                builderContexto?.semilla
               }
               clienteGlobal={clienteSeleccionado}
               onCambiarClienteGlobal={setClienteSeleccionado}
               onPublicado={() => void refreshOperationalData()}
+              verPlanTecnico={initialSnapshot.user.role === "admin"}
+              soloEnviaARevision={soloEnviaARevision}
             />
           )}
+          {view === "solicitudes" && <SolicitudesView />}
+          {view === "reglas" && <ReglasView clienteId={clienteSeleccionado} />}
+          <Dialog open={impulsarAbierto} onOpenChange={setImpulsarAbierto}>
+            <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
+              <DialogTitle className="sr-only">Impulsar</DialogTitle>
+              {impulsarAbierto && <ImpulsarView clienteId={clienteSeleccionado} puedeAprobar={initialSnapshot.user.role !== "analyst"} />}
+            </DialogContent>
+          </Dialog>
           {view === "historial" && <EjecucionesView />}
           {view === "team" && (
             <EquipoView
@@ -710,7 +933,7 @@ export default function WiwoDashboard({
               }))}
             />
           )}
-          {view === "integrations" && (
+          {view === "integrations" && initialSnapshot.user.role === "admin" && (
             <IntegrationsView
               currentUser={initialSnapshot.user}
               signOutPath={signOutPath}
@@ -718,14 +941,13 @@ export default function WiwoDashboard({
               portfolios={performance.portfolios}
             />
           )}
+          {view === "simulador" && <SimuladorView clienteId={clienteSeleccionado} />}
           {view === "audiencias" && (
             <AudienciasView
               portfolios={performance.portfolios}
               ads={performance.ads}
               clienteSeleccionado={clienteSeleccionado}
-              puedeAprobar={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
-              }
+              puedeAprobar={initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"}
             />
           )}
         </div>
@@ -776,6 +998,7 @@ function AppSidebar({
   theme,
   onThemeChange,
   onNavigate,
+  avisoSolicitudes,
   onBuscar,
   clienteId,
   clienteNombre,
@@ -789,6 +1012,7 @@ function AppSidebar({
   theme: "dark" | "light";
   onThemeChange: (checked: boolean) => void;
   onNavigate: (view: ViewKey) => void;
+  avisoSolicitudes: number;
   onBuscar: () => void;
   clienteId: string | null;
   clienteNombre: string | null;
@@ -850,6 +1074,11 @@ function AppSidebar({
                     <span className="flex-1 group-data-[collapsible=icon]:hidden">
                       {item.label}
                     </span>
+                    {item.key === "solicitudes" && avisoSolicitudes > 0 && (
+                      <span className="shrink-0 rounded-full bg-brand px-2 py-0.5 text-[0.6rem] font-bold text-white group-data-[collapsible=icon]:hidden">
+                        {avisoSolicitudes}
+                      </span>
+                    )}
                     {item.bloqueado && (
                       <span className="font-micro shrink-0 rounded-full bg-muted px-2 py-0.5 text-[0.6rem] text-muted-foreground group-data-[collapsible=icon]:hidden">
                         Pronto
@@ -915,13 +1144,16 @@ function AppSidebar({
             Buscar…
           </span>
         </button>
-        <BotonDeAlertas
-          clienteId={clienteId}
-          clienteNombre={clienteNombre}
-          rango={rango}
-          puedeAprobar={puedeAprobar}
-          onCambioAplicado={onCambioAplicado}
-        />
+        {/* Las alertas son de quien aprueba cambios: administrador y supervisor. */}
+        {puedeAprobar && (
+          <BotonDeAlertas
+            clienteId={clienteId}
+            clienteNombre={clienteNombre}
+            rango={rango}
+            puedeAprobar={puedeAprobar}
+            onCambioAplicado={onCambioAplicado}
+          />
+        )}
       </SidebarHeader>
 
       <SidebarContent className="gap-2 py-3">
@@ -1072,7 +1304,7 @@ function AppHeader({
   // Solo clientes declarados: `performance.portfolios` también trae una
   // entrada por cada cuenta suelta sin cliente asignado, y esas no existen
   // como portafolio real en `/api/clientes`.
-  const clientesDeclarados = performance.portfolios.filter((p) => p.declared);
+  const clientesDeclarados = performance.portfolios.filter((p) => p.declared && !p.archivado);
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-3 bg-canvas/90 px-4 backdrop-blur-xl md:px-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -1088,10 +1320,15 @@ function AppHeader({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={TODOS_LOS_CLIENTES}>Todos los clientes</SelectItem>
-              {clientesDeclarados.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.name}
-                </SelectItem>
+              {agruparPorEmpresa(clientesDeclarados).map((grupo) => (
+                <SelectGroup key={grupo.empresa ?? "sin"}>
+                  {grupo.etiqueta && <SelectLabel>{grupo.etiqueta}</SelectLabel>}
+                  {grupo.clientes.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>

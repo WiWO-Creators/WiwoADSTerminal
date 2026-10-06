@@ -1,5 +1,7 @@
+import { metaNativoFaltante } from "@/lib/meta-nativo-lectura";
 import { env } from "cloudflare:workers";
 
+import { registrarEscritura, versionDeEscrituras } from "@/lib/escrituras";
 import { getRawDb } from "@/db";
 import {
   addToBreakdown,
@@ -7,7 +9,9 @@ import {
   type ConversionBreakdown,
 } from "@/lib/conversiones";
 import { unidadesMenoresMeta } from "@/lib/monedas";
-import { ACTIVE_PLATFORMS, PLATFORM, type Platform } from "@/lib/plataformas";
+import { adaptarFilaLinkedin } from "@/lib/linkedin";
+import { adaptarFilaTiktok } from "@/lib/tiktok";
+import { ACTIVE_PLATFORMS, LECTURA_PLATFORMS, PLATFORM, isActivePlatform, type Platform } from "@/lib/plataformas";
 
 /**
  * Lectura de métricas vía Windsor.ai.
@@ -158,14 +162,14 @@ type Row = Record<string, unknown>;
  * archivo no cambia.
  */
 const CONNECTORS = Object.fromEntries(
-  ACTIVE_PLATFORMS.map((id) => [
+  LECTURA_PLATFORMS.map((id) => [
     id,
     { connector: PLATFORM[id].connector, fields: PLATFORM[id].camposDiarios },
   ]),
 ) as Record<Platform, { connector: string; fields: string[] }>;
 
 const CAMPAIGN_FIELDS = Object.fromEntries(
-  ACTIVE_PLATFORMS.map((id) => [id, PLATFORM[id].camposCampana]),
+  LECTURA_PLATFORMS.map((id) => [id, PLATFORM[id].camposCampana]),
 ) as Record<Platform, string[]>;
 
 export class WindsorError extends Error {
@@ -192,6 +196,21 @@ export async function fetchWindsorDaily(
   rangeStart: string,
   rangeEnd: string,
 ): Promise<{ rows: WindsorAccountDaily[]; fetchedAt: number }> {
+  const base = await fetchWindsorDailyDeWindsor(rangeStart, rangeEnd);
+  // Cuentas de Meta que Windsor no entrega: se leen directo de la API de Meta (ver `meta-nativo-lectura.ts`).
+  const catalogo = await fetchWindsorCatalog().catch(() => null);
+  const conocidas = new Set<string>([
+    ...base.rows.filter((r) => r.provider === "meta").map((r) => r.accountId),
+    ...(catalogo?.campanas ?? []).filter((c) => c.provider === "meta").map((c) => c.accountId),
+  ]);
+  const nativo = await metaNativoFaltante(conocidas, rangeStart, rangeEnd, "diarias");
+  return nativo.diarias.length ? { ...base, rows: [...base.rows, ...nativo.diarias] } : base;
+}
+
+async function fetchWindsorDailyDeWindsor(
+  rangeStart: string,
+  rangeEnd: string,
+): Promise<{ rows: WindsorAccountDaily[]; fetchedAt: number }> {
   if (!windsorConfigured()) throw new WindsorError("Falta WINDSOR_API_KEY");
 
   const db = getRawDb();
@@ -210,8 +229,8 @@ export async function fetchWindsorDaily(
 
   // En paralelo: en serie, un mes de 40+ cuentas tardaba casi un minuto.
   const perProvider = await Promise.all(
-    ACTIVE_PLATFORMS.map((provider) =>
-      fetchProvider(provider, rangeStart, rangeEnd),
+    LECTURA_PLATFORMS.map((provider) =>
+      soloLecturaSinRomper(provider, () => fetchProvider(provider, rangeStart, rangeEnd)),
     ),
   );
   const rows = perProvider.flat();
@@ -283,7 +302,7 @@ async function requestWindsor(
  * directa: sin él, el conector devuelve el contenido de TODAS las páginas e
  * Instagram conectados al workspace de Windsor, no solo del cliente pedido.
  */
-async function requestWindsorConnector(
+export async function requestWindsorConnector(
   connector: string,
   fields: string[],
   rangeStart: string,
@@ -291,7 +310,18 @@ async function requestWindsorConnector(
   {
     timeoutMs = TIMEOUT_MS,
     selectAccounts,
-  }: { timeoutMs?: number; selectAccounts?: string } = {},
+    filtro,
+  }: {
+    timeoutMs?: number;
+    selectAccounts?: string;
+    /**
+     * Filtro en el servidor de Windsor, ej. `[["campaign_id","eq","123"]]`.
+     * Verificado con datos reales: el parámetro REST se llama `filter` (en
+     * singular; `filters` se ignora sin avisar) y recorta la respuesta a lo
+     * pedido — sin él, un desglose de una campaña traería toda la cuenta.
+     */
+    filtro?: unknown[];
+  } = {},
 ): Promise<Row[]> {
   const url = new URL(`${API_BASE}/${connector}`);
   url.searchParams.set("api_key", env.WINDSOR_API_KEY!);
@@ -299,6 +329,7 @@ async function requestWindsorConnector(
   url.searchParams.set("date_to", rangeEnd);
   url.searchParams.set("fields", fields.join(","));
   if (selectAccounts) url.searchParams.set("select_accounts", selectAccounts);
+  if (filtro && filtro.length > 0) url.searchParams.set("filter", JSON.stringify(filtro));
 
   let lastError: unknown = null;
   for (let intento = 0; intento < REINTENTOS; intento += 1) {
@@ -336,7 +367,29 @@ async function requestWindsorConnector(
   );
 }
 
-function toRows(raw: Row[], provider: WindsorProvider): WindsorAccountDaily[] {
+/**
+ * Una plataforma de solo lectura (LinkedIn) que falle no debe tumbar la lectura de Google y Meta: se
+ * registra y se sigue sin ella. Las activas conservan su comportamiento: si fallan, falla todo.
+ */
+async function soloLecturaSinRomper<T>(provider: WindsorProvider, leer: () => Promise<T[]>): Promise<T[]> {
+  if (isActivePlatform(provider)) return leer();
+  try {
+    return await leer();
+  } catch (error) {
+    console.error("WiWO.ADS lectura de solo lectura", provider, error instanceof Error ? error.message : "error");
+    return [];
+  }
+}
+
+/** Las filas de LinkedIn y TikTok se traducen al vocabulario común antes de interpretarlas. */
+function adaptar(raw: Row[], provider: WindsorProvider): Row[] {
+  if (provider === "linkedin") return raw.map((fila) => adaptarFilaLinkedin(fila));
+  if (provider === "tiktok") return raw.map((fila) => adaptarFilaTiktok(fila));
+  return raw;
+}
+
+function toRows(rawCrudo: Row[], provider: WindsorProvider): WindsorAccountDaily[] {
+  const raw = adaptar(rawCrudo, provider);
   return raw
     .map((row) => {
       const accountId = text(first(row, "account_id"));
@@ -847,7 +900,11 @@ export async function fetchWindsorCampaigns(
     fetchCampanasConMetricas(rangeStart, rangeEnd),
     fetchWindsorCatalog(),
   ]);
-  return fusionarConCatalogo(catalogo.campanas, conMetricas, claveCampana);
+  const base = fusionarConCatalogo(catalogo.campanas, conMetricas, claveCampana);
+  // Cuentas de Meta que Windsor no entrega: se leen directo de la API de Meta (ver `meta-nativo-lectura.ts`).
+  const conocidas = new Set(base.filter((c) => c.provider === "meta").map((c) => c.accountId));
+  const nativo = await metaNativoFaltante(conocidas, rangeStart, rangeEnd, "campanas");
+  return [...base, ...nativo.campanas];
 }
 
 async function fetchCampanasConMetricas(
@@ -868,15 +925,17 @@ async function fetchCampanasConMetricas(
   }
 
   const perProvider = await Promise.all(
-    ACTIVE_PLATFORMS.map(async (provider) => {
-      const raw = await requestWindsor(
-        provider,
-        CAMPAIGN_FIELDS[provider],
-        rangeStart,
-        rangeEnd,
-      );
-      return toCampaigns(raw, provider);
-    }),
+    LECTURA_PLATFORMS.map((provider) =>
+      soloLecturaSinRomper(provider, async () => {
+        const raw = await requestWindsor(
+          provider,
+          CAMPAIGN_FIELDS[provider],
+          rangeStart,
+          rangeEnd,
+        );
+        return toCampaigns(raw, provider);
+      }),
+    ),
   );
   const campaigns = perProvider.flat();
 
@@ -952,9 +1011,10 @@ function isActiveStatus(status: string | null): boolean {
 }
 
 function parseCampaigns(
-  raw: Row[],
+  rawCrudo: Row[],
   provider: WindsorProvider,
 ): WindsorCampaign[] {
+  const raw = adaptar(rawCrudo, provider);
   return raw
     .map((row): WindsorCampaign | null => {
       const accountId = text(first(row, "account_id"));
@@ -1194,16 +1254,26 @@ export type WindsorAd = {
    */
   thumbnailUrl?: string | null;
   /**
-   * Contenido real de la pieza de Meta, para precargar el formulario de
-   * edición en vez de mostrarlo en blanco (ver `editar-anuncio.tsx`). `null`
-   * en Google (sin acción de escritura para editar un anuncio ya creado) o
-   * si Meta no la trae. `destinationUrl` sale del campo `link` de Windsor,
+   * Contenido real de la pieza de Meta. `null` en Google (sus textos y URLs
+   * salen de `detalle-entidad.ts`, no de este pipeline) o si Meta no lo trae.
+   * La edición vive en `app/editar-entidad.tsx`. `destinationUrl` sale del campo `link` de Windsor,
    * no de `link_url` — verificado con datos reales (2026-09-24): `link_url`
    * siempre viene vacío, `link` viene poblado de forma consistente.
    */
   message: string | null;
   headline: string | null;
   destinationUrl: string | null;
+  /**
+   * Publicación de página que usa el anuncio (`{page_id}_{post_id}`) — el id
+   * que pide `boost_post` para impulsarlo. Meta lo entrega para todo anuncio.
+   */
+  postId?: string | null;
+  /**
+   * Id de la publicación de Instagram con la que se armó el anuncio. Solo viene
+   * en los anuncios creados desde una publicación existente: es lo que los
+   * distingue de los propios, cuyo contenido sí se puede editar.
+   */
+  sourceInstagramMediaId?: string | null;
   /**
    * false: la entidad existe en la cuenta pero no tuvo actividad en el rango.
    *
@@ -1218,17 +1288,40 @@ export type WindsorAd = {
 };
 
 /** Anuncios y conjuntos del rango, completados con el catálogo. */
-export async function fetchWindsorAds(
+/**
+ * Lo ya leído y fusionado se guarda unos minutos en memoria del proceso: cambiar de cliente pide
+ * los anuncios otra vez, y sin esto cada pedido volvía a leer y convertir ~4 MB de caché.
+ * Las lecturas simultáneas del mismo periodo comparten una sola promesa.
+ */
+const MEMORIA_ANUNCIOS_MS = 2 * 60 * 1000;
+const memoriaDeAnuncios = new Map<string, { at: number; datos: Promise<WindsorAd[]> }>();
+
+export function fetchWindsorAds(
   rangeStart: string,
   rangeEnd: string,
 ): Promise<WindsorAd[]> {
+  const clave = `${rangeStart}:${rangeEnd}:${versionDeEscrituras()}`;
+  const guardado = memoriaDeAnuncios.get(clave);
+  if (guardado && Date.now() - guardado.at < MEMORIA_ANUNCIOS_MS) return guardado.datos;
+  const datos = leerAnuncios(rangeStart, rangeEnd);
+  memoriaDeAnuncios.set(clave, { at: Date.now(), datos });
+  // Una lectura fallida no se recuerda: el siguiente pedido lo vuelve a intentar.
+  datos.catch(() => {
+    if (memoriaDeAnuncios.get(clave)?.datos === datos) memoriaDeAnuncios.delete(clave);
+  });
+  if (memoriaDeAnuncios.size > 6) memoriaDeAnuncios.delete(memoriaDeAnuncios.keys().next().value as string);
+  return datos;
+}
+
+async function leerAnuncios(rangeStart: string, rangeEnd: string): Promise<WindsorAd[]> {
   const [conMetricas, catalogo] = await Promise.all([
     fetchAnunciosConMetricas(rangeStart, rangeEnd),
     fetchWindsorCatalog(),
   ]);
-  return fusionarConCatalogo(catalogo.anuncios, conMetricas, claveAnuncio).sort(
-    (a, b) => b.spendMicros - a.spendMicros,
-  );
+  const base = fusionarConCatalogo(catalogo.anuncios, conMetricas, claveAnuncio);
+  const conocidas = new Set(base.filter((a) => a.provider === "meta").map((a) => a.accountId));
+  const nativo = await metaNativoFaltante(conocidas, rangeStart, rangeEnd, "anuncios");
+  return [...base, ...nativo.anuncios].sort((a, b) => b.spendMicros - a.spendMicros);
 }
 
 async function fetchAnunciosConMetricas(
@@ -1249,15 +1342,17 @@ async function fetchAnunciosConMetricas(
   }
 
   const perProvider = await Promise.all(
-    ACTIVE_PLATFORMS.map(async (provider) => {
-      const raw = await requestWindsor(
-        provider,
-        PLATFORM[provider].camposAnuncio,
-        rangeStart,
-        rangeEnd,
-      );
-      return toAds(raw, provider);
-    }),
+    LECTURA_PLATFORMS.map((provider) =>
+      soloLecturaSinRomper(provider, async () => {
+        const raw = await requestWindsor(
+          provider,
+          PLATFORM[provider].camposAnuncio,
+          rangeStart,
+          rangeEnd,
+        );
+        return toAds(raw, provider);
+      }),
+    ),
   );
   const ads = perProvider.flat().sort((a, b) => b.spendMicros - a.spendMicros);
 
@@ -1273,10 +1368,10 @@ async function fetchAnunciosConMetricas(
   return ads;
 }
 
-function toAds(raw: Row[], provider: Platform): WindsorAd[] {
+function toAds(rawCrudo: Row[], provider: Platform): WindsorAd[] {
   const merged = new Map<string, WindsorAd>();
 
-  for (const row of raw) {
+  for (const row of adaptar(rawCrudo, provider)) {
     const accountId = text(first(row, "account_id"));
     const campaignName = text(first(row, "campaign", "campaign_name"));
     if (!accountId || !campaignName) continue;
@@ -1324,6 +1419,8 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
       message: text(row.body),
       headline: text(row.title),
       destinationUrl: text(row.link),
+      postId: text(row.effective_object_story_id),
+      sourceInstagramMediaId: text(row.source_instagram_media_id),
       conActividad: true,
     };
 
@@ -1365,6 +1462,9 @@ function toAds(raw: Row[], provider: Platform): WindsorAd[] {
     actual.message = actual.message ?? fila.message;
     actual.headline = actual.headline ?? fila.headline;
     actual.destinationUrl = actual.destinationUrl ?? fila.destinationUrl;
+    actual.postId = actual.postId ?? fila.postId;
+    actual.sourceInstagramMediaId =
+      actual.sourceInstagramMediaId ?? fila.sourceInstagramMediaId;
   }
 
   return [...merged.values()];
@@ -1523,6 +1623,45 @@ export async function fetchFacebookPosts(
  * Windsor entrega historias y publicaciones en familias de campos separadas
  * (`story_*` contra `media_*`); una fila trae una u otra, nunca las dos.
  */
+export type CuentaInstagram = { id: string; nombre: string; usuario: string | null };
+
+let memoriaInstagram: { at: number; cuentas: CuentaInstagram[] } | null = null;
+const VIGENCIA_INSTAGRAM_MS = 6 * 60 * 60 * 1000;
+
+/** Las cuentas de Instagram que Windsor tiene conectadas (una fila por cuenta, sin traer publicaciones). */
+export async function listarCuentasDeInstagram(): Promise<CuentaInstagram[]> {
+  if (!windsorConfigured()) return [];
+  if (memoriaInstagram && Date.now() - memoriaInstagram.at < VIGENCIA_INSTAGRAM_MS) return memoriaInstagram.cuentas;
+  const hasta = new Date().toISOString().slice(0, 10);
+  const desde = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
+  const filas = await requestWindsorConnector("instagram", ["account_id", "account_name", "username"], desde, hasta, {
+    timeoutMs: TIMEOUT_ORGANICO_MS,
+  });
+  const porId = new Map<string, CuentaInstagram>();
+  for (const f of filas) {
+    const id = text(f.account_id);
+    if (!id) continue;
+    porId.set(id, { id, nombre: text(f.account_name) ?? "", usuario: text(f.username) });
+  }
+  const cuentas = [...porId.values()];
+  memoriaInstagram = { at: Date.now(), cuentas };
+  return cuentas;
+}
+
+const sinTildes = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const soloLetras = (t: string) => sinTildes(t).replace(/[^a-z0-9]+/g, "");
+
+/**
+ * La cuenta de Instagram que corresponde a un cliente, por su nombre: solo si coincide UNA (el nombre del cliente
+ * dentro del nombre o del usuario de la cuenta). Con varias o ninguna devuelve `null`: no se adivina.
+ */
+export function instagramDelCliente(cuentas: CuentaInstagram[], nombreCliente: string): string | null {
+  const clave = soloLetras(nombreCliente);
+  if (clave.length < 4) return null;
+  const candidatas = cuentas.filter((c) => soloLetras(c.nombre).includes(clave) || (c.usuario ? soloLetras(c.usuario).includes(clave) : false));
+  return candidatas.length === 1 ? candidatas[0].id : null;
+}
+
 export async function fetchInstagramMedia(
   accountId: string,
   rangeStart: string,
@@ -1739,7 +1878,21 @@ export async function executeWindsorAction(
   params: Record<string, unknown>,
 ): Promise<WindsorActionResult> {
   if (!windsorConfigured()) throw new WindsorError("Falta WINDSOR_API_KEY");
+  // Antes y después: una lectura en vuelo mientras se escribe tampoco debe quedar recordada.
+  registrarEscritura();
+  try {
+    return await ejecutarAccionDeWindsor(provider, accountId, action, params);
+  } finally {
+    registrarEscritura();
+  }
+}
 
+async function ejecutarAccionDeWindsor(
+  provider: WindsorProvider,
+  accountId: string,
+  action: string,
+  params: Record<string, unknown>,
+): Promise<WindsorActionResult> {
   const connector = PLATFORM[provider].connector;
   const url = new URL(`${API_BASE}/${connector}/actions`);
   url.searchParams.set("api_key", env.WINDSOR_API_KEY!);

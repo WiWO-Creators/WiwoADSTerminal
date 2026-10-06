@@ -1,11 +1,13 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
-import { can, enAlcance } from "@/lib/permisos";
-import { listPortfolios } from "@/lib/portafolios-store";
+import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
+import { listPortfolios, updatePortfolio } from "@/lib/portafolios-store";
 import {
   fetchFacebookPosts,
   fetchIdentidadMeta,
   fetchInstagramMedia,
+  instagramDelCliente,
+  listarCuentasDeInstagram,
   WindsorError,
   type OrganicPost,
 } from "@/lib/windsor";
@@ -30,7 +32,7 @@ const DIAS_POR_DEFECTO = 90;
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
-  if (!can(session.actor, "crear_campanas")) {
+  if (!puedeArmarCampanas(session.actor)) {
     return fail("Tu rol no puede construir campañas", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   }
 
@@ -77,16 +79,35 @@ export async function GET(request: Request) {
       );
     }
 
+    // Sin cuenta de Instagram declarada se busca entre las que Windsor tiene conectadas, por el nombre del cliente
+    // (solo si coincide una). Si se encuentra, se guarda en la ficha para no volver a buscarla.
+    let instagramId = cliente.instagramId;
+    let instagramAutomatico = false;
+    if (!instagramId) {
+      try {
+        const encontrada = instagramDelCliente(await listarCuentasDeInstagram(), cliente.name);
+        if (encontrada) {
+          instagramId = encontrada;
+          instagramAutomatico = true;
+          await updatePortfolio(session.actor, cliente.id, { instagramId: encontrada }).catch(() => {
+            // Sin permiso para guardar en la ficha: se usa igual en esta lectura.
+          });
+        }
+      } catch (error) {
+        console.error("WiWO.ADS creatividades: no se pudo buscar el Instagram del cliente", error);
+      }
+    }
+
     const [posts, instagram] = await Promise.all([
       fetchFacebookPosts(pageId, desde, hasta),
-      cliente.instagramId
-        ? fetchInstagramMedia(cliente.instagramId, desde, hasta)
+      instagramId
+        ? fetchInstagramMedia(instagramId, desde, hasta)
         : Promise.resolve<OrganicPost[]>([]),
     ]);
     // Recién después: `fetchIdentidadMeta` solo lee lo que las dos llamadas
     // de arriba acaban de guardar de paso (nunca golpea Windsor por su
     // cuenta) — en paralelo con ellas todavía no habría nada que leer.
-    const identidad = await fetchIdentidadMeta(pageId, cliente.instagramId ?? null);
+    const identidad = await fetchIdentidadMeta(pageId, instagramId ?? null);
 
     const todo = [...posts, ...instagram].sort((a, b) =>
       (b.createdAt ?? "").localeCompare(a.createdAt ?? ""),
@@ -100,9 +121,11 @@ export async function GET(request: Request) {
       {
         posts: liviano,
         identidad,
-        aviso: cliente.instagramId
-          ? null
-          : "Este cliente no tiene una cuenta de Instagram declarada, así que solo se muestra Facebook.",
+        aviso: instagramId
+          ? instagramAutomatico
+            ? "Se encontró la cuenta de Instagram de este cliente por su nombre. Revisa que sea la correcta (Clientes → ficha del cliente → Instagram)."
+            : null
+          : "Este cliente no tiene su cuenta de Instagram declarada, así que solo se muestra Facebook. Declárala en Clientes → ficha del cliente → Instagram para ver también sus publicaciones y reels.",
       },
       { headers: NO_STORE },
     );

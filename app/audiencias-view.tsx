@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { Download, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -23,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { csvParaMeta, enLotes, parsearContactos } from "@/lib/contactos";
 import type { PortfolioSummary } from "@/lib/portafolios";
 import type { AdSummary } from "@/lib/performance-store";
 import { MensajeriaView } from "./mensajeria-view";
@@ -73,6 +76,8 @@ async function ejecutar(
  * no llegó a esta integración) — no es que sea imposible, es que hoy no se
  * puede construir desde acá sin inventar el acceso.
  */
+import { AudienciasMeta } from "./audiencias-meta";
+
 export function AudienciasView({
   portfolios,
   ads,
@@ -86,7 +91,7 @@ export function AudienciasView({
   clienteSeleccionado: string | null;
   puedeAprobar: boolean;
 }) {
-  const [pestana, setPestana] = useState<"mensajeria" | "listas">("mensajeria");
+  const [pestana, setPestana] = useState<"mensajeria" | "listas" | "meta">("listas");
   const cuentasVisibles = portfolios
     .filter((p) => !clienteSeleccionado || p.id === clienteSeleccionado)
     .flatMap((p) => p.accounts);
@@ -101,13 +106,14 @@ export function AudienciasView({
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 md:p-6">
       <div className="mb-5">
-        <h2 className="neo-section-title">Audiencias</h2>
+        <h2 className="neo-section-title">Lookalike y audiencias</h2>
       </div>
       <div className="mb-4 flex gap-2">
         {(
           [
             { id: "mensajeria" as const, label: "Mensajería (WhatsApp y llamadas)" },
             { id: "listas" as const, label: "Listas de contactos" },
+            { id: "meta" as const, label: "Audiencias de Meta" },
           ]
         ).map((item) => (
           <button
@@ -125,7 +131,9 @@ export function AudienciasView({
           </button>
         ))}
       </div>
-      {pestana === "mensajeria" ? (
+      {pestana === "meta" ? (
+        <AudienciasMeta clienteId={clienteSeleccionado} puedeAprobar={puedeAprobar} />
+      ) : pestana === "mensajeria" ? (
         <MensajeriaView
           ads={adsDelCliente}
           puedeAprobar={puedeAprobar}
@@ -389,55 +397,127 @@ function TarjetaSubirContactos({
   listas: ListaConocida[];
 }) {
   const [enviando, setEnviando] = useState(false);
+  const [progreso, setProgreso] = useState<{ hechos: number; total: number } | null>(null);
   const [listaId, setListaId] = useState("");
+  // La base vive solo en la memoria de esta pantalla: no se guarda en ningún lado.
   const [texto, setTexto] = useState("");
+  const [archivo, setArchivo] = useState<string | null>(null);
   const [consentAds, setConsentAds] = useState("UNSPECIFIED");
   const [consentUser, setConsentUser] = useState("UNSPECIFIED");
-  const [ultimoRequestId, setUltimoRequestId] = useState<string | null>(null);
+  const [autorizacion, setAutorizacion] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [ultimosIds, setUltimosIds] = useState<string[]>([]);
 
-  async function subir() {
-    if (!listaId.trim()) {
-      toast.error("Falta el id de la lista");
+  // El análisis de una base grande tarda: se hace con el texto «diferido» para que escribir o pegar no congele la pantalla.
+  const textoDiferido = useDeferredValue(texto);
+  const analizando = textoDiferido !== texto;
+  const carga = useMemo(() => parsearContactos(textoDiferido), [textoDiferido]);
+  const [leyendo, setLeyendo] = useState(false);
+  const [arrastrando, setArrastrando] = useState(false);
+  const hayContactos = carga.miembros.length > 0;
+
+  async function leerArchivo(file: File | undefined) {
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error("El archivo pesa más de 25 MB: divídelo en partes");
       return;
     }
-    const members = texto
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .map((linea) => (linea.includes("@") ? { email: linea } : { phone_number: linea }));
-    if (members.length === 0) {
-      toast.error("Escribe al menos un correo o teléfono, uno por línea");
-      return;
-    }
-    setEnviando(true);
+    setLeyendo(true);
+    // Un tick para que se pinte «Leyendo…» antes de empezar el trabajo pesado.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     try {
-      // Los valores viajan tal cual — Windsor los normaliza y hashea con
-      // SHA-256 del lado del servidor antes de subirlos a Google; nunca se
-      // envía un hash armado acá.
-      const data = (await ejecutar(cuenta.accountId, "upload_customer_match_list", {
-        user_list_id: listaId.trim(),
-        members,
-        consent_ad_personalization: consentAds,
-        consent_ad_user_data: consentUser,
-        operation_type: "add",
-      })) as { request_id?: string } | null;
-      if (data?.request_id) setUltimoRequestId(data.request_id);
-      toast.success(`${members.length} contacto(s) enviados`, {
-        description: data?.request_id
-          ? `Subida en proceso — id ${data.request_id}. Google tarda de minutos a 24 horas en confirmar.`
-          : "Google confirmó la recepción.",
-      });
-      setTexto("");
-    } catch (issue) {
-      toast.error(issue instanceof Error ? issue.message : "No se pudo subir la lista");
+      if (/\.xlsx$/i.test(file.name)) {
+        // Excel: se lee la primera hoja y se pasa a texto separado por tabulaciones, que el lector ya entiende.
+        const { readSheet } = await import("read-excel-file/web-worker");
+        const filas = await readSheet(file);
+        setTexto(filas.map((fila) => fila.map((celda) => String(celda ?? "").replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n"));
+      } else if (/\.xls$/i.test(file.name)) {
+        toast.error("Guarda el archivo como .xlsx o .csv (Excel antiguo .xls no se puede leer)");
+        return;
+      } else {
+        setTexto(await file.text());
+      }
+      setArchivo(file.name);
+    } catch (error) {
+      console.error("WiWO.ADS leer archivo de contactos", error);
+      toast.error("No se pudo leer el archivo. Revisa que sea un Excel (.xlsx) o un .csv válido");
     } finally {
-      setEnviando(false);
+      setLeyendo(false);
     }
   }
 
+  async function subir() {
+    setConfirmando(false);
+    const lotes = enLotes(carga.miembros);
+    setEnviando(true);
+    setProgreso({ hechos: 0, total: lotes.length });
+    const ids: string[] = [];
+    let enviados = 0;
+    try {
+      for (const [indice, members] of lotes.entries()) {
+        // Los valores viajan tal cual: Windsor los normaliza y hashea con
+        // SHA-256 del lado del servidor antes de subirlos a Google. Nunca se
+        // envía un hash armado acá, ni se guarda el contacto en la bitácora.
+        const data = (await ejecutar(cuenta.accountId, "upload_customer_match_list", {
+          user_list_id: listaId.trim(),
+          members,
+          consent_ad_personalization: consentAds,
+          consent_ad_user_data: consentUser,
+          operation_type: "add",
+        })) as { request_id?: string } | null;
+        if (data?.request_id) ids.push(data.request_id);
+        enviados += members.length;
+        setProgreso({ hechos: indice + 1, total: lotes.length });
+      }
+      setUltimosIds(ids);
+      toast.success(`${enviados.toLocaleString("es-CL")} contacto(s) enviados`, {
+        description: ids.length
+          ? "Google tarda de minutos a 24 horas en confirmar. Revisa el estado abajo con el id de la subida."
+          : "Google confirmó la recepción.",
+      });
+      // Terminó: la base sale de la memoria de la pantalla.
+      setTexto("");
+      setArchivo(null);
+      setAutorizacion(false);
+    } catch (issue) {
+      setUltimosIds(ids);
+      toast.error(issue instanceof Error ? issue.message : "No se pudo subir la lista", {
+        description:
+          enviados > 0
+            ? `Ya se habían enviado ${enviados.toLocaleString("es-CL")} contactos antes del error; no los repitas.`
+            : undefined,
+      });
+    } finally {
+      setEnviando(false);
+      setProgreso(null);
+    }
+  }
+
+  async function descargarParaMeta() {
+    try {
+      const csv = await csvParaMeta(carga.miembros);
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const enlace = document.createElement("a");
+      enlace.href = url;
+      enlace.download = `audiencia-meta-${cuenta.portfolioName}.csv`.toLowerCase().replace(/[^a-z0-9.]+/g, "-");
+      enlace.click();
+      URL.revokeObjectURL(url);
+      toast.success("Archivo hasheado descargado", {
+        description: "Súbelo en Meta → Administrador de anuncios → Audiencias → Crear público → Lista de clientes.",
+      });
+    } catch {
+      toast.error("No se pudo generar el archivo para Meta");
+    }
+  }
+
+  const puedeSubir = hayContactos && listaId.trim() !== "" && autorizacion && !enviando;
+
   return (
     <Surface className="p-4">
-      <h3 className="text-sm font-bold text-foreground">Subir contactos</h3>
+      <h3 className="text-sm font-bold text-foreground">Cargar base de clientes</h3>
+      <p className="mt-1 text-xs leading-5 text-foreground/50">
+        Sube un CSV (o pega una lista) con correos y teléfonos. Se valida acá, en tu navegador: no se guarda en WiWO.ADS.
+      </p>
       <div className="mt-3 space-y-2">
         <Input
           value={listaId}
@@ -459,13 +539,73 @@ function TarjetaSubirContactos({
             ))}
           </div>
         )}
+
+        <label
+          // Arrastrar y soltar: el mismo camino que elegir el archivo, para no tener dos formas de leerlo.
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!arrastrando) setArrastrando(true);
+          }}
+          onDragLeave={() => setArrastrando(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setArrastrando(false);
+            void leerArchivo(e.dataTransfer.files?.[0]);
+          }}
+          className={cn(
+            "flex cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3 py-4 text-xs text-foreground/65 transition-colors hover:border-brand/40",
+            arrastrando ? "border-brand bg-brand/8 text-foreground" : "border-foreground/20",
+          )}
+        >
+          <Upload className="size-4 shrink-0" />
+          <span className="min-w-0 truncate">{leyendo ? "Leyendo el archivo…" : analizando ? "Analizando los contactos…" : arrastrando ? "Suelta el archivo aquí" : (archivo ?? "Arrastra un archivo aquí o haz clic para elegirlo (Excel .xlsx, .csv o .txt)")}</span>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv,.txt,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="sr-only"
+            onChange={(e) => void leerArchivo(e.target.files?.[0])}
+          />
+        </label>
         <Textarea
           value={texto}
-          onChange={(e) => setTexto(e.target.value)}
-          rows={5}
-          placeholder={"persona@correo.com\n+56912345678"}
+          onChange={(e) => {
+            setTexto(e.target.value);
+            setArchivo(null);
+          }}
+          rows={4}
+          placeholder={"o pega aquí, uno por línea o en columnas (correo, teléfono):\npersona@correo.com\n+56912345678"}
           className="bg-field/60"
         />
+
+        {texto.trim() !== "" && (
+          <div
+            className={
+              "rounded-lg border p-3 text-xs leading-5 " +
+              (hayContactos ? "border-foreground/10 bg-foreground/4" : "border-danger/30 bg-danger/8")
+            }
+          >
+            {hayContactos ? (
+              <>
+                <p className="font-semibold text-foreground">
+                  {carga.miembros.length.toLocaleString("es-CL")} contactos válidos
+                  {enLotes(carga.miembros).length > 1 ? ` · se enviarán en ${enLotes(carga.miembros).length} lotes` : ""}
+                </p>
+                <p className="text-foreground/60">
+                  {carga.conEmail.toLocaleString("es-CL")} con correo · {carga.conTelefono.toLocaleString("es-CL")} con teléfono
+                  {carga.invalidas > 0 ? ` · ${carga.invalidas.toLocaleString("es-CL")} sin un dato válido (se omiten)` : ""}
+                  {carga.duplicadas > 0 ? ` · ${carga.duplicadas.toLocaleString("es-CL")} repetidos (se omiten)` : ""}
+                </p>
+                <p className="mt-1 text-foreground/45">Ejemplos: {carga.ejemplos.join("   |   ")}</p>
+              </>
+            ) : (
+              <p className="text-danger">
+                No se encontró ningún correo ni teléfono válido. Revisa el archivo: debe traer una columna de correo o de
+                teléfono (en Chile, 9 dígitos; de otros países, con «+» y código).
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-3">
           <div>
             <label className="font-micro block text-[0.58rem] text-foreground/45">
@@ -502,20 +642,70 @@ function TarjetaSubirContactos({
             </Select>
           </div>
         </div>
-        <p className="text-[0.65rem] leading-5 text-foreground/35">
-          Declarar el consentimiento real de cada contacto es responsabilidad
-          de quien sube la lista, no algo que esta pantalla pueda verificar.
-        </p>
-        <Button onClick={() => void subir()} disabled={enviando}>
-          {enviando ? <OrbeDeBoton /> : null}
-          Subir
-        </Button>
-        {ultimoRequestId && (
+
+        <label className="flex cursor-pointer items-start gap-2 text-xs leading-5 text-foreground/70">
+          <input
+            type="checkbox"
+            checked={autorizacion}
+            onChange={(e) => setAutorizacion(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            Confirmo que cuento con la autorización de estas personas para usar sus datos en publicidad. Declarar el
+            consentimiento real es responsabilidad de quien sube la lista: esta pantalla no puede verificarlo.
+          </span>
+        </label>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => setConfirmando(true)} disabled={!puedeSubir}>
+            {enviando ? <OrbeDeBoton /> : null}
+            Subir a Google Ads
+          </Button>
+          <Button variant="outline" onClick={() => void descargarParaMeta()} disabled={!hayContactos || enviando}>
+            <Download /> Archivo para Meta
+          </Button>
+          {progreso && (
+            <span className="text-xs text-foreground/55">
+              Lote {progreso.hechos} de {progreso.total}…
+            </span>
+          )}
+        </div>
+        <div className="rounded-lg border border-foreground/10 bg-foreground/4 p-3 text-xs leading-5 text-foreground/65">
+          <p className="font-semibold text-foreground/80">Cómo crear el público personalizado y el lookalike en Meta</p>
+          <p className="mt-0.5">
+            Meta no permite crear audiencias desde acá. El archivo para Meta ya va con los datos hasheados (SHA-256), con columnas
+            <code className="mx-1">email</code>y<code className="mx-1">phone</code>.
+          </p>
+          <ol className="mt-1.5 list-decimal space-y-0.5 pl-5">
+            <li>Descarga el «Archivo para Meta».</li>
+            <li>En el Administrador de anuncios: Audiencias → Crear audiencia → Público personalizado → Lista de clientes.</li>
+            <li>Sube el archivo y, al mapear columnas, indica que los datos ya vienen hasheados con SHA-256.</li>
+            <li>Con el público listo: Crear audiencia → Público similar. Elige el país y el tamaño: de 1 % (el más parecido) a 10 % (el más amplio).</li>
+          </ol>
+        </div>
+        {ultimosIds.length > 0 && (
           <p className="text-[0.68rem] text-foreground/50">
-            Último id de subida: <code>{ultimoRequestId}</code>
+            Ids de subida (úsalos en «Estado de una subida»): {ultimosIds.map((i) => <code key={i} className="mr-1">{i}</code>)}
           </p>
         )}
       </div>
+
+      <AlertDialog open={confirmando} onOpenChange={setConfirmando}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Subir {carga.miembros.length.toLocaleString("es-CL")} contactos a Google Ads?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se envían a la lista {listaId.trim()} de {cuenta.accountName} a través de Windsor, que los normaliza y los
+              hashea (SHA-256) antes de entregarlos a Google. Desde acá no se pueden recuperar ni borrar. Los contactos no
+              quedan guardados en WiWO.ADS ni en su bitácora.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void subir()}>Subir</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Surface>
   );
 }

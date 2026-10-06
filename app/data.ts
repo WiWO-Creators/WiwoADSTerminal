@@ -14,7 +14,11 @@ export type ViewKey =
   | "builder"
   | "clients"
   | "historial"
-  | "audiencias";
+  | "audiencias"
+  | "simulador"
+  | "solicitudes"
+  | "impulsar"
+  | "reglas";
 
 export type Severity = "critical" | "high" | "medium" | "info";
 export type HealthState = "critical" | "warning" | "healthy" | "inactive";

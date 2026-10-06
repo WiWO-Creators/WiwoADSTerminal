@@ -48,6 +48,8 @@ export function TarjetaResumenCliente({
   objetivos: ObjectiveTotal[];
 }) {
   const [alertas, setAlertas] = useState<Alerta[] | null>(null);
+  // Las alertas son de administradores y supervisores: para el resto la API responde 403 y el bloque no se muestra.
+  const [sinAcceso, setSinAcceso] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -59,6 +61,10 @@ export function TarjetaResumenCliente({
           `/api/alertas?cliente=${encodeURIComponent(portfolio.id)}`,
           { cache: "no-store" },
         );
+        if (response.status === 403) {
+          if (!cancelado) setSinAcceso(true);
+          return;
+        }
         const body = (await response.json()) as { alertas?: Alerta[] };
         if (!cancelado && response.ok) setAlertas(body.alertas ?? []);
       } catch {
@@ -118,13 +124,11 @@ export function TarjetaResumenCliente({
           </p>
           <p className="metric-number mt-1 text-lg font-extrabold text-foreground">
             {portfolio.clicks === null ? "—" : entero(portfolio.clicks)}{" "}
-            <span className="text-sm font-normal text-muted-foreground">clics</span>
+            <span className="text-sm font-normal text-muted-foreground">
+              clics
+            </span>
           </p>
-          {objetivos.length === 0 ? (
-            <p className="metric-number text-sm text-muted-foreground">
-              Sin resultados en el rango
-            </p>
-          ) : (
+          {objetivos.length > 0 && (
             <div className="mt-0.5 space-y-0.5">
               {objetivos.map((obj) => (
                 <p
@@ -140,31 +144,36 @@ export function TarjetaResumenCliente({
           )}
         </div>
 
-        <div>
-          <p className="font-micro text-[0.6rem] text-muted-foreground">
-            Alertas activas
-          </p>
-          {alertas === null ? (
-            <p className="mt-1 text-sm text-muted-foreground">Cargando…</p>
-          ) : totalAlertas === 0 ? (
-            <p className="mt-1 text-sm text-foreground">Todo en orden.</p>
-          ) : (
-            <div className="mt-1 space-y-1">
-              <p className="flex items-center gap-1.5 text-sm text-foreground">
-                <AlertTriangle className="size-3.5 text-warn" />
-                {conteo.critica > 0 &&
-                  `${conteo.critica} crítica${conteo.critica === 1 ? "" : "s"}`}
-                {conteo.critica > 0 && (conteo.alta > 0 || conteo.media > 0) && " · "}
-                {conteo.alta > 0 && `${conteo.alta} alta${conteo.alta === 1 ? "" : "s"}`}
-                {conteo.alta > 0 && conteo.media > 0 && " · "}
-                {conteo.media > 0 && `${conteo.media} por revisar`}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Ábrelas desde &ldquo;Alertas&rdquo; en el menú.
-              </p>
-            </div>
-          )}
-        </div>
+        {!sinAcceso && (
+          <div>
+            <p className="font-micro text-[0.6rem] text-muted-foreground">
+              Alertas activas
+            </p>
+            {alertas === null ? (
+              <p className="mt-1 text-sm text-muted-foreground">Cargando…</p>
+            ) : totalAlertas === 0 ? (
+              <p className="mt-1 text-sm text-foreground">Todo en orden.</p>
+            ) : (
+              <div className="mt-1 space-y-1">
+                <p className="flex items-center gap-1.5 text-sm text-foreground">
+                  <AlertTriangle className="size-3.5 text-warn" />
+                  {conteo.critica > 0 &&
+                    `${conteo.critica} crítica${conteo.critica === 1 ? "" : "s"}`}
+                  {conteo.critica > 0 &&
+                    (conteo.alta > 0 || conteo.media > 0) &&
+                    " · "}
+                  {conteo.alta > 0 &&
+                    `${conteo.alta} alta${conteo.alta === 1 ? "" : "s"}`}
+                  {conteo.alta > 0 && conteo.media > 0 && " · "}
+                  {conteo.media > 0 && `${conteo.media} por revisar`}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Ábrelas desde &ldquo;Alertas&rdquo; en el menú.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </Surface>
   );

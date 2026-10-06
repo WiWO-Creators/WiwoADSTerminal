@@ -7,10 +7,11 @@ import {
   ArrowUpDown,
   ChevronRight,
   Columns3,
+  Eye,
+  Flame,
   ImageOff,
   Pencil,
   Search,
-  Settings2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,6 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
+  DropdownMenuItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -53,9 +55,14 @@ import {
 } from "@/components/ui/table";
 import { OBJETIVO_CORTO, OBJETIVOS } from "@/lib/objetivos";
 import type { AdSummary, PerformanceSnapshot } from "@/lib/performance-store";
-import { ACTIVE_PLATFORMS, platformLabel, type Platform } from "@/lib/plataformas";
+import { isActivePlatform, LECTURA_PLATFORMS, platformLabel, puedeAdministrar, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
-import { EditarAnuncioDialog, type AnuncioEditable } from "./editar-anuncio";
+import type { SemillaDeCampana } from "@/lib/constructor";
+import { cambioDeColumna } from "@/lib/comparacion";
+import { DEFINICION_KPI, type KpiPrincipal } from "@/lib/kpis-cliente";
+import { rangoAnterior, resolverRango } from "@/lib/rangos";
+import { perteneceASegmento, type Segmento } from "@/lib/segmentos";
+import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
 import { GestionarCampanaDialog, type CampanaGestionable } from "./gestionar-campana";
 import { OrbeDeBoton, Surface } from "./ui";
 
@@ -113,6 +120,8 @@ type ColumnaMetricaId =
   | "optimizationScore";
 
 type ColumnaOrden = "nombre" | ColumnaMetricaId;
+
+type FiltroMetrica = { columna: ColumnaMetricaId; op: ">=" | "<="; valor: number };
 
 type DefinicionColumnaMetrica = {
   id: ColumnaMetricaId;
@@ -373,21 +382,47 @@ function columnasPorDefecto(): Set<ColumnaMetricaId> {
   return new Set(COLUMNAS_METRICA.filter((c) => c.porDefecto).map((c) => c.id));
 }
 
-function columnasIniciales(): Set<ColumnaMetricaId> {
+/**
+ * Las columnas que corresponden al KPI principal de un cliente (ver
+ * `kpis-cliente.ts`): un cliente de awareness ve alcance, CPM y frecuencia; uno
+ * de leads, resultados y costo por lead. Solo los ids que existen en la tabla.
+ */
+function columnasParaKpi(kpi: KpiPrincipal | null | undefined): Set<ColumnaMetricaId> {
+  if (!kpi) return columnasPorDefecto();
+  const ids = DEFINICION_KPI[kpi].columnas.filter((id): id is ColumnaMetricaId =>
+    COLUMNAS_METRICA.some((c) => c.id === id),
+  );
+  return ids.length > 0 ? new Set(ids) : columnasPorDefecto();
+}
+
+/**
+ * Lo que la persona eligió a mano manda; sin una elección guardada, se usan las
+ * columnas del KPI del cliente, y sin KPI, las de siempre.
+ */
+function columnasIniciales(kpi?: KpiPrincipal | null): Set<ColumnaMetricaId> {
   // Se renderiza también en el servidor (vinext): `window` no existe ahí.
-  if (typeof window === "undefined") return columnasPorDefecto();
+  if (typeof window === "undefined") return columnasParaKpi(kpi);
   try {
     const guardado = window.localStorage.getItem(CLAVE_COLUMNAS);
-    if (!guardado) return columnasPorDefecto();
+    if (!guardado) return columnasParaKpi(kpi);
     const ids: unknown = JSON.parse(guardado);
-    if (!Array.isArray(ids)) return columnasPorDefecto();
+    if (!Array.isArray(ids)) return columnasParaKpi(kpi);
     const validos = ids.filter((id): id is ColumnaMetricaId =>
       COLUMNAS_METRICA.some((c) => c.id === id),
     );
-    return validos.length > 0 ? new Set(validos) : columnasPorDefecto();
+    return validos.length > 0 ? new Set(validos) : columnasParaKpi(kpi);
   } catch {
     // Privado/bloqueado/corrupto: se cae de vuelta al set por defecto, nunca rompe la pantalla.
-    return columnasPorDefecto();
+    return columnasParaKpi(kpi);
+  }
+}
+
+/** Solo se guarda una elección hecha a propósito, no lo que se muestra por defecto. */
+function guardarColumnas(columnas: Set<ColumnaMetricaId>): void {
+  try {
+    window.localStorage.setItem(CLAVE_COLUMNAS, JSON.stringify([...columnas]));
+  } catch {
+    // No es crítico: la próxima carga vuelve a las columnas por defecto.
   }
 }
 
@@ -463,6 +498,8 @@ type Fila = {
   headline: string | null;
   destinationUrl: string | null;
   callToAction: string | null;
+  /** Publicación de página que usa el anuncio (Meta) — la que impulsa `boost_post`. */
+  postId: string | null;
 };
 
 /** Qué campaña y qué conjunto están abiertos. */
@@ -508,9 +545,14 @@ export function AnunciosView({
   portfolios,
   portfolioIdFijo,
   onCrearCampana,
+  onAbrirImpulsar,
   onAgregarConjunto,
   onAgregarAnuncio,
+  onImpulsar,
+  onVersionNueva,
+  kpiPrincipal,
   puedeAprobar,
+  onDatosCambiaron,
 }: {
   performance: PerformanceSnapshot;
   portfolios: Array<{
@@ -518,6 +560,8 @@ export function AnunciosView({
     name: string;
     accountKeys: string[];
     cuentas: Array<{ key: string; name: string; provider: string }>;
+    /** Proyectos o mercados del cliente (ver `lib/segmentos.ts`). */
+    segmentos?: Segmento[];
   }>;
   /**
    * Cuando viene de la ficha de un cliente: fija el filtro a ese cliente y
@@ -526,12 +570,22 @@ export function AnunciosView({
   portfolioIdFijo?: string;
   /** "+ Crear campaña" para el cliente elegido. Sin esto, el botón no aparece. */
   onCrearCampana?: (portfolioId: string) => void;
+  /** «Impulsar»: publicación o anuncio existente en un conjunto, sin salir de Cliente. */
+  onAbrirImpulsar?: () => void;
   /** "+ Añadir conjunto" sobre una campaña real, con su id nativo. */
   onAgregarConjunto?: (attachTo: AttachToCampana) => void;
   /** "+ Añadir anuncio" sobre un conjunto real, con su id nativo. */
   onAgregarAnuncio?: (attachTo: AttachToConjunto) => void;
+  /** "Impulsar" un anuncio ya publicado de Meta: abre el Constructor con su publicación. */
+  onImpulsar?: (portfolioId: string, semilla: SemillaDeCampana) => void;
+  /** Un anuncio nuevo en el mismo conjunto con el contenido de uno que Meta no deja editar. */
+  onVersionNueva?: (attachTo: AttachToConjunto, semilla: SemillaDeCampana) => void;
+  /** KPI principal del cliente: decide qué columnas se ven si nadie eligió otras. */
+  kpiPrincipal?: KpiPrincipal | null;
   /** Sin esto, la columna de pausar/activar no aparece: es una escritura real. */
   puedeAprobar?: boolean;
+  /** Tras aplicar un cambio desde el editor: quien tiene los datos los vuelve a pedir. */
+  onDatosCambiaron?: () => void;
 }) {
   const [nivel, setNivel] = useState<Nivel>("campana");
   const [enVuelo, setEnVuelo] = useState<Set<string>>(new Set());
@@ -546,18 +600,54 @@ export function AnunciosView({
   const [portfolioId] = useState(portfolioIdFijo ?? "all");
   const [provider, setProvider] = useState("all");
   const [accountKey, setAccountKey] = useState("all");
+  const [segmentoId, setSegmentoId] = useState("all");
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro>("todos");
   const [objetivoFiltro, setObjetivoFiltro] = useState("todos");
+  // Filtros por cualquier columna de métrica («Invertido ≥ 100», «CTR ≤ 0,5»): se suman, todos deben cumplirse.
+  const [filtrosMetrica, setFiltrosMetrica] = useState<FiltroMetrica[]>([]);
+  const [nuevoFiltro, setNuevoFiltro] = useState<{ columna: ColumnaMetricaId; op: ">=" | "<="; valor: string }>({
+    columna: "invertido",
+    op: ">=",
+    valor: "",
+  });
   const [busqueda, setBusqueda] = useState("");
-  const [columnasVisibles, setColumnasVisibles] = useState<Set<ColumnaMetricaId>>(columnasIniciales);
+  const [columnasVisibles, setColumnasVisibles] = useState<Set<ColumnaMetricaId>>(() =>
+    columnasIniciales(kpiPrincipal),
+  );
   const [seleccion, setSeleccion] = useState<Seleccion | null>(null);
   const [confirmando, setConfirmando] = useState<{
     fila: Fila;
     activar: boolean;
   } | null>(null);
   const [gestionando, setGestionando] = useState<CampanaGestionable | null>(null);
-  const [editandoAnuncio, setEditandoAnuncio] = useState<AnuncioEditable | null>(null);
-  const [expandido, setExpandido] = useState<Set<string>>(new Set());
+  const [detalle, setDetalle] = useState<EntidadParaDetalle | null>(null);
+  // Quién creó cada fila, según la bitácora de lo publicado desde WiWO.ADS.
+  // Lo creado directo en la plataforma no tiene autor conocido: se ve sin dato.
+  const [creadores, setCreadores] = useState<Record<string, { nombre: string; creadoEn: number }>>({});
+  useEffect(() => {
+    if (!portfolioIdFijo) return;
+    let cancelado = false;
+    fetch(`/api/creadores?cliente=${encodeURIComponent(portfolioIdFijo)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelado && d?.creadores) setCreadores(d.creadores);
+      })
+      .catch(() => {
+        // Sin creadores la tabla funciona igual: la columna queda sin dato.
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, [portfolioIdFijo]);
+  // Comparación con el periodo anterior: se pide a demanda (es una consulta
+  // más de Windsor), no en cada apertura de la tabla.
+  const [comparar, setComparar] = useState(false);
+  const [previo, setPrevio] = useState<{
+    desde: string;
+    ads: AdSummary[];
+    etiqueta: string;
+    error: string | null;
+  } | null>(null);
   // Una marca por nivel, no una sola bolsa — así marcar campañas y pasar a
   // Conjuntos no las pierde: se usan para acotar automáticamente qué se ve
   // al bajar de nivel (ver el filtro cruzado más abajo, en `filas`).
@@ -570,25 +660,64 @@ export function AnunciosView({
   const [soloMarcadas, setSoloMarcadas] = useState(false);
   const [orden, setOrden] = useState<{ columna: ColumnaOrden; asc: boolean } | null>(null);
 
-  // Preferencia de vista, no dato del cliente: por eso vive en el navegador,
-  // no en el servidor. Si falla (privado, bloqueado), la tabla sigue andando
-  // con las columnas por defecto — nunca rompe la pantalla por esto.
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(CLAVE_COLUMNAS, JSON.stringify([...columnasVisibles]));
-    } catch {
-      // No es crítico: la próxima carga vuelve a las columnas por defecto.
-    }
-  }, [columnasVisibles]);
-
+  // Preferencia de vista, no dato del cliente: por eso vive en el navegador, y
+  // solo se guarda cuando la persona elige columnas a propósito (no las que se
+  // muestran por defecto según el KPI del cliente).
   function alternarColumna(id: ColumnaMetricaId) {
-    setColumnasVisibles((actual) => {
-      const siguiente = new Set(actual);
-      if (siguiente.has(id)) siguiente.delete(id);
-      else siguiente.add(id);
-      return siguiente;
-    });
+    const siguiente = new Set(columnasVisibles);
+    if (siguiente.has(id)) siguiente.delete(id);
+    else siguiente.add(id);
+    setColumnasVisibles(siguiente);
+    guardarColumnas(siguiente);
   }
+
+  function aplicarColumnasDelCliente() {
+    const recomendadas = columnasParaKpi(kpiPrincipal);
+    setColumnasVisibles(recomendadas);
+    guardarColumnas(recomendadas);
+  }
+
+  // El periodo anterior del MISMO largo (no un mes cerrado contra uno a medias).
+  const rangoPrevio = useMemo(() => {
+    const ahora = new Date();
+    return rangoAnterior(resolverRango(performance.rango.id, ahora), ahora);
+  }, [performance.rango.id]);
+
+  useEffect(() => {
+    if (!comparar) return;
+    if (previo && previo.desde === rangoPrevio.desde && !previo.error) return;
+    const control = new AbortController();
+    const cliente = portfolioIdFijo ? `&anuncios=1&cliente=${encodeURIComponent(portfolioIdFijo)}` : "";
+    fetch(`/api/dashboard?rango=${encodeURIComponent(rangoPrevio.id)}${cliente}`, { signal: control.signal })
+      .then(async (respuesta) => {
+        const cuerpo = await respuesta.json().catch(() => null);
+        if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudo leer el periodo anterior");
+        setPrevio({
+          desde: rangoPrevio.desde,
+          ads: (cuerpo.performance?.ads ?? []) as AdSummary[],
+          etiqueta: rangoPrevio.label,
+          error: null,
+        });
+      })
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setPrevio({
+          desde: rangoPrevio.desde,
+          ads: [],
+          etiqueta: rangoPrevio.label,
+          error: e instanceof Error ? e.message : "No se pudo leer el periodo anterior",
+        });
+      });
+    return () => control.abort();
+  }, [comparar, rangoPrevio, previo, portfolioIdFijo]);
+
+  const cargandoPrevio = comparar && (!previo || previo.desde !== rangoPrevio.desde);
+
+  // Filas del periodo anterior, al mismo nivel que la tabla, por su clave.
+  const filasPrevias = useMemo(() => {
+    if (!comparar || !previo || previo.error || previo.desde !== rangoPrevio.desde) return null;
+    return new Map(agrupar(previo.ads, nivel).map((fila) => [fila.clave, fila]));
+  }, [comparar, previo, nivel, rangoPrevio.desde]);
 
   const columnasEnOrden = useMemo(
     () => COLUMNAS_METRICA.filter((columna) => columnasVisibles.has(columna.id)),
@@ -604,6 +733,13 @@ export function AnunciosView({
           ),
     [portfolioId, portfolios],
   );
+
+  // Proyectos o mercados del cliente (Valor: Ébano, Corotú…; SQM: México, LATAM…): un filtro más de la tabla.
+  const segmentosDelCliente = useMemo(
+    () => (portfolioId === "all" ? [] : (portfolios.find((p) => p.id === portfolioId)?.segmentos ?? [])),
+    [portfolioId, portfolios],
+  );
+  const segmentoActivo = segmentosDelCliente.find((s) => s.id === segmentoId) ?? null;
 
   // La plataforma de lo abierto manda sobre el selector: al abrir una campaña
   // de Meta no tiene sentido seguir "filtrando" por Google.
@@ -632,8 +768,8 @@ export function AnunciosView({
     );
   }, [portfolioId, portfolios]);
   const plataformasDisponibles = proveedoresDelCliente
-    ? ACTIVE_PLATFORMS.filter((id) => proveedoresDelCliente.has(id))
-    : ACTIVE_PLATFORMS;
+    ? LECTURA_PLATFORMS.filter((id) => proveedoresDelCliente.has(id))
+    : LECTURA_PLATFORMS;
 
   // Clientes con más de una cuenta en la misma plataforma (SQM: SPN, España…)
   // — solo aparece el selector cuando de verdad hay más de una entre las que
@@ -673,6 +809,15 @@ export function AnunciosView({
           return false;
         }
         if (accountKey !== "all" && ad.accountKey !== accountKey) return false;
+        if (
+          segmentoActivo &&
+          !perteneceASegmento(
+            { provider: ad.provider, accountId: ad.accountId, textos: [ad.accountName, ad.campaignName, ad.adsetName, ad.adName] },
+            segmentoActivo,
+          )
+        ) {
+          return false;
+        }
         if (seleccion) {
           if (ad.accountKey !== seleccion.accountKey) return false;
           if (ad.campaignName !== seleccion.campana) return false;
@@ -685,42 +830,8 @@ export function AnunciosView({
         }
         return true;
       }),
-    [performance.ads, permitidas, providerEfectivo, accountKey, seleccion, descartadas],
+    [performance.ads, permitidas, providerEfectivo, accountKey, segmentoActivo, seleccion, descartadas],
   );
-
-  // Mismo filtro que `ads`, pero sin acotar por `seleccion` — el panel del
-  // árbol es justo lo que arma esa selección, así que necesita ver toda la
-  // jerarquía (todas las campañas visibles), no solo la campaña ya abierta.
-  const adsParaArbol = useMemo(
-    () =>
-      performance.ads.filter((ad) => {
-        if (ad.campaignId && descartadas.has(ad.campaignId)) return false;
-        if (ad.adId && descartadas.has(ad.adId)) return false;
-        if (permitidas && !permitidas.has(ad.accountKey)) return false;
-        if (providerEfectivo !== "all" && ad.provider !== providerEfectivo) {
-          return false;
-        }
-        if (accountKey !== "all" && ad.accountKey !== accountKey) return false;
-        return true;
-      }),
-    [performance.ads, permitidas, providerEfectivo, accountKey, descartadas],
-  );
-  const arbol = useMemo(() => construirArbol(adsParaArbol), [adsParaArbol]);
-
-  // Si la selección cambia por otra vía (clic en una fila de la tabla, en vez
-  // de en el árbol), la rama correspondiente se abre sola — así el árbol
-  // siempre refleja dónde se está parado, sin importar cómo se llegó ahí.
-  useEffect(() => {
-    if (!seleccion) return;
-    const idCampana = `${seleccion.accountKey}::${seleccion.campana}`;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sincroniza el árbol con la selección real
-    setExpandido((actual) => {
-      const siguiente = new Set(actual);
-      siguiente.add(idCampana);
-      if (seleccion.conjunto) siguiente.add(`${idCampana}::${seleccion.conjunto}`);
-      return siguiente;
-    });
-  }, [seleccion]);
 
   // Campañas (o conjuntos) marcados en otra pestaña acotan lo que se ve acá,
   // pero solo mientras se navega "de arriba", sin haber entrado a una campaña
@@ -729,6 +840,32 @@ export function AnunciosView({
   const marcasCampanaParaFiltrar = !seleccion ? marcasPorNivel.campana : null;
   const marcasConjuntoParaFiltrar = !seleccion ? marcasPorNivel.conjunto : null;
 
+  /**
+   * La fila con id nativo de lo elegido en el breadcrumb — `Seleccion` solo
+   * guarda nombres (sirve para filtrar y navegar), así que para ofrecer
+   * "Editar nombre" ahí mismo hace falta volver a agrupar al nivel que
+   * corresponda y encontrar la fila real. `agrupar` es pura y barata; no
+   * vale la pena guardar el id nativo en `Seleccion` solo para este botón.
+   */
+  const filaDeLaSeleccion = useMemo(() => {
+    if (!seleccion) return null;
+    if (seleccion.conjunto === null) {
+      return (
+        agrupar(ads, "campana").find(
+          (fila) => fila.accountKey === seleccion.accountKey && fila.campaignName === seleccion.campana,
+        ) ?? null
+      );
+    }
+    return (
+      agrupar(ads, "conjunto").find(
+        (fila) =>
+          fila.accountKey === seleccion.accountKey &&
+          fila.campaignName === seleccion.campana &&
+          (fila.adsetName ?? "") === seleccion.conjunto,
+      ) ?? null
+    );
+  }, [ads, seleccion]);
+
   const filas = useMemo(() => {
     const texto = busqueda.trim().toLowerCase();
     const base = agrupar(ads, nivel).filter((fila) => {
@@ -736,6 +873,14 @@ export function AnunciosView({
       if (estadoFiltro === "pausado" && !pausado(fila.status)) return false;
       if (estadoFiltro === "sin_actividad" && fila.conActividad) return false;
       if (objetivoFiltro !== "todos" && fila.objetivo !== objetivoFiltro) return false;
+      for (const f of filtrosMetrica) {
+        const columna = COLUMNAS_METRICA.find((c) => c.id === f.columna);
+        const v = columna?.valor(fila) ?? null;
+        // Sin dato no cumple ningún límite: no se cuela como si valiera cero.
+        if (v === null) return false;
+        const comparable = f.columna === "invertido" ? v / 1_000_000 : v;
+        if (f.op === ">=" ? comparable < f.valor : comparable > f.valor) return false;
+      }
       if (soloMarcadas && !marcadas.has(identidadDeMarca(fila, nivel))) return false;
       if (nivel === "conjunto" && marcasCampanaParaFiltrar && marcasCampanaParaFiltrar.size > 0) {
         if (!marcasCampanaParaFiltrar.has(identidadCampana(fila))) return false;
@@ -774,6 +919,7 @@ export function AnunciosView({
     nivel,
     estadoFiltro,
     objetivoFiltro,
+    filtrosMetrica,
     busqueda,
     soloMarcadas,
     marcadas,
@@ -828,55 +974,6 @@ export function AnunciosView({
     else if (id === "conjunto" && seleccion) {
       setSeleccion({ ...seleccion, conjunto: null });
     }
-  }
-
-  /**
-   * Clic en un nodo del panel de árbol (campaña, conjunto o anuncio): mismo
-   * destino que `abrir()`, pero se puede saltar directo a cualquier nivel de
-   * cualquier campaña sin tener que bajar de a un nivel por vez.
-   */
-  function irANodo(nodo: NodoArbol) {
-    if (nodo.tipo === "campana") {
-      setSeleccion({
-        accountKey: nodo.accountKey,
-        provider: nodo.provider,
-        accountName: nodo.accountName,
-        campana: nodo.campaignName,
-        conjunto: null,
-      });
-      setNivel("conjunto");
-      return;
-    }
-    // Conjunto y anuncio comparten destino: el anuncio es hoja, así que
-    // "abrirlo" muestra la tabla de anuncios de SU conjunto (con él adentro),
-    // igual que hace un clic en Meta.
-    setSeleccion({
-      accountKey: nodo.accountKey,
-      provider: nodo.provider,
-      accountName: nodo.accountName,
-      campana: nodo.campaignName,
-      conjunto: nodo.adsetName ?? "",
-    });
-    setNivel("anuncio");
-  }
-
-  function alternarExpandido(id: string) {
-    setExpandido((actual) => {
-      const siguiente = new Set(actual);
-      if (siguiente.has(id)) siguiente.delete(id);
-      else siguiente.add(id);
-      return siguiente;
-    });
-  }
-
-  /** Resalta en el árbol el nodo que corresponde a lo que se está viendo. */
-  function esNodoSeleccionado(nodo: NodoArbol): boolean {
-    if (!seleccion) return false;
-    if (nodo.accountKey !== seleccion.accountKey || nodo.campaignName !== seleccion.campana) {
-      return false;
-    }
-    if (nodo.tipo === "campana") return !seleccion.conjunto;
-    return (nodo.adsetName ?? "") === (seleccion.conjunto ?? "") && nodo.tipo === "conjunto";
   }
 
   const puedeAbrir = nivel === "campana" || (nivel === "conjunto" && seleccion);
@@ -986,6 +1083,14 @@ export function AnunciosView({
    */
   /** Pausar o activar una fila. Requiere el id nativo del nivel abierto. */
   function botonEstado(fila: Fila) {
+    // Plataformas que solo se leen: se ven, pero no se pausan ni se activan desde aquí.
+    if (!puedeAdministrar(fila.provider)) {
+      return (
+        <span className="text-[0.6rem] text-foreground/35" title="Esta plataforma se lee, pero todavía no se puede modificar desde WiWO.ADS">
+          Solo lectura
+        </span>
+      );
+    }
     const id = idParaEstado(fila);
     if (!id) {
       return (
@@ -1046,73 +1151,108 @@ export function AnunciosView({
   }
 
   /**
-   * Presupuesto, nombre, estrategia de puja y el resto de `gestionar-campana`
-   * — solo a nivel de campaña, que es donde vive cada una de esas acciones en
-   * Windsor. Exige el id nativo, igual que pausar/activar.
+   * Ojo pegado al nombre: abre el panel con la configuración completa de la
+   * fila tal como está hoy en la plataforma. Es solo lectura, así que lo ven
+   * todos los roles (a diferencia de los botones de edición).
    */
-  function botonGestionar(fila: Fila) {
-    if (nivel !== "campana" && nivel !== "conjunto") return null;
-    const id = nivel === "campana" ? fila.campaignId : fila.adsetId;
+  function botonDetalle(fila: Fila) {
+    const id =
+      nivel === "campana" ? fila.campaignId : nivel === "conjunto" ? fila.adsetId : fila.adId;
     if (!id) return null;
     return (
       <button
         type="button"
-        title={nivel === "campana" ? "Gestionar campaña" : "Gestionar conjunto"}
+        title="Ver configuración completa"
         onClick={(e) => {
           e.stopPropagation();
-          setGestionando({
-            provider: fila.provider as Platform,
+          setDetalle({
+            provider: fila.provider,
             accountId: fila.accountId,
             nivel,
             id,
             nombre: fila.nombre,
             currency: fila.currency,
+            rango: performance.rango.id,
           });
         }}
-        className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
+        className="shrink-0 rounded-full p-1 text-foreground/35 transition-colors hover:bg-foreground/8 hover:text-brand"
       >
-        <Settings2 className="size-3.5" />
+        <Eye className="size-3" />
       </button>
     );
   }
 
   /**
-   * Editar el contenido de un anuncio ya publicado — solo Meta (Google no
-   * tiene ninguna acción de escritura para esto, ver `editar-anuncio.tsx`) y
-   * solo a nivel de anuncio, con el id nativo en mano.
+   * Lápiz pegado al nombre, en la misma celda — acceso directo a renombrar
+   * sin ir a buscar el engranaje de la columna de acciones. Abre el mismo
+   * `GestionarCampanaDialog` que `botonGestionar`; no hay una forma de abrir
+   * solo la sección de nombre, así que es el mismo modal completo.
+   */
+  function botonEditarNombre(fila: Fila) {
+    if (nivel !== "campana" && nivel !== "conjunto") return null;
+    if (!puedeAdministrar(fila.provider)) return null;
+    const id = nivel === "campana" ? fila.campaignId : fila.adsetId;
+    if (!id) return null;
+    return (
+      <button
+        type="button"
+        title={nivel === "campana" ? "Editar la campaña" : "Editar el conjunto"}
+        onClick={(e) => {
+          e.stopPropagation();
+          // El mismo editor a pantalla completa que usan los anuncios.
+          setDetalle({
+            provider: fila.provider,
+            accountId: fila.accountId,
+            nivel,
+            id,
+            nombre: fila.nombre,
+            currency: fila.currency,
+            abrirEnEdicion: true,
+            rango: performance.rango.id,
+          });
+        }}
+        className="shrink-0 rounded-full p-1 text-foreground/35 transition-colors hover:bg-foreground/8 hover:text-brand"
+      >
+        <Pencil className="size-3" />
+      </button>
+    );
+  }
+
+  /**
+   * Presupuesto, nombre, estrategia de puja y el resto de `gestionar-campana`
+   * — solo a nivel de campaña, que es donde vive cada una de esas acciones en
+   * Windsor. Exige el id nativo, igual que pausar/activar.
+   */
+  function botonGestionar(fila: Fila) {
+    // Reemplazado por el editor a pantalla completa (botonEditarNombre / botonEditarAnuncio).
+    void fila;
+    return null;
+  }
+
+  /**
+   * Editar un anuncio ya publicado: abre el mismo panel que "ver configuración",
+   * directo en la pestaña Editar. Es el único camino para cambiar el contenido
+   * —Meta por Windsor, Google por la API de Google Ads—, así que ya no hay un
+   * botón distinto ni un botón apagado según la plataforma: el panel dice, campo
+   * por campo, qué se puede cambiar y por qué no cuando algo no se puede.
    */
   function botonEditarAnuncio(fila: Fila) {
-    if (nivel !== "anuncio") return null;
-    // Google no tiene ninguna acción de escritura para editar el contenido
-    // de un anuncio ya creado — antes acá no se mostraba nada, lo que se
-    // leía como "no me deja editar" en vez de "esto no existe en Google".
-    // Un botón deshabilitado con el motivo real es más honesto que el vacío.
-    if (fila.provider !== "meta") {
-      return (
-        <span
-          title="Google no tiene una acción para editar el contenido de un anuncio ya creado — crea uno nuevo desde el Constructor y pausa el viejo."
-          className="rounded-full border border-foreground/8 p-1.5 text-foreground/20"
-        >
-          <Pencil className="size-3.5" />
-        </span>
-      );
-    }
-    if (!fila.adId) return null;
+    if (nivel !== "anuncio" || !fila.adId || !puedeAdministrar(fila.provider)) return null;
     return (
       <button
         type="button"
         title="Editar anuncio"
         onClick={(e) => {
           e.stopPropagation();
-          setEditandoAnuncio({
+          setDetalle({
+            provider: fila.provider,
             accountId: fila.accountId,
-            adId: fila.adId!,
+            nivel: "anuncio",
+            id: fila.adId!,
             nombre: fila.nombre,
-            mensajeActual: fila.message,
-            tituloActual: fila.headline,
-            enlaceActual: fila.destinationUrl,
-            imagenActual: fila.thumbnailUrl,
-            ctaActual: fila.callToAction,
+            currency: fila.currency,
+            abrirEnEdicion: true,
+            rango: performance.rango.id,
           });
         }}
         className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
@@ -1122,7 +1262,46 @@ export function AnunciosView({
     );
   }
 
+  /**
+   * Impulsar un anuncio que ya está publicado: crea uno nuevo que reutiliza la
+   * MISMA publicación (`boost_post`), así conserva sus reacciones, comentarios y
+   * compartidos en vez de partir de cero. Solo Meta, y solo si Windsor entregó el
+   * id de la publicación.
+   */
+  function botonImpulsar(fila: Fila) {
+    if (nivel !== "anuncio" || !onImpulsar) return null;
+    if (fila.provider !== "meta" || !fila.postId) return null;
+    const accountId = fila.accountKey.split(":").slice(2).join(":");
+    return (
+      <button
+        type="button"
+        title="Impulsar este anuncio: crea uno nuevo que reutiliza su misma publicación"
+        onClick={(e) => {
+          e.stopPropagation();
+          onImpulsar(portfolioIdFijo ?? portfolioId, {
+            name: `Impulso · ${fila.nombre}`,
+            objective: "alcance",
+            platforms: ["meta"],
+            details: `Impulsa el anuncio «${fila.nombre}» (campaña «${fila.campaignName}»).`,
+            targetCountries: [],
+            metaMessage: fila.message ?? undefined,
+            boost: {
+              postId: fila.postId!,
+              accountId,
+              mediaUrl: fila.thumbnailUrl ?? "",
+              anuncioOrigen: fila.nombre,
+            },
+          });
+        }}
+        className="rounded-full border border-foreground/12 p-1.5 text-foreground/50 transition-colors hover:border-brand/30 hover:text-brand"
+      >
+        <Flame className="size-3.5" />
+      </button>
+    );
+  }
+
   function botonAgregar(fila: Fila) {
+    if (!isActivePlatform(fila.provider)) return null;
     const accountId = fila.accountKey.split(":").slice(2).join(":");
     if (nivel === "campana" && onAgregarConjunto) {
       const campaignId = fila.campaignId;
@@ -1188,35 +1367,6 @@ export function AnunciosView({
 
   return (
     <div className="flex w-full items-start gap-4">
-      <Surface className="hidden max-h-[calc(100vh-9rem)] w-64 shrink-0 overflow-y-auto p-2 lg:block">
-        <button
-          type="button"
-          onClick={() => verNivel("campana")}
-          className={cn(
-            "mb-1 w-full rounded-lg px-2 py-1.5 text-left text-[0.68rem] font-bold transition-colors",
-            !seleccion ? "bg-brand/10 text-brand" : "text-foreground/50 hover:bg-foreground/5",
-          )}
-        >
-          Todas las campañas
-        </button>
-        {arbol.length === 0 ? (
-          <p className="px-2 py-4 text-[0.68rem] text-foreground/40">
-            Sin campañas con los filtros actuales.
-          </p>
-        ) : (
-          arbol.map((nodo) => (
-            <NodoDelArbol
-              key={nodo.id}
-              nodo={nodo}
-              profundidad={0}
-              expandido={expandido}
-              onToggleExpand={alternarExpandido}
-              onSeleccionar={irANodo}
-              esSeleccionado={esNodoSeleccionado}
-            />
-          ))
-        )}
-      </Surface>
       <div className="min-w-0 flex-1">
       <Surface className="mb-4 flex flex-wrap items-center gap-3 p-3">
         {/* Sin borde propio: ya vive dentro de una tarjeta con su propio
@@ -1271,6 +1421,15 @@ export function AnunciosView({
             + Crear campaña
           </button>
         )}
+        {onAbrirImpulsar && portfolioId !== "all" && (
+          <button
+            type="button"
+            onClick={onAbrirImpulsar}
+            className="shrink-0 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-brand/20"
+          >
+            Impulsar
+          </button>
+        )}
 
         <Select
           value={estadoFiltro}
@@ -1314,6 +1473,22 @@ export function AnunciosView({
             plataforma elegida — el caso SQM (España, SPN…) o ALO Group (una
             cuenta de Google por país): sin esto, esas cuentas solo se podían
             ver todas juntas o abriendo campaña por campaña. */}
+        {!seleccion && segmentosDelCliente.length > 0 && (
+          <Select value={segmentoId} onValueChange={setSegmentoId}>
+            <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-52" aria-label="Proyecto o país">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los proyectos / países</SelectItem>
+              {segmentosDelCliente.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
         {!seleccion && cuentasDelCliente.length > 1 && (
           <Select value={accountKey} onValueChange={setAccountKey}>
             <SelectTrigger size="sm" className="w-full bg-field/60 lg:w-48">
@@ -1350,6 +1525,63 @@ export function AnunciosView({
         </Select>
       </Surface>
 
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
+        <Select value={nuevoFiltro.columna} onValueChange={(v) => setNuevoFiltro((n) => ({ ...n, columna: v as ColumnaMetricaId }))}>
+          <SelectTrigger size="sm" className="w-40 bg-field/60">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {COLUMNAS_METRICA.filter((c) => !c.id.endsWith("Ranking")).map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={nuevoFiltro.op} onValueChange={(v) => setNuevoFiltro((n) => ({ ...n, op: v as ">=" | "<=" }))}>
+          <SelectTrigger size="sm" className="w-24 bg-field/60">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value=">=">Mayor o igual</SelectItem>
+            <SelectItem value="<=">Menor o igual</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          inputMode="decimal"
+          value={nuevoFiltro.valor}
+          onChange={(e) => setNuevoFiltro((n) => ({ ...n, valor: e.target.value }))}
+          placeholder="Valor"
+          aria-label="Valor del filtro"
+          className="h-8 w-24 bg-field/60"
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            const valor = Number(nuevoFiltro.valor.replace(",", "."));
+            if (!nuevoFiltro.valor.trim() || !Number.isFinite(valor)) return;
+            setFiltrosMetrica((a) => [...a, { columna: nuevoFiltro.columna, op: nuevoFiltro.op, valor }]);
+            setNuevoFiltro((n) => ({ ...n, valor: "" }));
+          }}
+        >
+          Filtrar por columna
+        </Button>
+        {filtrosMetrica.map((f, i) => (
+          <button
+            key={`${f.columna}-${f.op}-${f.valor}-${i}`}
+            type="button"
+            onClick={() => setFiltrosMetrica((a) => a.filter((_, j) => j !== i))}
+            aria-label="Quitar este filtro"
+            className="inline-flex items-center gap-1 rounded-full border border-brand/40 bg-brand/10 px-2.5 py-1 font-semibold text-foreground"
+          >
+            {COLUMNAS_METRICA.find((c) => c.id === f.columna)?.label} {f.op === ">=" ? "≥" : "≤"} {f.valor}
+            <X className="size-3" />
+          </button>
+        ))}
+      </div>
+
       {seleccion ? (
         <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs">
           <button
@@ -1381,6 +1613,39 @@ export function AnunciosView({
               </span>
             </>
           ) : null}
+          {puedeAprobar &&
+            filaDeLaSeleccion &&
+            (() => {
+              // Edita lo más específico que muestra el breadcrumb: el
+              // conjunto si hay uno elegido, si no la campaña — no la
+              // variable de estado `nivel` (que en ese momento ya bajó un
+              // paso más, a "anuncio", y no sirve para decidir esto).
+              const nivelBreadcrumb = seleccion.conjunto !== null ? "conjunto" : "campana";
+              const id =
+                nivelBreadcrumb === "campana"
+                  ? filaDeLaSeleccion.campaignId
+                  : filaDeLaSeleccion.adsetId;
+              if (!id) return null;
+              return (
+                <button
+                  type="button"
+                  title={nivelBreadcrumb === "campana" ? "Editar nombre de la campaña" : "Editar nombre del conjunto"}
+                  onClick={() =>
+                    setGestionando({
+                      provider: filaDeLaSeleccion.provider as Platform,
+                      accountId: filaDeLaSeleccion.accountId,
+                      nivel: nivelBreadcrumb,
+                      id,
+                      nombre: filaDeLaSeleccion.nombre,
+                      currency: filaDeLaSeleccion.currency,
+                    })
+                  }
+                  className="rounded-full p-1 text-foreground/40 transition-colors hover:bg-foreground/8 hover:text-brand"
+                >
+                  <Pencil className="size-3" />
+                </button>
+              );
+            })()}
           <button
             type="button"
             onClick={() => verNivel("campana")}
@@ -1466,6 +1731,22 @@ export function AnunciosView({
                 ? ` · ${sinActividad} SIN ACTIVIDAD EN EL RANGO`
                 : ""}
             </span>
+            <button
+              type="button"
+              onClick={() => setComparar((c) => !c)}
+              title={`Muestra el cambio frente a ${rangoPrevio.label}, del mismo largo`}
+              className={cn(
+                "h-7 rounded-md border px-2.5 text-[0.62rem] font-semibold transition-colors",
+                comparar
+                  ? "border-brand/40 bg-brand/10 text-brand"
+                  : "border-foreground/12 text-foreground/60 hover:text-foreground",
+              )}
+            >
+              {cargandoPrevio ? "Comparando…" : "Comparar con el periodo anterior"}
+            </button>
+            {comparar && previo?.error && (
+              <span className="text-[0.6rem] text-danger">{previo.error}</span>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1482,6 +1763,14 @@ export function AnunciosView({
                   Métricas visibles
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {kpiPrincipal && (
+                  <>
+                    <DropdownMenuItem onSelect={aplicarColumnasDelCliente}>
+                      Recomendadas: {DEFINICION_KPI[kpiPrincipal].etiqueta}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 {COLUMNAS_METRICA.map((columna) => (
                   <DropdownMenuCheckboxItem
                     key={columna.id}
@@ -1567,6 +1856,7 @@ export function AnunciosView({
                       </button>
                     </TableHead>
                   ))}
+                  <TableHead className="text-xs text-foreground/58">Creador</TableHead>
                   <TableHead className="text-xs text-foreground/58">
                     Objetivo
                   </TableHead>
@@ -1622,11 +1912,15 @@ export function AnunciosView({
                             </span>
                           ))}
                         <div className="min-w-0">
-                          <span
-                            className="block max-w-[380px] truncate text-sm font-bold text-foreground"
-                            title={fila.nombre}
-                          >
-                            {fila.nombre}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className="block max-w-[340px] truncate text-sm font-bold text-foreground"
+                              title={fila.nombre}
+                            >
+                              {fila.nombre}
+                            </span>
+                            {botonDetalle(fila)}
+                            {botonEditarNombre(fila)}
                           </span>
                           <span className="mt-1 block max-w-[380px] truncate text-xs text-foreground/45">
                             {platformLabel(fila.provider)} · {fila.contexto} ·{" "}
@@ -1658,9 +1952,50 @@ export function AnunciosView({
                           )}
                         >
                           {valor === null ? <SinDato /> : columna.formato(valor, fila)}
+                          {(() => {
+                            if (!filasPrevias || valor === null) return null;
+                            const filaPrevia = filasPrevias.get(fila.clave);
+                            if (!filaPrevia || !filaPrevia.conActividad) return null;
+                            const cambio = cambioDeColumna(columna.id, valor, columna.valor(filaPrevia));
+                            if (!cambio) return null;
+                            return (
+                              <span
+                                title={`Frente a ${previo?.etiqueta ?? "el periodo anterior"}`}
+                                className={cn(
+                                  "block text-[0.6rem] font-semibold leading-3",
+                                  cambio.tono === "bueno" && "text-ok",
+                                  cambio.tono === "malo" && "text-danger",
+                                  cambio.tono === "neutro" && "text-foreground/40",
+                                )}
+                              >
+                                {cambio.texto}
+                              </span>
+                            );
+                          })()}
                         </TableCell>
                       );
                     })}
+                    <TableCell className="text-xs">
+                      {(() => {
+                        const id = nivel === "campana" ? fila.campaignId : nivel === "conjunto" ? fila.adsetId : fila.adId;
+                        const creador = id ? creadores[`${fila.provider}:${nivel}:${id}`] : undefined;
+                        return creador ? (
+                          <span
+                            className="text-foreground/75"
+                            title={`Publicado desde WiWO.ADS el ${new Date(creador.creadoEn).toLocaleDateString("es-CL")}`}
+                          >
+                            {creador.nombre}
+                          </span>
+                        ) : (
+                          <span
+                            className="text-foreground/30"
+                            title="Sin registro: se creó directo en la plataforma o antes de que WiWO.ADS llevara bitácora"
+                          >
+                            —
+                          </span>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell>
                       {fila.objetivo ? (
                         <span className="inline-flex rounded-full bg-brand/12 px-2 py-0.5 text-[0.62rem] font-bold text-brand">
@@ -1702,6 +2037,7 @@ export function AnunciosView({
                           {botonDescartar(fila)}
                           {botonGestionar(fila)}
                           {botonEditarAnuncio(fila)}
+                          {botonImpulsar(fila)}
                           {botonEstado(fila)}
                         </div>
                       </TableCell>
@@ -1755,15 +2091,44 @@ export function AnunciosView({
         </AlertDialogContent>
       </AlertDialog>
 
+      <DetalleEntidadSheet
+        entidad={detalle}
+        ads={performance.ads}
+        puedeAprobar={Boolean(puedeAprobar)}
+        onOpenChange={(open) => !open && setDetalle(null)}
+        onAplicado={onDatosCambiaron}
+        onCrearVersion={
+          onVersionNueva
+            ? (v) =>
+                onVersionNueva(
+                  {
+                    portfolioId: portfolioIdFijo ?? portfolioId,
+                    platform: "meta",
+                    accountId: v.accountId,
+                    campaignId: v.campaignId,
+                    campaignName: v.campaignName,
+                    adsetId: v.adsetId,
+                    adsetName: v.adsetName,
+                  },
+                  {
+                    name: `${v.nombre} (versión editada)`,
+                    objective: "alcance",
+                    platforms: ["meta"],
+                    details: `Versión nueva de «${v.nombre}», que usa una publicación existente y Meta no deja editar. Se crea como anuncio nuevo en el mismo conjunto; el original sigue publicado hasta que lo pauses.`,
+                    targetCountries: [],
+                    landingUrl: v.urlDestino ?? undefined,
+                    metaMessage: v.textoPrincipal ?? undefined,
+                    metaHeadline: v.titulo ?? undefined,
+                    versionDeAnuncio: { mediaUrl: v.imagenUrl ?? "", cta: v.cta, anuncioOrigen: v.nombre },
+                  },
+                )
+            : undefined
+        }
+      />
       <GestionarCampanaDialog
         campana={gestionando}
         open={Boolean(gestionando)}
         onOpenChange={(open) => !open && setGestionando(null)}
-      />
-      <EditarAnuncioDialog
-        anuncio={editandoAnuncio}
-        open={Boolean(editandoAnuncio)}
-        onOpenChange={(open) => !open && setEditandoAnuncio(null)}
       />
       </div>
     </div>
@@ -1790,184 +2155,6 @@ function identidadDeMarca(fila: Fila, nivel: Nivel): string {
 }
 
 /** Un nodo del panel de navegación en árbol (campaña → conjunto → anuncio). */
-type NodoArbol = {
-  id: string;
-  tipo: Nivel;
-  nombre: string;
-  accountKey: string;
-  provider: string;
-  accountName: string;
-  campaignName: string;
-  adsetName: string | null;
-  status: string | null;
-  conActividad: boolean;
-  hijos: NodoArbol[];
-};
-
-/**
- * Arma la jerarquía completa (campaña → conjunto → anuncio) para el panel de
- * navegación tipo árbol — a diferencia de `agrupar`, que aplana a un solo
- * nivel a la vez para la tabla, esto anida los tres para poder verlos y
- * moverse entre ellos sin perder de vista el resto de la campaña, como en
- * Meta Ads Manager.
- */
-function construirArbol(ads: AdSummary[]): NodoArbol[] {
-  const campanas = new Map<string, NodoArbol>();
-  const conjuntos = new Map<string, NodoArbol>();
-
-  for (const ad of ads) {
-    const claveCampana = `${ad.accountKey}::${ad.campaignName}`;
-    let campana = campanas.get(claveCampana);
-    if (!campana) {
-      campana = {
-        id: claveCampana,
-        tipo: "campana",
-        nombre: ad.campaignName,
-        accountKey: ad.accountKey,
-        provider: ad.provider,
-        accountName: ad.accountName,
-        campaignName: ad.campaignName,
-        adsetName: null,
-        status: ad.status,
-        conActividad: ad.conActividad,
-        hijos: [],
-      };
-      campanas.set(claveCampana, campana);
-    }
-    if (activo(ad.status)) campana.status = ad.status;
-    if (ad.conActividad) campana.conActividad = true;
-
-    const nombreConjunto = ad.adsetName ?? `${ad.campaignName} · sin conjunto`;
-    const claveConjunto = `${claveCampana}::${nombreConjunto}`;
-    let conjunto = conjuntos.get(claveConjunto);
-    if (!conjunto) {
-      conjunto = {
-        id: claveConjunto,
-        tipo: "conjunto",
-        nombre: nombreConjunto,
-        accountKey: ad.accountKey,
-        provider: ad.provider,
-        accountName: ad.accountName,
-        campaignName: ad.campaignName,
-        adsetName: ad.adsetName,
-        status: ad.status,
-        conActividad: ad.conActividad,
-        hijos: [],
-      };
-      conjuntos.set(claveConjunto, conjunto);
-      campana.hijos.push(conjunto);
-    }
-    if (activo(ad.status)) conjunto.status = ad.status;
-    if (ad.conActividad) conjunto.conActividad = true;
-
-    const nombreAnuncio = ad.adName ? primerTitulo(ad.adName) : `${ad.campaignName} · sin anuncio`;
-    conjunto.hijos.push({
-      id: `${claveConjunto}::${ad.adId ?? nombreAnuncio}`,
-      tipo: "anuncio",
-      nombre: nombreAnuncio,
-      accountKey: ad.accountKey,
-      provider: ad.provider,
-      accountName: ad.accountName,
-      campaignName: ad.campaignName,
-      adsetName: ad.adsetName,
-      status: ad.status,
-      conActividad: ad.conActividad,
-      hijos: [],
-    });
-  }
-
-  return [...campanas.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
-}
-
-const ICONO_DE_TIPO: Record<Nivel, string> = {
-  campana: "📣",
-  conjunto: "🗂️",
-  anuncio: "🖼️",
-};
-
-/** Una fila del panel de árbol, recursiva — campaña, conjunto o anuncio. */
-function NodoDelArbol({
-  nodo,
-  profundidad,
-  expandido,
-  onToggleExpand,
-  onSeleccionar,
-  esSeleccionado,
-}: {
-  nodo: NodoArbol;
-  profundidad: number;
-  expandido: Set<string>;
-  onToggleExpand: (id: string) => void;
-  onSeleccionar: (nodo: NodoArbol) => void;
-  esSeleccionado: (nodo: NodoArbol) => boolean;
-}) {
-  const abierto = expandido.has(nodo.id);
-  const tieneHijos = nodo.hijos.length > 0;
-  const seleccionado = esSeleccionado(nodo);
-
-  return (
-    <div>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => onSeleccionar(nodo)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") onSeleccionar(nodo);
-        }}
-        className={cn(
-          "flex cursor-pointer items-center gap-1.5 rounded-lg py-1.5 pr-2 text-xs transition-colors hover:bg-foreground/5",
-          seleccionado ? "bg-brand/10 font-bold text-brand" : "text-foreground/75",
-        )}
-        style={{ paddingLeft: `${profundidad * 14 + 6}px` }}
-      >
-        {tieneHijos ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleExpand(nodo.id);
-            }}
-            aria-label={abierto ? "Contraer" : "Expandir"}
-            className="shrink-0 text-foreground/35 hover:text-foreground"
-          >
-            <ChevronRight className={cn("size-3 transition-transform", abierto && "rotate-90")} />
-          </button>
-        ) : (
-          <span className="inline-block size-3 shrink-0" />
-        )}
-        <span
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            activo(nodo.status) ? "bg-ok-deep" : "bg-foreground/25",
-          )}
-          title={activo(nodo.status) ? "Activo" : "Pausado"}
-        />
-        <span className="shrink-0" aria-hidden>
-          {ICONO_DE_TIPO[nodo.tipo]}
-        </span>
-        <span className="min-w-0 flex-1 truncate" title={nodo.nombre}>
-          {nodo.nombre}
-        </span>
-        {tieneHijos && (
-          <span className="shrink-0 text-[0.6rem] text-foreground/35">{nodo.hijos.length}</span>
-        )}
-      </div>
-      {abierto &&
-        nodo.hijos.map((hijo) => (
-          <NodoDelArbol
-            key={hijo.id}
-            nodo={hijo}
-            profundidad={profundidad + 1}
-            expandido={expandido}
-            onToggleExpand={onToggleExpand}
-            onSeleccionar={onSeleccionar}
-            esSeleccionado={esSeleccionado}
-          />
-        ))}
-    </div>
-  );
-}
-
 /**
  * Agrupa las filas de anuncio al nivel pedido.
  *
@@ -2050,6 +2237,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
         headline: ad.headline,
         destinationUrl: ad.destinationUrl,
         callToAction: ad.callToAction ?? null,
+        postId: ad.postId ?? null,
       });
       continue;
     }
@@ -2101,6 +2289,7 @@ function agrupar(ads: AdSummary[], nivel: Nivel): Fila[] {
     actual.headline = actual.headline ?? ad.headline;
     actual.destinationUrl = actual.destinationUrl ?? ad.destinationUrl;
     actual.callToAction = actual.callToAction ?? ad.callToAction ?? null;
+    actual.postId = actual.postId ?? ad.postId ?? null;
   }
 
   for (const fila of grupos.values()) {

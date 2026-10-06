@@ -1,11 +1,12 @@
 import { getSession } from "@/app/sesion";
-import type { Actor } from "@/lib/permisos";
+import { can, type Actor } from "@/lib/permisos";
 import {
   IntegrationError,
   listIntegrations,
   userCanManageIntegrations,
 } from "@/lib/integration-store";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
+import type { PlataformaConectable } from "@/lib/plataformas";
 import { windsorConfigured } from "@/lib/windsor";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,12 @@ export async function GET() {
     );
   }
   const user = session.actor;
+  if (!can(user, "ver_cuentas")) {
+    return Response.json(
+      { error: "Las cuentas conectadas las ve solo un administrador." },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
+  }
 
   try {
     return Response.json(
@@ -51,7 +58,7 @@ async function windsorStatus(actor: Actor) {
       incluirCampanas: false,
       incluirAnuncios: false,
     });
-    const porProveedor = (provider: "google" | "meta") =>
+    const porProveedor = (provider: PlataformaConectable) =>
       performance.accounts
         .filter((account) => account.provider === provider && account.hasData)
         .map((account) => ({

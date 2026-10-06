@@ -59,6 +59,10 @@ declare module "cloudflare:workers" {
     MEDIA?: R2Bucket;
     OAUTH_TOKEN_KEY?: string;
     WINDSOR_API_KEY?: string;
+    /** Clave del evaluador programado de reglas (`servidor/evaluar-reglas.mjs`). */
+    CRON_SECRET?: string;
+    /** Token del usuario del sistema «WiwoAds» de Meta (API directa). */
+    META_SYSTEM_USER_TOKEN?: string;
     ANTHROPIC_API_KEY?: string;
     SESSION_SECRET?: string;
     WIWO_RUNTIME?: string;

@@ -188,7 +188,9 @@ function GeoMap({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-foreground/10">
+    // `isolate`: los paneles de Leaflet traen z-index de 400 a 1000; sin un contexto propio se
+    // pintaban por encima de los diálogos (la vista previa, por ejemplo).
+    <div className="relative isolate z-0 overflow-hidden rounded-xl border border-foreground/10">
       <MapContainer
         center={[-15, -68]}
         zoom={3}
@@ -376,6 +378,8 @@ type ResultadoLugar = {
   lng?: number;
   radiusKm?: number;
   aproximado?: boolean;
+  /** El `key` real de Meta, cuando Meta reconoce el lugar. */
+  metaKey?: string;
 };
 
 /**
@@ -400,6 +404,7 @@ async function resolverLugar(
       lng: lugar.lng,
       radiusKm: lugar.radiusKm,
       aproximado: lugar.aproximado ?? false,
+      ...(lugar.metaKey ? { metaKey: lugar.metaKey } : {}),
     };
   }
   let coordenadas: { lat: number; lng: number; radiusKm: number; aproximado: boolean } | null =
@@ -422,6 +427,7 @@ async function resolverLugar(
     countryCode: lugar.countryCode,
     tier,
     ...(coordenadas ?? {}),
+    ...(lugar.metaKey ? { metaKey: lugar.metaKey } : {}),
   };
 }
 
@@ -719,11 +725,13 @@ function ResumenDeSegmentacion({
           label={`${lugar.nombre} · ${lugar.tier === "region" ? "Región" : "Ciudad"}${
             !/^\d+$/.test(lugar.id)
               ? " · solo Meta"
-              : lugar.radiusKm === undefined
-                ? " · solo Google"
-                : lugar.aproximado
-                  ? " · aprox. en Meta"
-                  : ""
+              : lugar.metaKey
+                ? " · Meta ✓"
+                : lugar.radiusKm === undefined
+                  ? " · solo Google"
+                  : lugar.aproximado
+                    ? " · aprox. en Meta"
+                    : ""
           }`}
           tipo={lugar.tier === "region" ? "region" : "ciudad"}
           onQuitar={() => onQuitarLugar(lugar.id)}

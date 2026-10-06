@@ -28,3 +28,9 @@ test("un campo estructurado gana sobre el texto", () => {
 test("sin id devuelve null en vez de inventar uno", () => {
   assert.equal(idDeResultado({ result: "Something failed" }, ["id"]), null);
 });
+
+test("boost_post: el id del anuncio es el que sigue a «as ad», no el del conjunto", async () => {
+  const { idDeResultado } = await import("../lib/ids-de-resultado.ts");
+  const raw = { result: "Post 286255651767382_914886358336034 boosted successfully as ad 52532282766237 in ad set 52532282752237. Use enable_ad to activate it or pause_ad to pause it." };
+  assert.equal(idDeResultado(raw, ["ad_id", "adId", "id"]), "52532282766237");
+});

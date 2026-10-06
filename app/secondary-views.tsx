@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ArrowRight,
   CircleDollarSign,
-  HeartPulse,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
@@ -23,10 +22,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { platformLabel } from "@/lib/plataformas";
 import { summarizeObjectives, type ObjectiveTotal } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
 import { TarjetaResumenCliente } from "./resumen-cliente";
+import { DistribucionDelGasto } from "./distribucion-gasto";
+import { SaludDeMedicion } from "./salud-medicion";
+import { BotonDeSugerencias } from "./sugerencias-tinder";
+import { PresupuestoDelMes } from "./presupuesto-mes";
 import { TarjetaResumenSemanal } from "./resumen-semanal";
 import {
   HealthBadge,
@@ -189,6 +193,94 @@ function TarjetaDeModulo({
   );
 }
 
+const ESTADO_DE_CAMPANA: Record<string, { texto: string; clase: string }> = {
+  ACTIVE: { texto: "Activa", clase: "bg-[#3BFF00]/12 text-brand" },
+  ENABLED: { texto: "Activa", clase: "bg-[#3BFF00]/12 text-brand" },
+  PAUSED: { texto: "Pausada", clase: "bg-foreground/[0.07] text-foreground/60" },
+  REMOVED: { texto: "Eliminada", clase: "bg-danger/10 text-danger" },
+  DELETED: { texto: "Eliminada", clase: "bg-danger/10 text-danger" },
+  ARCHIVED: { texto: "Archivada", clase: "bg-foreground/[0.07] text-foreground/50" },
+  WITH_ISSUES: { texto: "Con problemas", clase: "bg-warn/12 text-warn" },
+  IN_PROCESS: { texto: "En revisión", clase: "bg-warn/12 text-warn" },
+};
+
+function estadoDeCampana(status: string | null) {
+  const clave = (status ?? "").toUpperCase();
+  return ESTADO_DE_CAMPANA[clave] ?? { texto: status ? status.toLowerCase() : "Sin estado", clase: "bg-foreground/[0.07] text-foreground/55" };
+}
+
+/**
+ * Lo que importa de un vistazo: cuenta, campaña, plataforma y estado. Las campañas son las que tuvieron actividad
+ * en el período elegido (lo que Windsor entrega); una pausada hace tiempo no aparece hasta que se pide el catálogo.
+ */
+function TablaDeCampanas({
+  campanas,
+  cuentas,
+  onOpenIntegrations,
+}: {
+  campanas: PerformanceSnapshot["campaigns"];
+  cuentas: Array<{ id: string; name: string; provider: string }>;
+  onOpenIntegrations: () => void;
+}) {
+  const nombreDeCuenta = new Map(cuentas.map((a) => [a.id, a.name]));
+  return (
+    <Surface className="mb-4 overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-foreground/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="font-bold text-foreground">Campañas del cliente</h3>
+          <p className="mt-1 text-xs text-foreground/58">
+            {campanas.length} {campanas.length === 1 ? "campaña" : "campañas"} con actividad en el período elegido
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="bg-card" onClick={onOpenIntegrations}>
+          <RefreshCw />
+          Revisar fuentes
+        </Button>
+      </div>
+      <div className="max-h-[28rem] overflow-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-foreground/[0.03] hover:bg-foreground/[0.04]">
+              <TableHead className="pl-4 text-xs text-foreground/58">Cuenta</TableHead>
+              <TableHead className="text-xs text-foreground/58">Campaña</TableHead>
+              <TableHead className="text-xs text-foreground/58">Plataforma</TableHead>
+              <TableHead className="pr-4 text-xs text-foreground/58">Estado</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {campanas.map((c) => {
+              const estado = estadoDeCampana(c.status);
+              return (
+                <TableRow key={`${c.accountKey}-${c.campaignId ?? c.name}`} className="h-12">
+                  <TableCell className="pl-4 text-sm font-bold text-foreground">{nombreDeCuenta.get(c.accountKey) ?? c.accountName}</TableCell>
+                  <TableCell className="max-w-[28rem] truncate text-sm text-foreground/82" title={c.name}>
+                    {c.name}
+                  </TableCell>
+                  <TableCell>
+                    <span className="rounded-md bg-foreground/[0.07] px-2 py-1 text-xs font-semibold text-foreground/66">
+                      {platformLabel(c.provider)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="pr-4">
+                    <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", estado.clase)}>{estado.texto}</span>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {campanas.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} className="h-32 text-center text-sm text-foreground/58">
+                  Este cliente no tuvo campañas con actividad en el período elegido.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </Surface>
+  );
+}
+
 export function HealthView({
   client,
   performance,
@@ -200,6 +292,9 @@ export function HealthView({
   critical,
   warnings,
   puedeVerResumen,
+  puedeVerAlertas,
+  puedeEditarFicha,
+  puedeVerSugerencias,
 }: {
   /**
    * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
@@ -217,6 +312,12 @@ export function HealthView({
   warnings: number;
   /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
   puedeVerResumen: boolean;
+  /** Administrador o supervisor: ven las alertas técnicas (medición, Tag Manager). */
+  puedeVerAlertas: boolean;
+  /** Puede editar la ficha del cliente (para avisar qué falta cargar). */
+  puedeEditarFicha: boolean;
+  /** Todo el equipo menos el cliente ve las sugerencias. */
+  puedeVerSugerencias: boolean;
 }) {
   const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
@@ -226,10 +327,17 @@ export function HealthView({
   // `summarizeObjectives`), así que acá se recalcula solo con las campañas
   // de este cliente — `byObjective` en el snapshot es de toda la cartera.
   const cuentasDelCliente = new Set(portfolio?.accounts.map((a) => a.id) ?? []);
+  // Solo los objetivos que ese cliente de verdad movió: uno con campañas pero
+  // sin ningún resultado no aporta nada y se lee como un dato roto ("—").
   const objetivosDelCliente = portfolio
     ? summarizeObjectives(
         performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)),
-      )
+      ).filter((o) => o.result !== null && o.result > 0)
+    : [];
+
+  // Las campañas de este cliente, para la tabla de estado (la de verificaciones técnicas va plegada).
+  const campanasDelCliente = portfolio
+    ? performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)).sort((a, b) => b.spendMicros - a.spendMicros)
     : [];
 
   // Sin cliente elegido no hay nada que medir: antes el selector arrancaba
@@ -272,25 +380,10 @@ export function HealthView({
             {portfolio.name}
           </h2>
           <p className="mt-2 max-w-xl text-xs leading-5 text-foreground/50">
-            Por cada cuenta: ¿sigue autorizada la conexión? ¿los datos llegaron
-            al día? Esto no mide el rendimiento de las campañas.
+            Cuánto se invirtió, cuánto queda, adónde se fue y qué conviene revisar.
           </p>
         </div>
-      </div>
-
-      {/*
-        Antes esto era una fila más en la tabla, repetida idéntica por cada
-        cuenta: "Cambios automáticos · inactivo". Un valor que nunca cambia no
-        es una verificación de nada — es una regla del sistema entero, y va
-        acá, una sola vez.
-      */}
-      <div className="mb-4 flex items-start gap-2 rounded-xl border border-foreground/10 bg-foreground/[0.03] px-4 py-3">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
-        <p className="text-xs leading-5 text-foreground/60">
-          Este sistema no ejecuta cambios automáticos en ninguna cuenta: crear,
-          pausar o activar algo siempre lo confirma una persona — desde el
-          Constructor, el botón de una campaña o una propuesta del asistente.
-        </p>
+        {puedeVerSugerencias && <BotonDeSugerencias key={`sugerencias-${portfolio.id}`} clienteId={portfolio.id} rango={performance.rango.id} />}
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -322,6 +415,32 @@ export function HealthView({
         />
         <TarjetaResultadosPorObjetivo objetivos={objetivosDelCliente} monthLabel={monthLabel} />
       </div>
+
+      {/* Del cliente elegido, no de toda la cartera — a diferencia del
+          resumen agregado de arriba cuando no hay cliente elegido, acá ya se
+          sabe de quién es la pantalla, así que no tiene sentido mezclarlo
+          con el gasto de otros clientes. */}
+      <TarjetaResumenCliente
+        portfolio={portfolio}
+        periodo={{
+          desde: performance.rangeStart,
+          hasta: performance.rangeEnd,
+          enCurso: performance.rango.enCurso,
+        }}
+        objetivos={objetivosDelCliente}
+      />
+
+      <PresupuestoDelMes key={`presupuesto-${portfolio.id}`} portfolioId={portfolio.id} />
+
+      <DistribucionDelGasto
+        campanas={performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey))}
+        objetivos={objetivosDelCliente}
+        periodo={etiquetaPeriodo(performance)}
+      />
+
+      {puedeVerAlertas && (
+        <SaludDeMedicion key={`medicion-${portfolio.id}`} portfolioId={portfolio.id} puedeEditar={puedeEditarFicha} />
+      )}
 
       {critical > 0 && (
         <div className="mb-4 flex flex-col gap-3 rounded-xl border border-danger-deep/25 bg-danger-deep/10 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -397,20 +516,16 @@ export function HealthView({
         />
       </div>
 
-      {/* Del cliente elegido, no de toda la cartera — a diferencia del
-          resumen agregado de arriba cuando no hay cliente elegido, acá ya se
-          sabe de quién es la pantalla, así que no tiene sentido mezclarlo
-          con el gasto de otros clientes. */}
-      <TarjetaResumenCliente
-        portfolio={portfolio}
-        periodo={{
-          desde: performance.rangeStart,
-          hasta: performance.rangeEnd,
-          enCurso: performance.rango.enCurso,
-        }}
-        objetivos={objetivosDelCliente}
+      <TablaDeCampanas
+        campanas={campanasDelCliente}
+        cuentas={portfolio.accounts.map((a) => ({ id: a.id, name: a.name, provider: a.provider }))}
+        onOpenIntegrations={onOpenIntegrations}
       />
 
+      <details className="group mb-4">
+      <summary className="mb-3 cursor-pointer list-none rounded-xl border border-foreground/10 bg-foreground/[0.03] px-4 py-3 text-sm font-semibold text-foreground/70 hover:text-foreground">
+        Verificaciones de lectura por cuenta ({checks.length}) — ver el detalle técnico
+      </summary>
       <Surface className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-foreground/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -512,6 +627,22 @@ export function HealthView({
           </TableBody>
         </Table>
       </Surface>
+      </details>
+      {/*
+        Antes esto era una fila más en la tabla, repetida idéntica por cada
+        cuenta: "Cambios automáticos · inactivo". Un valor que nunca cambia no
+        es una verificación de nada — es una regla del sistema entero, y va
+        acá, una sola vez.
+      */}
+      <div className="mb-4 flex items-start gap-2 rounded-xl border border-foreground/10 bg-foreground/[0.03] px-4 py-3">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
+        <p className="text-xs leading-5 text-foreground/60">
+          Este sistema no ejecuta cambios automáticos en ninguna cuenta: crear,
+          pausar o activar algo siempre lo confirma una persona — desde el
+          Constructor, el botón de una campaña o una propuesta del asistente.
+        </p>
+      </div>
+
     </div>
   );
 }
@@ -531,17 +662,8 @@ function TarjetaResultadosPorObjetivo({
   objetivos: ObjectiveTotal[];
   monthLabel: string;
 }) {
-  if (objetivos.length === 0) {
-    return (
-      <StatCard
-        label={`Resultados · ${monthLabel}`}
-        value="—"
-        note="Sin campañas con sigla de objetivo activas en el rango"
-        icon={HeartPulse}
-        tone="cyan"
-      />
-    );
-  }
+  // Sin ningún resultado no se muestra una tarjeta vacía.
+  if (objetivos.length === 0) return null;
   return (
     <Surface className="neo-card-accent p-5">
       <p className="font-micro text-[0.62rem] text-foreground/45">

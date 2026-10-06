@@ -2,6 +2,7 @@ import { CODIGOS_ERROR, fail as responseError } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import {
+  definirConexionDelEquipo,
   disconnectIntegration,
   IntegrationError,
   isIntegrationProvider,
@@ -26,6 +27,14 @@ export async function PATCH(
   return mutate(request, context, "select");
 }
 
+/** Marca o desmarca la conexión de Google de quien pregunta como la del equipo. Body: `{ "equipo": true | false }`. */
+export async function PUT(
+  request: Request,
+  context: { params: Promise<{ provider: string }> },
+) {
+  return mutate(request, context, "team");
+}
+
 export async function DELETE(
   request: Request,
   context: { params: Promise<{ provider: string }> },
@@ -36,7 +45,7 @@ export async function DELETE(
 async function mutate(
   request: Request,
   context: { params: Promise<{ provider: string }> },
-  action: "sync" | "select" | "disconnect",
+  action: "sync" | "select" | "disconnect" | "team",
 ) {
   const session = await getSession();
   const user = session?.actor ?? null;
@@ -53,6 +62,15 @@ async function mutate(
     if (action === "sync") {
       return Response.json(
         { integrations: await syncIntegration(user, provider) },
+        { headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (action === "team") {
+      if (provider !== "google") throw new IntegrationError("La conexión del equipo solo existe para Google", 400);
+      const cuerpo = (await request.json().catch(() => null)) as { equipo?: unknown } | null;
+      if (typeof cuerpo?.equipo !== "boolean") throw new IntegrationError("Falta indicar si se activa o se quita", 400);
+      return Response.json(
+        { integrations: await definirConexionDelEquipo(user, cuerpo.equipo) },
         { headers: { "cache-control": "no-store" } },
       );
     }

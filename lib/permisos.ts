@@ -54,7 +54,11 @@ export type Capability =
   /** Administrar las conexiones de datos. */
   | "administrar_conexiones"
   /** Ver la cola de decisiones y la bitácora interna. */
-  | "ver_operacion";
+  | "ver_operacion"
+  /** Entrar a Gestión → Cuentas (conexiones, inventario, credenciales). Solo administración. */
+  | "ver_cuentas"
+  /** Ver el detalle técnico de lo que ejecutaría un plan (pasos y parámetros crudos de la API). */
+  | "ver_plan_tecnico";
 
 const CAPABILITIES: Record<Role, Capability[]> = {
   admin: [
@@ -64,6 +68,8 @@ const CAPABILITIES: Record<Role, Capability[]> = {
     "ver_equipo",
     "administrar_conexiones",
     "ver_operacion",
+    "ver_cuentas",
+    "ver_plan_tecnico",
   ],
   // Todo lo operativo de admin (ve, crea, aprueba, conecta), pero sin poder
   // tocar a nadie que ya esté en el equipo — solo sumar gente nueva, y con
@@ -83,6 +89,35 @@ const CAPABILITIES: Record<Role, Capability[]> = {
   analyst: ["ver_todos_los_clientes", "sugerir_campanas", "ver_equipo", "ver_operacion"],
   client: ["sugerir_campanas"],
 };
+
+/**
+ * Qué puede hacer cada rol, en palabras, para mostrarlo en Equipo. Sale de `CAPABILITIES` (no se escribe a mano),
+ * así la tabla nunca dice una cosa y el sistema hace otra.
+ */
+const FILAS_DE_MATRIZ: Array<{ capacidad: Capability; texto: string }> = [
+  { capacidad: "ver_todos_los_clientes", texto: "Ver todos los clientes" },
+  { capacidad: "sugerir_campanas", texto: "Pedir y recibir sugerencias de campañas (asistente)" },
+  { capacidad: "crear_campanas", texto: "Armar y publicar campañas en el Constructor" },
+  { capacidad: "aprobar_cambios", texto: "Aprobar cambios y editar lo ya publicado" },
+  { capacidad: "ver_operacion", texto: "Ver la bitácora y la cola de decisiones" },
+  { capacidad: "ver_equipo", texto: "Entrar a Equipo y sumar gente" },
+  { capacidad: "administrar_conexiones", texto: "Actualizar datos y administrar conexiones" },
+  { capacidad: "ver_cuentas", texto: "Ver Gestión → Cuentas conectadas" },
+  { capacidad: "ver_plan_tecnico", texto: "Ver el plan técnico de un cambio (pasos y parámetros)" },
+];
+
+export function matrizDeRoles(): Array<{ texto: string; roles: Record<Role, boolean> }> {
+  const filas = FILAS_DE_MATRIZ.map(({ capacidad, texto }) => ({
+    texto,
+    roles: Object.fromEntries(ROLES.map((rol) => [rol, roleCan(rol, capacidad)])) as Record<Role, boolean>,
+  }));
+  // Modificar a quien ya está no es una capacidad: lo decide `puedeModificarMiembros` (solo admin).
+  filas.push({
+    texto: "Modificar el rol, el estado o los clientes de quien ya está en el equipo",
+    roles: { admin: true, supervisor: false, analyst: false, client: false },
+  });
+  return filas;
+}
 
 /**
  * Qué roles puede asignar esta persona al invitar a alguien nuevo — [] si no
@@ -168,4 +203,9 @@ export function visiblePortfolios(actor: Actor): string[] | null {
 export function enAlcance(actor: Actor, portfolioId: string): boolean {
   if (can(actor, "ver_todos_los_clientes")) return true;
   return actor.portfolioIds.includes(portfolioId);
+}
+
+/** Quien puede armar un borrador en el Constructor: quien publica, y el analista, que lo arma y lo envía a revisión. */
+export function puedeArmarCampanas(actor: Actor): boolean {
+  return can(actor, "crear_campanas") || (actor.role === "analyst" && can(actor, "sugerir_campanas"));
 }

@@ -123,6 +123,20 @@ export function fechaCorta(texto: string): string {
   return `${fecha.getUTCDate()} ${MESES_CORTOS[fecha.getUTCMonth()]} ${fecha.getUTCFullYear()}`;
 }
 
+/**
+ * El periodo inmediatamente anterior y del MISMO largo. Con el mes en curso
+ * incompleto, compara contra igual cantidad de días —no contra un mes cerrado—,
+ * porque contrastar un mes a medias con uno entero y presentarlo como una caída
+ * es el error clásico de los reportes de medios.
+ */
+export function rangoAnterior(rango: Rango, ahora: Date): Rango {
+  const desde = dia(rango.desde);
+  const dias = Math.round((dia(rango.hasta).getTime() - desde.getTime()) / 86_400_000) + 1;
+  const hastaPrevio = iso(sumarDias(desde, -1));
+  const desdePrevio = iso(sumarDias(desde, -dias));
+  return resolverRango(rangoPersonalizado(desdePrevio, hastaPrevio), ahora);
+}
+
 /** Fechas concretas de un periodo, calculadas en UTC como el resto del sistema. */
 export function resolverRango(id: RangoId, ahora: Date): Rango {
   const hoy = iso(ahora);

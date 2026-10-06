@@ -46,6 +46,7 @@ import type {
 } from "@/lib/integration-store";
 import type { PerformanceAccountSummary } from "@/lib/performance-store";
 import type { PortfolioSummary } from "@/lib/portafolios";
+import { CONECTABLES, platformLabel } from "@/lib/plataformas";
 import { OrbeDeBoton, Surface } from "./ui";
 
 type WindsorAccount = { name: string; currency: string | null };
@@ -72,7 +73,7 @@ type BusyAction = {
   action: BusyKind;
 } | null;
 
-type BusyKind = "sync" | "select" | "disconnect";
+type BusyKind = "sync" | "select" | "disconnect" | "team";
 
 const errorMessages: Record<string, string> = {
   authorization_cancelled: "La autorización fue cancelada. No se hizo ningún cambio.",
@@ -392,8 +393,9 @@ export function IntegrationsView({
             >
               onboard.windsor.ai
             </a>
-            . Las conexiones de abajo son para la capa de escritura, que todavía
-            no está habilitada.
+            . Las conexiones de abajo cubren lo que Windsor no hace: leer anuncios
+            pausados, editar anuncios de Google y crear anuncios de Display con imagen. Google se conecta con la
+            cuenta del equipo.
           </p>
         </div>
       ) : null}
@@ -430,7 +432,7 @@ export function IntegrationsView({
 
       <div className="grid gap-4 lg:grid-cols-2">
         {loading
-          ? ["google", "meta"].map((provider) => (
+          ? CONECTABLES.map((provider) => (
               <Surface key={provider} className="min-h-[320px] animate-pulse p-5">
                 <div className="h-12 w-12 rounded-2xl bg-foreground/8" />
                 <div className="mt-6 h-6 w-36 rounded bg-foreground/8" />
@@ -449,6 +451,12 @@ export function IntegrationsView({
                 onManage={() => openAccountManager(integration)}
                 onSync={() => void sync(integration.provider)}
                 onDisconnect={() => setDisconnectProvider(integration.provider)}
+                onTeam={(equipo) =>
+                  void mutate(integration.provider, "team", {
+                    method: "PUT",
+                    body: JSON.stringify({ equipo }),
+                  }).then((r) => r && toast.success(equipo ? "Esta cuenta de Google es ahora la del equipo" : "Cada persona vuelve a usar la suya"))
+                }
               />
             ))}
       </div>
@@ -883,6 +891,7 @@ function ProviderCard({
   onManage,
   onSync,
   onDisconnect,
+  onTeam,
 }: {
   integration: IntegrationSummary;
   windsorAccounts: WindsorAccount[];
@@ -891,6 +900,7 @@ function ProviderCard({
   onManage: () => void;
   onSync: () => void;
   onDisconnect: () => void;
+  onTeam: (equipo: boolean) => void;
 }) {
   const connected = integration.status === "connected";
   const attention = integration.status === "needs_attention";
@@ -941,7 +951,7 @@ function ProviderCard({
                 : "bg-[#0668E1] text-white",
             )}
           >
-            {integration.provider === "google" ? "G" : "M"}
+            {platformLabel(integration.provider).charAt(0)}
           </span>
           <div>
             <h3 className="text-lg font-bold text-foreground">
@@ -1023,7 +1033,7 @@ function ProviderCard({
                 </ul>
                 <p className="mt-3 border-t border-foreground/8 pt-3 text-xs leading-5 text-foreground/45">
                   Autorizadas dentro de Windsor. Conectar {integration.label}{" "}
-                  acá es para la capa de escritura.
+                  acá habilita la edición directa y lo que Windsor no cubre.
                 </p>
               </>
             ) : (
@@ -1109,6 +1119,19 @@ function ProviderCard({
                   <SlidersHorizontal />
                   Administrar
                 </Button>
+              ) : null}
+              {integration.provider === "google" && authorized && canManage ? (
+                integration.conexionEquipo ? (
+                  <Button variant="outline" onClick={() => onTeam(false)} disabled={Boolean(busy)} className="border-brand/40 text-brand">
+                    Es la cuenta del equipo · quitar
+                  </Button>
+                ) : integration.equipoUsaOtra ? (
+                  <span className="self-center text-xs text-foreground/50">El equipo usa otra cuenta de Google</span>
+                ) : (
+                  <Button variant="outline" onClick={() => onTeam(true)} disabled={Boolean(busy)}>
+                    Usar para todo el equipo
+                  </Button>
+                )
               ) : null}
               <Button
                 variant="ghost"

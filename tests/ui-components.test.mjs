@@ -14,7 +14,8 @@ const vite = await createServer({
   configFile: false,
   root,
   resolve: { alias: { "@": root } },
-  server: { middlewareMode: true, hmr: false },
+  // Sin WebSocket: con `hmr: false` Vite igual abre el puerto 24678, y chocaba con un servidor de desarrollo abierto (fallo intermitente).
+  server: { middlewareMode: true, hmr: false, ws: false },
 });
 
 after(async () => {

@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 
 import { can, type Actor } from "@/lib/permisos";
+import type { CredencialesGoogle } from "@/lib/google-ads-nativo";
+import { CONECTABLES, isConectable, type PlataformaConectable } from "@/lib/plataformas";
 import { getRawDb } from "@/db";
 import {
   fetchGoogleDailyAccountMetrics,
@@ -11,7 +13,8 @@ import {
   ProviderMetricsError,
 } from "@/lib/provider-metrics";
 
-export type IntegrationProvider = "google" | "meta";
+/** Plataformas con OAuth propio: se deriva del registro (`CONECTABLES`), no se repite acá. */
+export type IntegrationProvider = PlataformaConectable;
 
 export type IntegrationAccount = {
   id: string;
@@ -53,6 +56,10 @@ export type IntegrationSummary = {
   performanceRowCount: number;
   performanceError: string | null;
   accounts: IntegrationAccount[];
+  /** Solo Google: esta conexión es la que usa todo el equipo para escribir y leer con la API de Google Ads. */
+  conexionEquipo?: boolean;
+  /** Solo Google: otra persona del equipo ya fijó SU conexión como la del equipo. */
+  equipoUsaOtra?: boolean;
 };
 
 type OAuthSessionRow = {
@@ -167,7 +174,7 @@ export class IntegrationError extends Error {
 export function isIntegrationProvider(
   value: string,
 ): value is IntegrationProvider {
-  return value === "google" || value === "meta";
+  return isConectable(value);
 }
 
 export function providerIsConfigured(provider: IntegrationProvider): boolean {
@@ -211,12 +218,152 @@ export function userCanManageIntegrations(actor: Actor): boolean {
   return can(actor, "administrar_conexiones");
 }
 
+/**
+ * Credenciales para hablar directo con la API de Google Ads en nombre de esta
+ * persona, o `null` si no puede: no conectó su cuenta de Google, la conexión
+ * necesita atención, falta el developer token, o esa cuenta publicitaria no
+ * está entre las suyas. `null` no es un error: quien llama cae a Windsor.
+ *
+ * Es la conexión de quien pide, no la de otro miembro del equipo: usar el
+ * token de alguien más en silencio haría que sus acciones quedaran a nombre
+ * ajeno en Google.
+ */
+/**
+ * Un token de Meta con permiso de lectura para buscar ubicaciones (`adgeolocation`). Es el catálogo de lugares de Meta,
+ * no datos de un cliente: sirve la conexión de quien pregunta o, si no tiene, la de cualquier persona del equipo.
+ */
+export async function tokensMetaParaBuscarLugares(user: Actor): Promise<string[]> {
+  const candidatos: string[] = [];
+  const delUsuario = await tokenDeUsuarioMeta(user);
+  if (delUsuario) candidatos.push(delUsuario);
+  // El token de la propia app (id|secreto) sirve para el catálogo público de lugares y no depende de que una cuenta
+  // personal de Facebook esté libre de verificaciones de seguridad.
+  if (env.META_APP_ID && env.META_APP_SECRET) candidatos.push(`${env.META_APP_ID}|${env.META_APP_SECRET}`);
+  return candidatos;
+}
+
+async function tokenDeUsuarioMeta(user: Actor): Promise<string | null> {
+  try {
+    const fila = await getRawDb()
+      .prepare(
+        `SELECT token_ciphertext FROM integration_connections
+         WHERE provider = 'meta' AND status = 'connected'
+         ORDER BY (user_id = ?) DESC, updated_at DESC LIMIT 1`,
+      )
+      .bind(user.id)
+      .first<{ token_ciphertext: string }>();
+    if (!fila) return null;
+    const tokens = await decryptTokenBundle(fila.token_ciphertext);
+    if (tokens.expiresAt && tokens.expiresAt <= Date.now()) return null;
+    return tokens.accessToken;
+  } catch (error) {
+    console.error("WiWO.ADS token de Meta para ubicaciones", safeErrorMessage(error));
+    return null;
+  }
+}
+
+const CLAVE_EQUIPO_GOOGLE = "google_conexion_equipo_user";
+
+/** Quién conectó la cuenta de Google que usa todo el equipo (`null`: cada quien usa la suya). */
+export async function usuarioDeConexionEquipo(): Promise<string | null> {
+  try {
+    const fila = await getRawDb()
+      .prepare("SELECT value FROM app_meta WHERE key = ? LIMIT 1")
+      .bind(CLAVE_EQUIPO_GOOGLE)
+      .first<{ value: string }>();
+    return fila?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fija (o quita) la conexión de Google de quien pregunta como la del equipo. Solo administración. Los cambios en
+ * Google quedan a nombre de esa cuenta, pero la bitácora de WiWO.ADS sigue registrando quién fue.
+ */
+export async function definirConexionDelEquipo(user: Actor, activar: boolean): Promise<IntegrationSummary[]> {
+  assertAdmin(user);
+  const db = getRawDb();
+  if (activar) {
+    const connection = await findConnection(user.id, "google");
+    if (!connection || connection.status !== "connected") {
+      throw new IntegrationError("Primero conecta tu cuenta de Google (la que usa el equipo, por ejemplo hola@wiwo.me).", 409);
+    }
+    await db
+      .prepare(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      )
+      .bind(CLAVE_EQUIPO_GOOGLE, user.id, Date.now())
+      .run();
+  } else if ((await usuarioDeConexionEquipo()) === user.id) {
+    await db.prepare("DELETE FROM app_meta WHERE key = ?").bind(CLAVE_EQUIPO_GOOGLE).run();
+  }
+  return listIntegrations(user);
+}
+
+export async function accesoNativoGoogle(
+  user: Actor,
+  externalAccountId: string,
+): Promise<CredencialesGoogle | null> {
+  if (!env.GOOGLE_ADS_DEVELOPER_TOKEN || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
+    return null;
+  }
+  // La conexión del equipo (la cuenta de Google con la que todos trabajan) manda sobre la personal.
+  const duenoId = (await usuarioDeConexionEquipo()) ?? user.id;
+  const connection = await findConnection(duenoId, "google");
+  if (!connection || connection.status !== "connected") return null;
+
+  const cuenta = await getRawDb()
+    .prepare(
+      `SELECT manager_account_id FROM integration_accounts
+       WHERE connection_id = ? AND replace(provider_account_id, '-', '') = ?
+         AND account_type = 'ads' AND is_available = 1 LIMIT 1`,
+    )
+    .bind(connection.id, externalAccountId.replace(/-/g, ""))
+    .first<{ manager_account_id: string | null }>();
+  if (!cuenta) return null;
+
+  try {
+    const guardados = await decryptTokenBundle(connection.token_ciphertext);
+    const vigentes = await refreshGoogleToken(guardados);
+    if (vigentes.accessToken !== guardados.accessToken) {
+      await getRawDb()
+        .prepare(
+          `UPDATE integration_connections
+           SET token_ciphertext = ?, token_expires_at = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .bind(
+          await encryptTokenBundle(vigentes),
+          vigentes.expiresAt,
+          Date.now(),
+          connection.id,
+        )
+        .run();
+    }
+    if (vigentes.expiresAt && vigentes.expiresAt <= Date.now()) return null;
+    return {
+      accessToken: vigentes.accessToken,
+      developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN,
+      apiVersion: env.GOOGLE_ADS_API_VERSION ?? "v25",
+      managerId: cuenta.manager_account_id,
+    };
+  } catch (error) {
+    // Un token que no se puede refrescar deja al usuario sin la vía nativa,
+    // no sin la pantalla: se registra y se sigue con Windsor.
+    console.error("WiWO.ADS acceso nativo a Google", safeErrorMessage(error));
+    return null;
+  }
+}
+
 export async function listIntegrations(
   user: Actor,
 ): Promise<IntegrationSummary[]> {
   const observedAt = Date.now();
+  const duenoEquipo = await usuarioDeConexionEquipo();
   return Promise.all(
-    (["google", "meta"] as const).map(async (provider) => {
+    CONECTABLES.map(async (provider) => {
       const connection = await findConnection(user.id, provider);
       const [accounts, metricRun] = connection
         ? await Promise.all([
@@ -270,6 +417,9 @@ export async function listIntegrations(
           ? "La última sincronización se interrumpió. Puedes volver a intentarla."
           : metricRun?.error_summary ?? null,
         accounts,
+        ...(provider === "google"
+          ? { conexionEquipo: duenoEquipo === user.id, equipoUsaOtra: duenoEquipo !== null && duenoEquipo !== user.id }
+          : {}),
       };
     }),
   );
@@ -480,6 +630,15 @@ export async function syncIntegration(
     );
     const encrypted = await encryptTokenBundle(tokens);
     const now = Date.now();
+    if (provider === "google") {
+      const correo = await correoDeGoogle(tokens.accessToken);
+      if (correo) {
+        await getRawDb()
+          .prepare("UPDATE integration_connections SET provider_user_name = ? WHERE id = ?")
+          .bind(etiquetaGoogle(correo), connection.id)
+          .run();
+      }
+    }
     const issue = joinIssues(discovered.warning, metrics.error);
     const connectionStatus = metrics.authorizationRequired
       ? "needs_attention"
@@ -678,6 +837,9 @@ export async function disconnectIntegration(
     // Local removal still takes precedence when a provider cannot be reached.
   }
 
+  if (provider === "google" && (await usuarioDeConexionEquipo()) === user.id) {
+    await getRawDb().prepare("DELETE FROM app_meta WHERE key = ?").bind(CLAVE_EQUIPO_GOOGLE).run();
+  }
   const db = getRawDb();
   await db.batch([
     db
@@ -748,9 +910,27 @@ async function completeGoogleAuthorization(
     accounts: discovered.accounts,
     warning: discovered.warning,
     providerUserId: null,
-    providerUserName: "Google Ads + Analytics",
+    providerUserName: etiquetaGoogle(await correoDeGoogle(tokens.accessToken)),
   };
 }
+
+/** Correo de la cuenta de Google autorizada (el permiso `userinfo.email` ya se pide al conectar). */
+async function correoDeGoogle(accessToken: string): Promise<string | null> {
+  try {
+    const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { email?: string };
+    return j.email?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+const ETIQUETA_GOOGLE = "Google Ads + Analytics";
+const etiquetaGoogle = (correo: string | null) => (correo ? `${ETIQUETA_GOOGLE} · ${correo}` : ETIQUETA_GOOGLE);
 
 async function completeMetaAuthorization(
   code: string,
@@ -991,7 +1171,9 @@ async function discoverMetaAccounts(accessToken: string): Promise<{
     const url = metaGraphUrl("me/adaccounts");
     url.searchParams.set(
       "fields",
-      "id,account_id,name,currency,account_status,timezone_name,business",
+      // Sin `business`: ese campo exige el permiso business_management (que pide revisión de la app)
+      // y solo servía para guardar el id del Business Manager, que nada usa para leer.
+      "id,account_id,name,currency,account_status,timezone_name",
     );
     url.searchParams.set("limit", "200");
     url.searchParams.set("appsecret_proof", appSecretProof);

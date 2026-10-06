@@ -39,7 +39,9 @@ export async function GET(
         pragma: "no-cache",
       },
     });
-  } catch {
+  } catch (error) {
+    // Solo el mensaje (nunca el código ni los tokens): sin esto la pantalla solo dice «no pudo completar».
+    console.error("WiWO.ADS conexión", provider, error instanceof Error ? error.message : "error desconocido");
     return backToIntegrations(request, "callback_failed", provider);
   }
 }

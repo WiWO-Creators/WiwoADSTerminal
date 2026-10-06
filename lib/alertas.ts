@@ -1,4 +1,5 @@
 import type { CampaignSummary } from "@/lib/performance-store";
+import { isActivePlatform, type Platform } from "@/lib/plataformas";
 import type { Portfolio } from "@/lib/portafolios-store";
 
 /**
@@ -56,11 +57,14 @@ export type Alerta = {
   severidad: Severidad;
   clienteId: string;
   clienteNombre: string;
-  plataforma: "google" | "meta";
+  /** `null` en las alertas del cliente entero (por ejemplo, la medición). */
+  plataforma: Platform | null;
   cuenta: string;
   campana: string;
   diagnostico: string;
   accion: { tipo: "pausar"; cuentaId: string; campanaId: string } | null;
+  /** Enlaces directos para revisarlo fuera de la app (los agrega la API). */
+  enlaces?: Array<{ etiqueta: string; url: string }>;
 };
 
 
@@ -84,9 +88,8 @@ export function generarAlertas(portfolios: Portfolio[], campanas: CampaignSummar
   const alertas: Alerta[] = [];
 
   for (const c of campanas) {
-    // TikTok y LinkedIn están en el registro de plataformas pero desactivados
-    // en el resto de la app; acá tampoco se les genera alerta.
-    if (c.provider !== "google" && c.provider !== "meta") continue;
+    // Las plataformas declaradas pero desactivadas no generan alertas.
+    if (!isActivePlatform(c.provider)) continue;
     if (!activa(c.status)) continue;
     const portfolio = portfolioPorCuenta.get(c.accountId);
     if (!portfolio) continue;
@@ -105,7 +108,7 @@ export function generarAlertas(portfolios: Portfolio[], campanas: CampaignSummar
         cuenta: c.accountName,
         campana: c.name,
         diagnostico:
-          "Está activa pero no registró gasto ni impresiones en el periodo — puede estar sin presupuesto disponible, rechazada por la plataforma o mal segmentada. Vale la pena revisarla en la plataforma.",
+          "Está activa pero no gastó nada en el periodo. Revisa en la plataforma si le falta presupuesto, si la rechazaron o si el público es demasiado cerrado.",
         accion: null,
       });
       continue;
@@ -128,7 +131,7 @@ export function generarAlertas(portfolios: Portfolio[], campanas: CampaignSummar
         plataforma: c.provider,
         cuenta: c.accountName,
         campana: c.name,
-        diagnostico: `Gastó ${moneda(spend, c.currency)} en el periodo sin ninguna conversión — el doble de la meta de CPA (${moneda(portfolio.targetCpaMicros, c.currency)}).`,
+        diagnostico: `Gastó ${moneda(spend, c.currency)} sin lograr ningún resultado (cada resultado debería costar ${moneda(portfolio.targetCpaMicros, c.currency)}). Conviene pausarla y revisar su público o su anuncio.`,
         accion: accionDePausar(c),
       });
       continue;
@@ -145,11 +148,29 @@ export function generarAlertas(portfolios: Portfolio[], campanas: CampaignSummar
           plataforma: c.provider,
           cuenta: c.accountName,
           campana: c.name,
-          diagnostico: `CPA real de ${moneda(cpaReal, c.currency)}, un ${Math.round((cpaReal / portfolio.targetCpaMicros - 1) * 100)}% sobre la meta de ${moneda(portfolio.targetCpaMicros, c.currency)}, con ${conversions} conversiones.`,
+          diagnostico: `Cada resultado le está costando ${moneda(cpaReal, c.currency)}, un ${Math.round((cpaReal / portfolio.targetCpaMicros - 1) * 100)}% más que la meta de ${moneda(portfolio.targetCpaMicros, c.currency)}. Revisa su público y sus anuncios antes de seguir invirtiendo.`,
           accion: accionDePausar(c),
         });
       }
     }
+  }
+
+  // Medición: un cliente marcado sin GTM lo muestra siempre, tenga o no campañas
+  // activas. "Sin verificar" (null) no alerta: no se afirma lo que nadie confirmó.
+  for (const p of portfolios) {
+    if (p.gtmEstado !== "no_tiene") continue;
+    alertas.push({
+      id: `sin-gtm-${p.id}`,
+      severidad: "alta",
+      clienteId: p.id,
+      clienteNombre: p.name,
+      plataforma: null,
+      cuenta: "Medición",
+      campana: "Google Tag Manager",
+      diagnostico:
+        "NO cuenta con GTM. Sin Tag Manager, los leads y las conversiones pueden medirse mal o no medirse. Instálalo en el sitio y registra el contenedor en la ficha del cliente.",
+      accion: null,
+    });
   }
 
   const orden: Record<Severidad, number> = { critica: 0, alta: 1, media: 2 };
