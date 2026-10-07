@@ -21,7 +21,7 @@ type Enviada = { id: string; estado: string; mensaje: string; enlaces: Array<{ e
 const campoClase = "h-11 w-full rounded-xl border border-border bg-background px-3 text-sm";
 
 /**
- * Impulsar desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
+ * Boostear un anuncio desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
  * existente. Lo elegido pasa por la misma aprobación que todo; quien aprueba cambios lo publica al instante y queda corriendo.
  */
 export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string }) {
@@ -229,7 +229,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
   return (
     <div className="mx-auto w-full max-w-[640px] space-y-4 p-4 md:p-6">
       <div>
-        <h2 className="neo-section-title">Impulsar</h2>
+        <h2 className="neo-section-title">Boostear anuncio</h2>
         <p className="mt-3 text-sm leading-6 text-foreground/58">
           Elige la campaña y el conjunto, y luego una publicación o un anuncio que ya exista. Al aprobarse queda corriendo.
           {puedeAprobar ? "" : " Un supervisor lo aprueba antes de publicarse."}
@@ -265,7 +265,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
             </Button>
           )}
           <Button type="button" variant="outline" className="w-full" onClick={() => setEnviada(null)}>
-            Impulsar otra
+            Boostear otro
           </Button>
         </Surface>
       ) : (
@@ -293,7 +293,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
                   ))}
                 </select>
                 {campana && campana.objetivo !== "OUTCOME_ENGAGEMENT" && (
-                  <span className="mt-1 block font-normal text-warn">Meta solo deja impulsar publicaciones de Facebook con «Impulsar» en campañas de interacción. En esta se crearán como anuncios nuevos dentro del conjunto.</span>
+                  <span className="mt-1 block font-normal text-warn">Meta solo deja boostear publicaciones de Facebook con «Boostear» en campañas de interacción. En esta se crearán como anuncios nuevos dentro del conjunto.</span>
                 )}
               </label>
               <label className="block text-xs font-semibold text-foreground/70">
@@ -380,7 +380,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
                       </span>
                     </button>
                   ))}
-                  {anuncios && anuncios.length === 0 && <p className="text-sm text-muted-foreground">No hay anuncios con publicación para impulsar.</p>}
+                  {anuncios && anuncios.length === 0 && <p className="text-sm text-muted-foreground">No hay anuncios con publicación para boostear.</p>}
                 </div>
               )}
 

@@ -31,6 +31,8 @@ export type CambiosEdicion = {
   nombre?: string;
   /** true: pausar la entidad. Un Creator lo propone y lo aprueba un Lead o superior. */
   pausar?: boolean;
+  /** true: volver a activar la entidad (por ejemplo, una campaña que quedó apagada). */
+  activar?: boolean;
   presupuesto?: { tipo: "daily" | "lifetime"; monto: number };
   /** Meta: puja del conjunto. Google: CPC máximo del grupo. En la moneda de la cuenta. */
   puja?: number;
@@ -151,11 +153,13 @@ export type PlanEdicion = {
   pausaAlAplicar: boolean;
   /** Se pidió pausar: es un cambio aunque no haya pasos de edición. */
   pausaPedida?: boolean;
+  /** Se pidió activar: es un cambio aunque no haya pasos de edición. */
+  activacionPedida?: boolean;
 };
 
 /** ¿Hay algo que aplicar? Pasos de edición o una pausa pedida. */
 export function hayAlgoQueAplicar(plan: PlanEdicion): boolean {
-  return plan.pasos.length > 0 || plan.pausaPedida === true;
+  return plan.pasos.length > 0 || plan.pausaPedida === true || plan.activacionPedida === true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -232,6 +236,20 @@ export function planEdicion(
       plan.pausaPedida = true;
       plan.pausaAlAplicar = true;
       plan.diff.push({ campo: "estado", etiqueta: "Estado", antes: estado === "" ? "—" : "Activo", despues: "Pausado" });
+    }
+  }
+
+  if (cambios.activar === true) {
+    const estado = String((antes.entidad as { estado?: string | null }).estado ?? "").toUpperCase();
+    if (cambios.pausar === true) {
+      problema("activar", "No se puede pausar y activar a la vez.");
+    } else if (provider === "linkedin") {
+      problema("activar", "LinkedIn no permite reactivar desde WiWO.ADS.");
+    } else if (estado === "ACTIVE" || estado === "ENABLED") {
+      problema("activar", "Ya está activo: no hay nada que activar.");
+    } else {
+      plan.activacionPedida = true;
+      plan.diff.push({ campo: "estado", etiqueta: "Estado", antes: estado === "" ? "—" : "Pausado", despues: "Activo" });
     }
   }
 

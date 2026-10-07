@@ -1,5 +1,6 @@
 import { getSession } from "@/app/sesion";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
+import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarEjecucion, type PasoEjecutado } from "@/lib/constructor-ejecutar";
 import { copiarReglaMetaParaAnuncio, crearReglaMetaDeGasto, eliminarReglaMetaDePrueba, ErrorDeMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
@@ -51,6 +52,18 @@ export async function POST(request: Request) {
     }
     const paso = { platform: "meta", action: b.modo === "copiar" ? "rules:copy_native" : "rules:create_native", label: nombre, ok: true, error: null, raw: { reglaId: id, anuncioIds } } as PasoEjecutado;
     await registrarEjecucion({ portfolioId: b.clienteId!, name: `Regla en Meta · ${nombre}`, platforms: ["meta"] }, v.session!.actor.email, [paso], true);
+    await registrarAuditoria({
+      categoria: "regla",
+      accion: b.modo === "copiar" ? "copiada_en_meta" : "creada_en_meta",
+      actorEmail: v.session!.actor.email,
+      portfolioId: b.clienteId!,
+      plataforma: "meta",
+      entidadTipo: "regla",
+      entidadId: id,
+      entidadNombre: nombre,
+      titulo: `${v.session!.actor.email.split("@")[0]} creó en Meta la regla «${nombre}» para ${anuncioIds.length} anuncio${anuncioIds.length === 1 ? "" : "s"}`,
+      detalle: { reglaId: id, modo: b.modo, anuncioIds, gasto: b.gasto ?? null, copiaDe: b.reglaId ?? null },
+    });
     return Response.json({ ok: true, reglaId: id }, { status: 201, headers: NO_STORE });
   } catch (error) {
     if (error instanceof ErrorDeMeta) return fail(error.message, error.status);

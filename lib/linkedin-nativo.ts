@@ -21,7 +21,7 @@ import {
   cuerpoDeRenovacion,
   elementos,
   filaDeAnalytics,
-  idDeCabeceraCreada,
+  idDeCreacion,
   mensajeDeError,
   respuestaDeLead,
   rutaDeAnalytics,
@@ -64,8 +64,13 @@ function credenciales(): { clientId: string; clientSecret: string } {
 }
 
 /** Alcances según los productos aprobados. Pedir uno no aprobado hace fallar toda la autorización. */
-export function alcancesSolicitados(productos: { leads?: boolean; administrar?: boolean } = {}): string[] {
-  return [...ALCANCES.lectura, ...(productos.leads ? ALCANCES.leads : []), ...(productos.administrar ? ALCANCES.administrar : [])];
+export function alcancesSolicitados(productos: { leads?: boolean; administrar?: boolean; anuncios?: boolean } = {}): string[] {
+  return [
+    ...ALCANCES.lectura,
+    ...(productos.administrar ? ALCANCES.administrar : []),
+    ...(productos.anuncios ? ALCANCES.anuncios : []),
+    ...(productos.leads ? ALCANCES.leads : []),
+  ];
 }
 
 export function crearUrlDeAutorizacion(redirectUri: string, state: string, alcances: readonly string[]): string {
@@ -114,7 +119,7 @@ export async function leerDeLinkedin(ruta: string, accessToken: string): Promise
 
 // ------------------------------------------------------------ Advertising API (lectura)
 
-export type CuentaDeLinkedin = { id: string; nombre: string; moneda: string | null; estado: string | null };
+export type CuentaDeLinkedin = { id: string; nombre: string; moneda: string | null; estado: string | null; prueba: boolean };
 
 export async function cuentasDeLinkedin(accessToken: string): Promise<CuentaDeLinkedin[]> {
   const cuerpo = await leerDeLinkedin(rutaDeCuentas(), accessToken);
@@ -123,6 +128,7 @@ export async function cuentasDeLinkedin(accessToken: string): Promise<CuentaDeLi
     nombre: typeof c.name === "string" ? c.name : String(c.id ?? ""),
     moneda: typeof c.currency === "string" ? c.currency : null,
     estado: typeof c.status === "string" ? c.status : null,
+    prueba: c.test === true,
   }));
 }
 
@@ -175,5 +181,36 @@ export async function crearEnLinkedin(ruta: string, cuerpo: object, accessToken:
     const error = await respuesta.json().catch(() => null);
     throw new ErrorDeLinkedin(mensajeDeError(error, respuesta.status), respuesta.status);
   }
-  return { id: idDeCabeceraCreada(respuesta.headers.get("x-restli-id")), status: respuesta.status };
+  return { id: idDeCreacion(respuesta.headers), status: respuesta.status };
+}
+
+/**
+ * Envía a LinkedIn un plan ya armado por `linkedin-escritura-pura.ts` (crear o actualizar grupos y campañas). NUNCA reintenta
+ * (un timeout es ambiguo y reintentar duplicaría). Estas rutas sí llevan `X-Restli-Protocol-Version: 2.0.0` (la creación de
+ * cuentas de prueba es la excepción). Una actualización responde 204 sin cuerpo; una creación entrega el id en `x-linkedin-id`.
+ */
+export async function enviarPlanALinkedin(
+  plan: { ruta: string; cuerpo: object; cabeceras: Record<string, string> },
+  accessToken: string,
+): Promise<{ id: string | null; status: number }> {
+  const respuesta = await fetch(`${BASE}${plan.ruta}`, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "Linkedin-Version": env.LINKEDIN_API_VERSION?.trim() || VERSION_API_POR_DEFECTO,
+      "X-Restli-Protocol-Version": "2.0.0",
+      "content-type": "application/json",
+      ...plan.cabeceras,
+    },
+    body: JSON.stringify(plan.cuerpo),
+  });
+  if (!respuesta.ok) {
+    const error = (await respuesta.json().catch(() => null)) as Record<string, unknown> | null;
+    // Los errores de validación de LinkedIn dicen qué campo falló: sin eso no se puede corregir un plan.
+    const detalle = typeof error?.message === "string" ? ` ${error.message}` : "";
+    throw new ErrorDeLinkedin(`${mensajeDeError(error, respuesta.status)}${respuesta.status === 400 ? detalle : ""}`.trim(), respuesta.status);
+  }
+  return { id: idDeCreacion(respuesta.headers), status: respuesta.status };
 }

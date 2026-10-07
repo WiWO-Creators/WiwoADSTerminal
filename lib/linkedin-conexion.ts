@@ -69,8 +69,9 @@ export async function crearUrlDeConexionLinkedin(user: Actor, request: Request):
     )
     .bind(await hashDeEstadoOAuth(state), user.id, PROVEEDOR, redirectUri, ahora + 10 * 60 * 1000, ahora)
     .run();
-  // Lectura y administración (crear/editar). Lead Sync no: todavía no está aprobado, y pedir un alcance no aprobado rompe la autorización.
-  return crearUrlDeAutorizacion(redirectUri, state, alcancesSolicitados({ administrar: true }));
+  // Lectura, administración (crear/editar) y lo necesario para crear anuncios. Leads, audiencias y conversiones no: son productos
+  // que todavía no se piden, y un alcance no aprobado hace fallar toda la autorización.
+  return crearUrlDeAutorizacion(redirectUri, state, alcancesSolicitados({ administrar: true, anuncios: true }));
 }
 
 async function consumirSesion(userId: string, state: string): Promise<{ redirect_uri: string }> {

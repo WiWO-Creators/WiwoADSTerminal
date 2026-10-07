@@ -1,6 +1,8 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { etiquetaDeAccion } from "@/lib/auditoria-pura";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { nombreDeEdicion, pasoDeEdicion } from "@/lib/edicion-registro";
 import { can, enAlcance } from "@/lib/permisos";
@@ -243,8 +245,20 @@ export async function POST(request: Request) {
     body.params,
   );
   const pasos = [pasoDeEdicion(provider, action, body.params, resultado, body.accountId)];
-  const registrar = (ok: boolean) =>
-    registrarEjecucion(
+  const registrar = async (ok: boolean) => {
+    await registrarAuditoria({
+      categoria: "cambio",
+      accion: ok ? "aplicado" : "fallido",
+      actorEmail: session.actor.email,
+      portfolioId: portafolio.id,
+      portfolioNombre: portafolio.name,
+      plataforma: provider,
+      titulo: `${session.actor.email.split("@")[0]} hizo «${nombreDeEdicion(action, body.params ?? {})}»${ok ? "" : " (falló)"}`,
+      resultado: ok ? "ok" : "error",
+      etiquetas: [etiquetaDeAccion(action)],
+      detalle: { accion: action, parametros: body.params ?? {}, error: ok ? null : resultado.error },
+    });
+    return registrarEjecucion(
       {
         portfolioId: portafolio.id,
         name: nombreDeEdicion(action, body.params ?? {}),
@@ -254,6 +268,7 @@ export async function POST(request: Request) {
       pasos,
       ok,
     );
+  };
 
   if (!resultado.ok) {
     await registrar(false);

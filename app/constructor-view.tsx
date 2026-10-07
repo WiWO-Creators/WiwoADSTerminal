@@ -2711,7 +2711,7 @@ function FaseAnuncio({
                       className="shrink-0 border-foreground/15 bg-card/60"
                     >
                       <Images className="size-4" />
-                      Impulsar publicación de la red
+                      Boostear publicación de la red
                     </Button>
                   )}
                   {cuentaMeta && draft.portfolioId && (

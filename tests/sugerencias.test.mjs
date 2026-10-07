@@ -169,7 +169,7 @@ test("cada problema de medición es una sugerencia del cliente, siempre «revisa
 
 const { sugerenciasDeContenido, DIAS_SIN_CONTENIDO } = await import("../lib/sugerencias.ts");
 
-test("una campaña sin anuncios nuevos desde hace más de 14 días pide contenido; una reciente o sin fecha, no", () => {
+test("una campaña sin anuncios nuevos desde hace 20 días o más pide contenido; una reciente o sin fecha, no", () => {
   const ahora = new Date("2026-10-06T12:00:00Z");
   const dia = 86_400_000;
   const base = { cliente: { id: "anker", nombre: "Anker" }, provider: "meta", accountId: "1", campanaNombre: "[AE] Tráfico Perfil" };
@@ -182,13 +182,13 @@ test("una campaña sin anuncios nuevos desde hace más de 14 días pide contenid
     ],
     ahora,
   );
-  assert.equal(DIAS_SIN_CONTENIDO, 14);
-  assert.deepEqual(s.map((x) => x.entityId), ["vieja", "muy-vieja"]);
+  assert.equal(DIAS_SIN_CONTENIDO, 20);
+  assert.deepEqual(s.map((x) => x.entityId), ["muy-vieja", "vieja"]);
   assert.equal(s[0].accion.tipo, "contenido");
-  assert.equal(s[0].accion.dias, 20);
-  assert.equal(s[0].severity, "medium");
-  assert.equal(s[1].severity, "high");
+  assert.equal(s[0].accion.dias, 40);
+  assert.equal(s[0].severity, "high");
+  assert.equal(s[1].severity, "medium");
   assert.match(s[0].title, /No has actualizado el contenido/);
   // El mismo día y la misma semana: mismo id, no se duplica.
-  assert.equal(sugerenciasDeContenido([{ ...base, campanaId: "vieja", ultimoAnuncio: ahora.getTime() - 20 * dia }], new Date(ahora.getTime() + dia))[0].id, s[0].id);
+  assert.equal(sugerenciasDeContenido([{ ...base, campanaId: "vieja", ultimoAnuncio: ahora.getTime() - 20 * dia }], new Date(ahora.getTime() + dia))[0].id, s[1].id);
 });

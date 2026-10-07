@@ -1,5 +1,6 @@
 import { getSession } from "@/app/sesion";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
+import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { crearAnuncioDesdeInstagram, ErrorDeMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
@@ -43,7 +44,19 @@ export async function POST(request: Request) {
       [{ platform: "meta", action: "ads:create_from_instagram", label: nombre, ok: true, error: null, raw: r } as never],
       true,
     );
-    return Response.json({ ...r, estado: "PAUSED", enlace: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${accountId}&selected_ad_ids=${r.anuncioId}` }, { headers: { "cache-control": "no-store" } });
+    await registrarAuditoria({
+      categoria: "creacion",
+      accion: "publicada",
+      actorEmail: session.actor.email,
+      portfolioId: b.portfolioId,
+      plataforma: "meta",
+      entidadTipo: "anuncio",
+      entidadId: r.anuncioId,
+      entidadNombre: nombre,
+      titulo: `${session.actor.email.split("@")[0]} impulsó una publicación de Instagram: «${nombre}»`,
+      detalle: { conjuntoId: b.conjuntoId, mediaId: b.mediaId, anuncioId: r.anuncioId },
+    });
+    return Response.json({ ...r, estado: "ACTIVE", enlace: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${accountId}&selected_ad_ids=${r.anuncioId}` }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     if (error instanceof ErrorDeMeta) return fail(error.message, error.status);
     console.error("WiWO.ADS impulso de Instagram", error);

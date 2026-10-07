@@ -22,6 +22,7 @@ import {
   Sun,
   type LucideIcon,
   Lightbulb,
+  HeartPulse,
   Stethoscope,
   Wallet,
 } from "lucide-react";
@@ -96,13 +97,14 @@ const Cargando = () => (
 const cargarVista = <T,>(importar: () => Promise<React.ComponentType<T>>) =>
   dynamic(async () => ({ default: await importar() }) as { default: React.ComponentType<T> }, { ssr: false, loading: Cargando });
 const ConstructorView = cargarVista(() => import("./constructor-view").then((m) => m.ConstructorView));
+const MedicionView = cargarVista(() => import("./medicion-view").then((m) => m.MedicionView));
 const InversionView = cargarVista(() => import("./inversion-view").then((m) => m.InversionView));
 const DiagnosticoView = cargarVista(() => import("./diagnostico-view").then((m) => m.DiagnosticoView));
 const DecisionesView = cargarVista(() => import("./sugerencias-tinder").then((m) => m.BotonDeSugerencias));
 const ImpulsarView = cargarVista(() => import("./impulsar-view").then((m) => m.ImpulsarView));
 const ReglasView = cargarVista(() => import("./reglas-view").then((m) => m.ReglasView));
 const SolicitudesView = cargarVista(() => import("./solicitudes-view").then((m) => m.SolicitudesView));
-const EjecucionesView = cargarVista(() => import("./ejecuciones-view").then((m) => m.EjecucionesView));
+const AuditoriaView = cargarVista(() => import("./auditoria-view").then((m) => m.AuditoriaView));
 const SimuladorView = cargarVista(() => import("./simulador-view").then((m) => m.SimuladorView));
 const EquipoView = cargarVista(() => import("./equipo-view").then((m) => m.EquipoView));
 const IntegrationsView = cargarVista(() => import("./integrations-view").then((m) => m.IntegrationsView));
@@ -135,7 +137,14 @@ const navItems: ItemDeMenu[] = [
     icono: Lightbulb,
     resumen: "Cambios que se pueden hacer ahora: pausar, ajustar presupuesto o subir contenido nuevo.",
   },
-  { key: "control", label: "Inicio", icono: Home },
+  { key: "control", label: "Sala de control", icono: Home },
+  {
+    key: "medicion",
+    label: "Salud de medición",
+    roles: ["admin", "supervisor"],
+    icono: HeartPulse,
+    resumen: "¿Se mide bien lo que se paga? GA4, Tag Manager, eventos clave y conversiones.",
+  },
   {
     key: "inversion",
     label: "Inversión",
@@ -147,7 +156,7 @@ const navItems: ItemDeMenu[] = [
     key: "health",
     label: "Dashboard C-Level",
     icono: LineChart,
-    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+    resumen: "Resultados por objetivo y estado de las campañas y de las fuentes de datos.",
   },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
@@ -192,7 +201,7 @@ const navItemsGestion: ItemDeMenu[] = [
     label: "Auditoría",
     roles: ["admin", "supervisor", "analyst"],
     icono: History,
-    resumen: "Qué se publicó, quién lo mandó y qué respondió cada paso.",
+    resumen: "Todo queda registrado: pedidos al bot, solicitudes, decisiones y cada cambio con su antes y después.",
   },
   {
     key: "reglas",
@@ -857,13 +866,6 @@ export default function WiwoDashboard({
               puedeVerResumen={
                 initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
               }
-              puedeVerAlertas={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
-              }
-              puedeEditarFicha={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
-              }
-              puedeVerSugerencias={initialSnapshot.user.role !== "client"}
             />
           )}
           {view === "clients" && (
@@ -949,17 +951,20 @@ export default function WiwoDashboard({
           )}
           {view === "solicitudes" && <SolicitudesView />}
           {view === "reglas" && <ReglasView clienteId={clienteSeleccionado} />}
+          {view === "medicion" && (initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor") && (
+            <MedicionView clienteId={clienteSeleccionado} performance={performance} puedeEditar onElegirCliente={setClienteSeleccionado} />
+          )}
           {view === "inversion" && (
             <InversionView clienteId={clienteSeleccionado} performance={performance} periodo={performance.rango.label} onElegirCliente={setClienteSeleccionado} />
           )}
           {view === "diagnostico" && initialSnapshot.user.role === "admin" && <DiagnosticoView clienteId={clienteSeleccionado} />}
           <Dialog open={impulsarAbierto} onOpenChange={setImpulsarAbierto}>
             <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
-              <DialogTitle className="sr-only">Impulsar</DialogTitle>
+              <DialogTitle className="sr-only">Boostear anuncio</DialogTitle>
               {impulsarAbierto && <ImpulsarView clienteId={clienteSeleccionado} puedeAprobar={initialSnapshot.user.role !== "analyst"} />}
             </DialogContent>
           </Dialog>
-          {view === "historial" && <EjecucionesView />}
+          {view === "historial" && <AuditoriaView />}
           {view === "team" && (
             <EquipoView
               portfolios={performance.portfolios.map((item) => ({

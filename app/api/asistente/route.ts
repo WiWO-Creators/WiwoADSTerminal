@@ -8,6 +8,8 @@ import {
 } from "@/lib/asistente";
 import { CSV_TAMANO_MAXIMO, perfilarCsv } from "@/lib/asistente-csv";
 import { esRango } from "@/lib/rangos";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { recortar } from "@/lib/auditoria-pura";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +65,18 @@ export async function POST(request: Request) {
   if (mensajes.length === 0 || mensajes[mensajes.length - 1].role !== "user") {
     return fallo("Falta la pregunta", 400);
   }
+
+  // Auditoría: lo que la persona le pide al bot (antes de sumar el archivo adjunto).
+  const preguntaDePersona = mensajes[mensajes.length - 1].content;
+  await registrarAuditoria({
+    categoria: "asistente",
+    accion: "pregunta",
+    actorEmail: session.actor.email,
+    portfolioId: cuerpo.clienteId ?? null,
+    portfolioNombre: cuerpo.clienteNombre ?? null,
+    titulo: `Le pidió al bot: «${recortar(preguntaDePersona, 140)}»`,
+    detalle: { pregunta: recortar(preguntaDePersona, 1200), conArchivo: Boolean(cuerpo.csv?.texto), cliente: cuerpo.clienteNombre ?? null },
+  });
 
   const csvTexto = cuerpo.csv?.texto;
   if (typeof csvTexto === "string" && csvTexto.length > 0) {

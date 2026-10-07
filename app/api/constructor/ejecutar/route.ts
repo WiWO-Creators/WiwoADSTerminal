@@ -1,3 +1,4 @@
+import { registrarAuditoria } from "@/lib/auditoria";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
@@ -161,6 +162,18 @@ export async function POST(request: Request) {
   );
 
   await registrarEjecucion(draft, session.actor.email, realizados, todoBien);
+  await registrarAuditoria({
+    categoria: "creacion",
+    accion: todoBien ? "publicada" : "fallida",
+    actorEmail: session.actor.email,
+    portfolioId: draft.portfolioId,
+    plataforma: draft.platforms.join(","),
+    entidadTipo: "campana",
+    entidadNombre: draft.name,
+    titulo: `${session.actor.email.split("@")[0]} ${todoBien ? "creó" : "intentó crear"} la campaña «${draft.name}» en ${draft.platforms.join(" y ")}${todoBien ? "" : " (falló)"}`,
+    resultado: todoBien ? "ok" : "error",
+    detalle: { pasos: realizados.map((p) => ({ accion: p.action, etiqueta: p.label, ok: p.ok, error: p.error })), campanaIncompleta: campanaIncompleta ?? null },
+  });
 
   // Lo recién creado no tiene ni una impresión, así que solo el catálogo lo
   // conoce — y ese se reconstruía como mucho una vez al día, por eso la

@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { getRawDb } from "@/db";
+import { registrarAuditoria } from "@/lib/auditoria";
 import {
   can,
   esCargoProtegido,
@@ -262,6 +263,16 @@ export async function inviteMember(
     .run();
 
   await replacePortfolios(id, input.portfolioIds, actor.email);
+  await registrarAuditoria({
+    categoria: "equipo",
+    accion: "agregado",
+    actorEmail: actor.email,
+    entidadTipo: "persona",
+    entidadId: id,
+    entidadNombre: email,
+    titulo: `${actor.email} agregó a ${email} como ${ROLE_LABELS[input.role]}`,
+    detalle: { rol: input.role, clientes: input.portfolioIds },
+  });
 }
 
 export async function updateMember(
@@ -313,6 +324,21 @@ export async function updateMember(
   if (input.portfolioIds !== undefined) {
     await replacePortfolios(row.id, input.portfolioIds, actor.email);
   }
+  const cambios = [
+    input.role !== undefined ? `rol: ${input.role}` : null,
+    input.isActive !== undefined ? (input.isActive ? "activada" : "desactivada") : null,
+    input.portfolioIds !== undefined ? `${input.portfolioIds.length} clientes asignados` : null,
+  ].filter(Boolean);
+  await registrarAuditoria({
+    categoria: "equipo",
+    accion: "modificado",
+    actorEmail: actor.email,
+    entidadTipo: "persona",
+    entidadId: row.id,
+    entidadNombre: row.email,
+    titulo: `${actor.email} modificó a ${row.email}: ${cambios.join(", ") || "sin cambios"}`,
+    detalle: { rol: input.role ?? null, activa: input.isActive ?? null, clientes: input.portfolioIds ?? null },
+  });
 }
 
 async function replacePortfolios(

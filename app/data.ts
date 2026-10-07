@@ -21,7 +21,8 @@ export type ViewKey =
   | "impulsar"
   | "reglas"
   | "diagnostico"
-  | "inversion";
+  | "inversion"
+  | "medicion";
 
 export type Severity = "critical" | "high" | "medium" | "info";
 export type HealthState = "critical" | "warning" | "healthy" | "inactive";

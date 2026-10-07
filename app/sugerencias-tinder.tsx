@@ -31,6 +31,9 @@ const SEVERIDAD: Record<SugerenciaVista["severity"], { etiqueta: string; clase: 
 };
 
 const MOTIVOS = ["No aplica a este cliente", "Ya lo resolví por otro lado", "No estoy de acuerdo"];
+/** Para estas recomendaciones el motivo importa: con «Ya no estará activa», «De temporada» o «Pausada a propósito» no se vuelve a recomendar. */
+const MOTIVOS_DE_CAMPANA = ["Ya no estará activa", "Es una campaña de temporada", "Está pausada a propósito", "No estoy de acuerdo"];
+const motivosDe = (x: SugerenciaVista): string[] => (x.rule === "campana_apagada" || x.rule === "contenido_desactualizado" ? MOTIVOS_DE_CAMPANA : MOTIVOS);
 /** Cuánto hay que arrastrar la tarjeta para que cuente como una decisión. */
 const UMBRAL_ARRASTRE = 110;
 
@@ -40,6 +43,20 @@ function tipoDe(s: SugerenciaVista): string {
   if (s.accion?.tipo === "presupuesto") return "Presupuesto";
   if (s.accion?.tipo === "pausar") return "Pausar";
   return s.rule.startsWith("medicion_") ? "Medición" : "Revisar";
+}
+
+/** «Hace 5 min», «Hace 2 h», «Hace 3 días». */
+function hace(ms: number): string {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (min < 60) return `Hace ${min} min`;
+  if (min < 60 * 24) return `Hace ${Math.round(min / 60)} h`;
+  return `Hace ${Math.round(min / 1440)} días`;
+}
+
+/** «Vence en 3 días», «Vence hoy». */
+function vence(ms: number): string {
+  const dias = Math.ceil((ms - Date.now()) / 86_400_000);
+  return dias <= 0 ? "Vence hoy" : dias === 1 ? "Vence mañana" : `Vence en ${dias} días`;
 }
 
 const idempotencia = () => `SUG-${crypto.randomUUID()}`;
@@ -81,6 +98,7 @@ export function BotonDeSugerencias({
   const [resueltas, setResueltas] = useState(0);
   const [subiendo, setSubiendo] = useState<SugerenciaVista | null>(null);
   const [seleccionId, setSeleccionId] = useState<string | null>(null);
+  const [reactivando, setReactivando] = useState<SugerenciaVista | null>(null);
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroPlataforma, setFiltroPlataforma] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
@@ -193,6 +211,11 @@ export function BotonDeSugerencias({
       setSubiendo(s);
       return;
     }
+    if (s.accion?.tipo === "reactivar") {
+      setDx(0);
+      setReactivando(s);
+      return;
+    }
     if (s.accion?.tipo === "pausar") {
       setDx(0);
       setPausando(s);
@@ -236,6 +259,49 @@ export function BotonDeSugerencias({
     if (await resolver(s, "approve")) {
       toast.success("Campaña pausada");
       quitar(s);
+    }
+  }
+
+  async function reactivarCampana(s: SugerenciaVista) {
+    if (!s.provider || !s.accountId || !s.entityId) return;
+    setTrabajando(true);
+    try {
+      const respuesta = await fetch("/api/anuncios/estado", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: s.provider, nivel: "campana", accountId: s.accountId, campaignId: s.entityId, activar: true }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok || cuerpo?.ok === false) throw new Error(cuerpo?.error ?? "No se pudo reactivar la campaña");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo reactivar la campaña");
+      setTrabajando(false);
+      return;
+    }
+    setTrabajando(false);
+    if (await resolver(s, "approve")) {
+      toast.success("Campaña reactivada");
+      quitar(s);
+    }
+  }
+
+  /** Quien no aprueba cambios propone reactivar: queda pendiente hasta que lo apruebe un Lead o superior. */
+  async function proponerReactivar(s: SugerenciaVista) {
+    if (!s.provider || !s.accountId || !s.entityId || trabajando) return;
+    setTrabajando(true);
+    try {
+      const respuesta = await fetch("/api/entidades/editar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: s.provider, accountId: s.accountId, nivel: "campana", id: s.entityId, cambios: { activar: true }, modo: "solicitar" }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudo enviar la propuesta");
+      toast.success("Propuesta enviada: nada se reactivó todavía. Debe aprobarla un Lead o superior.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo enviar la propuesta");
+    } finally {
+      setTrabajando(false);
     }
   }
 
@@ -382,6 +448,19 @@ export function BotonDeSugerencias({
                     <span className="font-semibold">Qué hacer: </span>
                     {actual.proposedAction}
                   </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-xl border border-foreground/10 p-3">
+                      <p className="text-[0.65rem] text-foreground/50">Impacto estimado</p>
+                      <p className="mt-0.5 text-xs font-semibold leading-5 text-foreground">{actual.impact}</p>
+                    </div>
+                    <div className="rounded-xl border border-foreground/10 p-3">
+                      <p className="text-[0.65rem] text-foreground/50">Confianza</p>
+                      <p className="mt-0.5 text-xs font-semibold text-foreground">{actual.confidence}</p>
+                      <p className="mt-0.5 text-[0.65rem] text-foreground/45">
+                        {hace(actual.generadaEn)} · {vence(actual.venceEn)}
+                      </p>
+                    </div>
+                  </div>
                   {actual.enlaces.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {actual.enlaces.map((e) => (
@@ -408,6 +487,17 @@ export function BotonDeSugerencias({
                       {actual.delta && actual.delta !== "—" && <span className="text-foreground/45">({actual.delta})</span>}
                     </div>
                   )}
+                  {actual.accion?.tipo === "reactivar" && !puede && actual.entityId && (
+                    <button
+                      type="button"
+                      disabled={trabajando}
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => void proponerReactivar(actual)}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    >
+                      Proponer reactivar esta campaña
+                    </button>
+                  )}
                   {actual.accion?.tipo === "pausar" && !puede && actual.entityId && (
                     <button
                       type="button"
@@ -429,7 +519,7 @@ export function BotonDeSugerencias({
                       Subir contenido a esta campaña
                     </button>
                   )}
-                  {actual.entityId && actual.accion?.tipo !== "contenido" && (
+                  {actual.entityId && actual.accion?.tipo !== "contenido" && actual.accion?.tipo !== "reactivar" && (
                     <button
                       type="button"
                       onClick={() => void abrirEnEditor(actual, false)}
@@ -444,8 +534,11 @@ export function BotonDeSugerencias({
               {eligiendoMotivo ? (
                 <div className="space-y-2 rounded-xl border border-foreground/10 p-3">
                   <p className="text-xs font-semibold text-foreground/70">¿Por qué la descartas?</p>
+                  {(actual.rule === "campana_apagada" || actual.rule === "contenido_desactualizado") && (
+                    <p className="text-[0.68rem] leading-4 text-foreground/50">Con «Ya no estará activa», «Es una campaña de temporada» o «Está pausada a propósito» no se vuelve a recomendar.</p>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    {MOTIVOS.map((m) => (
+                    {motivosDe(actual).map((m) => (
                       <button
                         key={m}
                         type="button"
@@ -640,6 +733,30 @@ export function BotonDeSugerencias({
           {subiendo?.clienteId && <ImpulsarView clienteId={subiendo.clienteId} puedeAprobar={puede} campanaInicial={subiendo.entityId ?? undefined} />}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={reactivando !== null} onOpenChange={(o) => !o && setReactivando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Reactivar esta campaña?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se reactivará “{reactivando?.entityName}” en {reactivando?.platform}. Vuelve a entregar y gastar de verdad en la cuenta del cliente; se revierte pausándola de nuevo.
+              Si ya no debía estar activa, cancela y descártala con el motivo «Ya no estará activa».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const x = reactivando;
+                setReactivando(null);
+                if (x) void reactivarCampana(x);
+              }}
+            >
+              Reactivar campaña
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={pausando !== null} onOpenChange={(o) => !o && setPausando(null)}>
         <AlertDialogContent>

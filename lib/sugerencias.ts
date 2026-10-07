@@ -18,6 +18,7 @@ import {
   type Senal,
 } from "./contexto-cliente";
 import { moneda } from "./monedas";
+import { campanaDeEpocaPasada } from "./vigencia-campana-pura";
 import type { Hallazgo } from "./medicion";
 import { ETIQUETA_RITMO, type ResumenPresupuesto } from "./presupuesto";
 
@@ -26,6 +27,8 @@ export type AccionSugerida =
   | { tipo: "presupuesto"; monto: number; actual: number }
   /** La campaña lleva días sin contenido nuevo: se resuelve subiendo contenido a sus conjuntos. */
   | { tipo: "contenido"; dias: number }
+  /** La campaña dejó de correr el mes pasado: reactivarla o confirmar que ya no estará activa. */
+  | { tipo: "reactivar" }
   | { tipo: "revisar" };
 
 export type SeveridadSugerencia = "critical" | "high" | "medium" | "info";
@@ -497,8 +500,10 @@ export function sugerenciasDeMedicion(entradas: EntradaDeMedicion[], ahora: Date
   );
 }
 
-/** Días sin anuncios nuevos a partir de los cuales una campaña activa pide contenido. */
-export const DIAS_SIN_CONTENIDO = 14;
+/** Días con el mismo contenido a partir de los cuales una campaña activa pide renovarlo. */
+export const DIAS_SIN_CONTENIDO = 20;
+/** Tarjetas de contenido a la vez por cliente. */
+export const MAX_CONTENIDO_POR_CLIENTE = 5;
 
 export type EntradaDeContenido = {
   cliente: { id: string; nombre: string };
@@ -523,6 +528,8 @@ export function sugerenciasDeContenido(entradas: EntradaDeContenido[], ahora: Da
   const salida: Sugerencia[] = [];
   for (const e of entradas) {
     if (e.ultimoAnuncio === null) continue;
+    // Una campaña de una época que ya pasó («junio» en octubre) no necesita contenido nuevo: ya cumplió.
+    if (campanaDeEpocaPasada(e.campanaNombre, ahora)) continue;
     const dias = Math.floor((generatedAt - e.ultimoAnuncio) / 86_400_000);
     if (dias < DIAS_SIN_CONTENIDO) continue;
     salida.push({
@@ -549,6 +556,67 @@ export function sugerenciasDeContenido(entradas: EntradaDeContenido[], ahora: Da
       delta: `${e.soloCota ? "+" : ""}${dias} días`,
       primaryLabel: "Subir contenido",
       accion: { tipo: "contenido", dias },
+      generatedAt,
+      expiresAt: generatedAt + 7 * 86_400_000,
+    });
+  }
+  // Para no inundar la cola: las 5 con contenido más viejo de cada cliente; al resolverlas aparecen las siguientes.
+  const porCliente = new Map<string, Sugerencia[]>();
+  for (const x of salida) porCliente.set(x.portfolioId, [...(porCliente.get(x.portfolioId) ?? []), x]);
+  const dias = (x: Sugerencia) => (x.accion.tipo === "contenido" ? x.accion.dias : 0);
+  return [...porCliente.values()].flatMap((lista) => lista.sort((a, b) => dias(b) - dias(a)).slice(0, MAX_CONTENIDO_POR_CLIENTE));
+}
+
+export type EntradaDeCampanaApagada = {
+  cliente: { id: string; nombre: string };
+  provider: string;
+  accountId: string;
+  campanaId: string;
+  campanaNombre: string;
+  /** Gasto de la campaña en el mes pasado, en micros de su moneda. */
+  gastoMesAnteriorMicros: number;
+  moneda: string | null;
+  /** Nombre del mes pasado, para decirlo («septiembre»). */
+  mesAnterior: string;
+};
+
+/**
+ * «"X" dejó de correr»: gastó el mes pasado y hoy no tiene gasto ni está activa. Se pregunta si debería seguir; si la respuesta
+ * es «ya no estará activa», la tarjeta se descarta con ese motivo y no vuelve. No se recomienda nada de campañas de una época
+ * pasada (el mes del nombre terminó hace más de un mes). Una por campaña y semana.
+ */
+export function sugerenciasDeCampanaApagada(entradas: EntradaDeCampanaApagada[], ahora: Date): Sugerencia[] {
+  const semana = Math.floor(ahora.getTime() / (7 * 86_400_000));
+  const generatedAt = ahora.getTime();
+  const salida: Sugerencia[] = [];
+  for (const e of entradas) {
+    if (e.gastoMesAnteriorMicros <= 0) continue;
+    if (campanaDeEpocaPasada(e.campanaNombre, ahora)) continue;
+    const gasto = moneda(e.gastoMesAnteriorMicros, e.moneda);
+    salida.push({
+      id: `apagada-${e.campanaId}-${semana}`,
+      rule: "campana_apagada",
+      severity: "medium",
+      portfolioId: e.cliente.id,
+      client: e.cliente.nombre,
+      platform: plataforma(e.provider),
+      provider: e.provider,
+      accountId: e.accountId,
+      entityLevel: "campana",
+      entityId: e.campanaId,
+      entityName: e.campanaNombre,
+      title: `"${e.campanaNombre}" dejó de correr`,
+      diagnosis: `Gastó ${gasto} en ${e.mesAnterior} y en los últimos 14 días no tiene gasto; hoy no está activa. Si debería seguir, reactívala. Si ya no estará activa, descártala indicando el motivo y no se volverá a recomendar.`,
+      proposedAction: "Reactivarla si debe seguir corriendo, o confirmar que ya no estará activa.",
+      impact: "Evita dejar apagada por descuido una campaña que sí debía seguir.",
+      confidence: "Media",
+      before: "Apagada",
+      after: "Reactivada",
+      guardrail: "Es un cambio real en la cuenta del cliente; se revierte pausándola de nuevo.",
+      metric: "Gasto del mes pasado sin gasto actual",
+      delta: gasto,
+      primaryLabel: "Reactivar",
+      accion: { tipo: "reactivar" },
       generatedAt,
       expiresAt: generatedAt + 7 * 86_400_000,
     });

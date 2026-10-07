@@ -1,11 +1,10 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import {
   Activity,
   AlertTriangle,
   ArrowRight,
-  CircleDollarSign,
   LockKeyhole,
   RefreshCw,
   ShieldCheck,
@@ -26,11 +25,6 @@ import { platformLabel } from "@/lib/plataformas";
 import { summarizeObjectives, type ObjectiveTotal } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
-import { TarjetaResumenCliente } from "./resumen-cliente";
-import { DistribucionDelGasto } from "./distribucion-gasto";
-import { SaludDeMedicion } from "./salud-medicion";
-import { BotonDeSugerencias } from "./sugerencias-tinder";
-import { PresupuestoDelMes } from "./presupuesto-mes";
 import { TarjetaResumenSemanal } from "./resumen-semanal";
 import {
   HealthBadge,
@@ -57,6 +51,48 @@ export type ModuloInicio = {
  * los datos y reparte hacia los módulos. Las cifras no se repiten acá —
  * viven en el Dashboard C-Level, que es donde se las va a buscar.
  */
+type Atencion = { decisiones: number | null; porRevisar: number | null };
+
+/** Lo que necesita atención, primero: cuántas decisiones y solicitudes esperan, con un clic a su ventana. No repite cifras de inversión. */
+function AtencionPrimero({ onNavigate, accountsWithData }: { onNavigate: (key: ViewKey) => void; accountsWithData: number }) {
+  const [atencion, setAtencion] = useState<Atencion>({ decisiones: null, porRevisar: null });
+  useEffect(() => {
+    let vivo = true;
+    void (async () => {
+      const decisiones = await fetch("/api/sugerencias", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j: { pendientes?: unknown[] } | null) => (j?.pendientes ? j.pendientes.length : null)).catch(() => null);
+      const porRevisar = await fetch("/api/solicitudes", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((j: { porRevisar?: unknown[] } | null) => (j?.porRevisar ? j.porRevisar.length : null)).catch(() => null);
+      if (vivo) setAtencion({ decisiones, porRevisar });
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  const tarjetas: Array<{ titulo: string; valor: string; nota: string; destino: ViewKey }> = [
+    { titulo: "Decisiones abiertas", valor: atencion.decisiones === null ? "—" : String(atencion.decisiones), nota: "Cambios que se pueden hacer ahora", destino: "decisiones" },
+    { titulo: "Solicitudes por revisar", valor: atencion.porRevisar === null ? "—" : String(atencion.porRevisar), nota: "Esperan una aprobación", destino: "solicitudes" },
+    { titulo: "Cuentas con datos", valor: String(accountsWithData), nota: "Leyendo en este momento", destino: "integrations" },
+    { titulo: "Salud de medición", valor: "Revisar", nota: "¿Se mide bien lo que se paga?", destino: "medicion" },
+  ];
+  return (
+    <section className="mb-7">
+      <p className="font-micro mb-3 text-[0.68rem] text-foreground/40">LO QUE NECESITA ATENCIÓN, PRIMERO</p>
+      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {tarjetas.map((t) => (
+          <li key={t.titulo}>
+            <button type="button" onClick={() => onNavigate(t.destino)} className="block w-full text-left">
+              <Surface className="neo-card-accent p-4 transition-colors hover:border-brand/40">
+                <p className="text-xs font-semibold text-foreground/60">{t.titulo}</p>
+                <p className="metric-number mt-1 text-2xl font-extrabold text-foreground">{t.valor}</p>
+                <p className="mt-0.5 text-xs text-foreground/50">{t.nota}</p>
+              </Surface>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function ControlRoomView({
   nombre,
   performance,
@@ -87,7 +123,7 @@ export function ControlRoomView({
           </h2>
           <p className="mt-3 text-base text-muted-foreground">
             {hasLiveData
-              ? "Tu panel de WiWO.ADS — elige por dónde seguir."
+              ? "Sala de control: lo que espera tu atención y cada ventana, cada una para algo específico."
               : "Conecta una fuente para empezar a ver datos reales."}
           </p>
         </div>
@@ -98,6 +134,8 @@ export function ControlRoomView({
           </Button>
         )}
       </div>
+
+      <AtencionPrimero onNavigate={onNavigate} accountsWithData={performance.accountsWithData} />
 
       <nav aria-label="Módulos" className="space-y-7">
         <GrupoDeModulos
@@ -292,9 +330,6 @@ export function HealthView({
   critical,
   warnings,
   puedeVerResumen,
-  puedeVerAlertas,
-  puedeEditarFicha,
-  puedeVerSugerencias,
 }: {
   /**
    * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
@@ -312,12 +347,6 @@ export function HealthView({
   warnings: number;
   /** Solo admin/lead ven el resumen semanal: es un agregado de toda la cartera. */
   puedeVerResumen: boolean;
-  /** Administrador o supervisor: ven las alertas técnicas (medición, Tag Manager). */
-  puedeVerAlertas: boolean;
-  /** Puede editar la ficha del cliente (para avisar qué falta cargar). */
-  puedeEditarFicha: boolean;
-  /** Todo el equipo menos el cliente ve las sugerencias. */
-  puedeVerSugerencias: boolean;
 }) {
   const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
@@ -380,29 +409,12 @@ export function HealthView({
             {portfolio.name}
           </h2>
           <p className="mt-2 max-w-xl text-xs leading-5 text-foreground/50">
-            Cuánto se invirtió, cuánto queda, adónde se fue y qué conviene revisar.
+            Resultados y estado de las campañas. La inversión está en Inversión; la medición, en Salud de medición; lo que conviene hacer, en Decisiones.
           </p>
         </div>
-        {puedeVerSugerencias && <BotonDeSugerencias key={`sugerencias-${portfolio.id}`} clienteId={portfolio.id} rango={performance.rango.id} />}
       </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <StatCard
-          label={`Inversión · ${monthLabel}`}
-          value={
-            portfolio.currencyTotals.length === 0
-              ? "—"
-              : portfolio.currencyTotals
-                  .map((t) => formatCurrency(t.spendMicros, t.currency))
-                  .join(" · ")
-          }
-          note={
-            portfolio.accountsWithData > 0
-              ? `${portfolio.accountsWithData} de ${portfolio.accountCount} cuentas con datos`
-              : "Sin datos en el periodo"
-          }
-          icon={CircleDollarSign}
-        />
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <StatCard
           label={`Clics · ${monthLabel}`}
           value={portfolio.clicks === null ? "—" : formatInteger(portfolio.clicks)}
@@ -416,31 +428,8 @@ export function HealthView({
         <TarjetaResultadosPorObjetivo objetivos={objetivosDelCliente} monthLabel={monthLabel} />
       </div>
 
-      {/* Del cliente elegido, no de toda la cartera — a diferencia del
-          resumen agregado de arriba cuando no hay cliente elegido, acá ya se
-          sabe de quién es la pantalla, así que no tiene sentido mezclarlo
-          con el gasto de otros clientes. */}
-      <TarjetaResumenCliente
-        portfolio={portfolio}
-        periodo={{
-          desde: performance.rangeStart,
-          hasta: performance.rangeEnd,
-          enCurso: performance.rango.enCurso,
-        }}
-        objetivos={objetivosDelCliente}
-      />
 
-      <PresupuestoDelMes key={`presupuesto-${portfolio.id}`} portfolioId={portfolio.id} />
 
-      <DistribucionDelGasto
-        campanas={performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey))}
-        objetivos={objetivosDelCliente}
-        periodo={etiquetaPeriodo(performance)}
-      />
-
-      {puedeVerAlertas && (
-        <SaludDeMedicion key={`medicion-${portfolio.id}`} portfolioId={portfolio.id} puedeEditar={puedeEditarFicha} />
-      )}
 
       {critical > 0 && (
         <div className="mb-4 flex flex-col gap-3 rounded-xl border border-danger-deep/25 bg-danger-deep/10 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -707,17 +696,6 @@ function etiquetaPeriodo(performance: PerformanceSnapshot): string {
   return performance.rango.label;
 }
 
-function formatCurrency(valorMicros: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("es-CL", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).format(valorMicros / 1_000_000);
-  } catch {
-    return `${currency} ${Math.round(valorMicros / 1_000_000).toLocaleString("es-CL")}`;
-  }
-}
 
 function formatInteger(valor: number): string {
   return valor.toLocaleString("es-CL");

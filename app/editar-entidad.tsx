@@ -28,6 +28,7 @@ type Simulacion = {
     problemas: Problema[];
     pausaAlAplicar: boolean;
     pausaPedida?: boolean;
+    activacionPedida?: boolean;
   };
   validacionGoogle: { ok: boolean; mensaje: string | null } | null;
 };
@@ -177,7 +178,8 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   const cambio = (k: string) => (ahora[k] ?? "") !== (antes[k] ?? "");
   const c: CambiosEdicion = {};
   if (cambio("nombre")) c.nombre = ahora.nombre;
-  if (ahora.pausar === "1") c.pausar = true;
+  if (ahora.estadoPedido === "pausar") c.pausar = true;
+  if (ahora.estadoPedido === "activar") c.activar = true;
 
   if (cambio("presupuestoMonto") || cambio("presupuestoTipo")) {
     const monto = num(ahora.presupuestoMonto ?? "");
@@ -373,13 +375,13 @@ export function EditarEntidad(props: Props) {
   const puedeAplicar0 =
     simulacion !== null &&
     bloqueantes.length === 0 &&
-    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true) &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
   const puedeAplicar =
     puedeAprobar &&
     simulacion !== null &&
     bloqueantes.length === 0 &&
-    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true) &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
 
   return (
@@ -392,11 +394,16 @@ export function EditarEntidad(props: Props) {
           </p>
         ) : (
           <>
-          <Campo etiqueta="Estado" ayuda="Pausar detiene la entrega. Se revierte activándolo de nuevo en la plataforma.">
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={valores.pausar === "1"} onChange={(e) => poner("pausar")(e.target.checked ? "1" : "")} />
-              Pausar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}
-            </label>
+          <Campo etiqueta="Estado" ayuda="Pausar detiene la entrega; activar la reanuda. Si no eliges nada, el estado no cambia.">
+            <select
+              className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+              value={valores.estadoPedido ?? ""}
+              onChange={(e) => poner("estadoPedido")(e.target.value)}
+            >
+              <option value="">Sin cambio</option>
+              <option value="pausar">Pausar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}</option>
+              {provider !== "linkedin" && <option value="activar">Activar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}</option>}
+            </select>
           </Campo>
           <Campo
             etiqueta="Nombre"

@@ -20,8 +20,15 @@ export const VERSION_API_POR_DEFECTO = "202609";
 export const ALCANCES = {
   /** Advertising API: leer cuentas, campañas y creativos / leer métricas. */
   lectura: ["r_ads", "r_ads_reporting"],
-  /** Advertising API: pausar, activar y cambiar presupuestos. Hoy WiWO.ADS no escribe por esta vía. */
+  /** Advertising API: crear, editar, pausar y activar grupos, campañas y presupuestos. */
   administrar: ["rw_ads"],
+  /**
+   * Advertising API: lo que hace falta para CREAR ANUNCIOS. Un anuncio apunta a una publicación de una página de empresa:
+   * ver qué páginas administra la persona (`r_organization_admin`), leer sus publicaciones para patrocinar una existente
+   * (`r_organization_social`) y crear la publicación «oculta» del anuncio (`w_organization_social`). Comprobado el
+   * 2026-10-07: LinkedIn los acepta para esta app sin pedir ningún otro producto.
+   */
+  anuncios: ["r_organization_admin", "r_organization_social", "w_organization_social"],
   /** Lead Sync API: leer las respuestas de los formularios. */
   leads: ["r_marketing_leadgen_automation"],
 } as const;
@@ -100,7 +107,7 @@ export function fechaRest(fecha: string): string {
 }
 
 /** Los ids se validan antes de meterlos en la URL: llegan de la base o de la persona, y la ruta se arma como texto. */
-function soloIds(ids: readonly string[], que: string): string[] {
+export function soloIds(ids: readonly string[], que: string): string[] {
   for (const id of ids) if (!SOLO_ID.test(id)) throw new ErrorDeLinkedin(`Id de ${que} inválido: ${id}`, 400);
   return [...ids];
 }
@@ -283,7 +290,7 @@ export function cuerpoDeCuentaDePrueba(datos: { nombre?: string; moneda?: string
   return cuerpo;
 }
 
-/** El id de lo recién creado: LinkedIn lo devuelve en la cabecera `x-restli-id`, no en el cuerpo. */
+/** Un id numérico de una cabecera (`x-linkedin-id`, `x-restli-id`…); `null` si no es un número. */
 export function idDeCabeceraCreada(valor: string | null | undefined): string | null {
   const id = (valor ?? "").trim();
   return SOLO_ID.test(id) ? id : null;
@@ -293,4 +300,18 @@ export function idDeCabeceraCreada(valor: string | null | undefined): string | n
 export function diasHastaVencer(expiraEn: number | null, ahora: number): number | null {
   if (expiraEn === null || !Number.isFinite(expiraEn)) return null;
   return Math.floor((expiraEn - ahora) / 86_400_000);
+}
+
+/**
+ * El id de lo recién creado. Las APIs versionadas (cabecera `Linkedin-Version`) lo devuelven en `x-linkedin-id`; las
+ * anteriores, en `x-restli-id`; y como último recurso se lee el final de `location` (`/adAccounts/123`). Se comprobó con la
+ * creación real de la cuenta de prueba: `x-restli-id` no vino y la cuenta sí se creó.
+ */
+export function idDeCreacion(cabeceras: { get(nombre: string): string | null }): string | null {
+  for (const nombre of ["x-linkedin-id", "x-restli-id"]) {
+    const id = idDeCabeceraCreada(cabeceras.get(nombre));
+    if (id) return id;
+  }
+  const ubicacion = (cabeceras.get("location") ?? "").split("?")[0].split("/").filter(Boolean).pop();
+  return idDeCabeceraCreada(ubicacion);
 }

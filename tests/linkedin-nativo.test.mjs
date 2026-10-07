@@ -155,3 +155,19 @@ test("diasHastaVencer cuenta en días enteros, negativo si venció y null si no 
   assert.equal(p.diasHastaVencer(1000 - 2 * dia, 1000), -2);
   assert.equal(p.diasHastaVencer(null, 1000), null);
 });
+
+test("idDeCreacion lee x-linkedin-id (APIs versionadas), luego x-restli-id y por último location", () => {
+  const h = (o) => ({ get: (k) => o[k.toLowerCase()] ?? null });
+  assert.equal(p.idDeCreacion(h({ "x-linkedin-id": "558457797" })), "558457797");
+  assert.equal(p.idDeCreacion(h({ "x-restli-id": "77" })), "77");
+  assert.equal(p.idDeCreacion(h({ location: "/adAccounts/123?x=1" })), "123");
+  assert.equal(p.idDeCreacion(h({ "x-linkedin-id": "urn:li:x:9", "x-restli-id": "5" })), "5");
+  assert.equal(p.idDeCreacion(h({})), null);
+});
+
+test("los alcances de anuncios y de administración son los que LinkedIn aceptó para esta app, y los de leads van aparte", () => {
+  assert.deepEqual([...p.ALCANCES.lectura], ["r_ads", "r_ads_reporting"]);
+  assert.deepEqual([...p.ALCANCES.administrar], ["rw_ads"]);
+  assert.deepEqual([...p.ALCANCES.anuncios], ["r_organization_admin", "r_organization_social", "w_organization_social"]);
+  assert.deepEqual([...p.ALCANCES.leads], ["r_marketing_leadgen_automation"]);
+});

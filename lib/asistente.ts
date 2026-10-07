@@ -17,6 +17,8 @@ import { moneda as formatoMoneda } from "@/lib/monedas";
 import { listPortfolios } from "@/lib/portafolios-store";
 import { calcularPresupuesto, ETIQUETA_RITMO } from "@/lib/presupuesto";
 import { OBJECTIVES, type Objective, type LugarSegmentable } from "@/lib/constructor";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { recortar, resumenDeEntrada } from "@/lib/auditoria-pura";
 import { solicitarContenido } from "@/lib/contenido-ia";
 import { solicitarImpulsos } from "@/lib/impulsos";
 import { listarReglasMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
@@ -1750,8 +1752,34 @@ export async function correrAsistente(
             tool_use_id: bloque.id,
             content: JSON.stringify(salidaHerramienta).slice(0, 24_000),
           });
+          // Auditoría: qué usó el bot, con qué datos y cómo le fue.
+          const salida = (salidaHerramienta ?? {}) as Record<string, unknown>;
+          const conError = typeof salida.error === "string";
+          await registrarAuditoria({
+            categoria: "asistente",
+            accion: "herramienta",
+            actorEmail: ctx.actor.email,
+            portfolioId: ctx.clienteId ?? null,
+            titulo: `El bot usó «${bloque.name}»${conError ? ` y no pudo: ${recortar(String(salida.error), 120)}` : ""}`,
+            resultado: conError ? "error" : "ok",
+            detalle: {
+              herramienta: bloque.name,
+              entrada: resumenDeEntrada((bloque.input ?? {}) as Record<string, unknown>),
+              resultado: conError ? salida.error : typeof salida.mensaje === "string" ? recortar(salida.mensaje, 300) : undefined,
+              enviadaARevision: salida.enviada_a_revision ?? undefined,
+            },
+          });
         } catch (error) {
           console.error("[asistente] herramienta falló", bloque.name, error);
+          await registrarAuditoria({
+            categoria: "asistente",
+            accion: "herramienta",
+            actorEmail: ctx.actor.email,
+            portfolioId: ctx.clienteId ?? null,
+            titulo: `El bot usó «${bloque.name}» y falló`,
+            resultado: "error",
+            detalle: { herramienta: bloque.name, entrada: resumenDeEntrada((bloque.input ?? {}) as Record<string, unknown>) },
+          });
           resultados.push({
             type: "tool_result",
             tool_use_id: bloque.id,

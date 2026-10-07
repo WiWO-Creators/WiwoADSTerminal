@@ -45,6 +45,7 @@ Leyenda de riesgo: 🔴 da acceso o permite actuar · 🟠 da acceso parcial o g
 |---|---|---|---|
 | `LINKEDIN_CLIENT_ID` 🟢 | ID de la app «WiwoAds» de LinkedIn (también vale `LINKEDIN_APP_ID`). | `lib/linkedin-nativo.ts` | Es público: sale en la URL de login. |
 | `LINKEDIN_CLIENT_SECRET` 🔴 | Secreto de esa app (también vale `LINKEDIN_APP_SECRET`). Canjea el código OAuth y renueva tokens. | `lib/linkedin-nativo.ts` | Permite **hacerse pasar por la app** al canjear códigos. Regenerar en LinkedIn Developers → Auth. |
+| `LINKEDIN_ESCRITURA_CLIENTES` 🟠 | Con `true`, WiWO.ADS puede **crear y modificar campañas en cuentas de clientes** de LinkedIn. Sin ella (por defecto) solo escribe en la cuenta de prueba. | `app/api/linkedin/escritura/route.ts` | No es secreto, pero activarla es una decisión de negocio: cambios reales en cuentas de clientes. Actívala solo tras probar. |
 | `LINKEDIN_API_VERSION` 🟢 | Versión de la API REST (cabecera `Linkedin-Version`, `AAAAMM`). Por defecto `202609` (la 202510 se retira el 2026-10-15). | `lib/linkedin-nativo.ts` | No es secreto. LinkedIn retira versiones viejas: si responde 426, subirla. |
 
 Sin las dos primeras, la vía nativa queda apagada y LinkedIn sigue leyéndose por Windsor.

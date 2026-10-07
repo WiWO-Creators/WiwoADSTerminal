@@ -8,6 +8,8 @@ import { armarAntes, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servi
 import { actualizarAnuncioRsa,
   actualizarCampanaGoogle, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { etiquetasDeCambios, resumenDeCambios } from "@/lib/auditoria-pura";
 import { can, puedeArmarCampanas } from "@/lib/permisos";
 import { crearSolicitudDeEdicion, ErrorDeSolicitud } from "@/lib/solicitudes";
 import { puedeAdministrar, type NivelEntidad } from "@/lib/plataformas";
@@ -146,6 +148,7 @@ export async function POST(request: Request) {
       },
       pasos: plan.pasos,
       pausarAlFinal: plan.pausaAlAplicar,
+      activarAlFinal: plan.activacionPedida === true,
       credencialesGoogle,
     });
 
@@ -159,6 +162,25 @@ export async function POST(request: Request) {
       resultado.pasos,
       resultado.ok,
     );
+
+    {
+      const nombreEntidad = antes.entidad.nombre ?? id;
+      const que = nivel === "campana" ? "la campaña" : nivel === "conjunto" ? "el conjunto" : "el anuncio";
+      await registrarAuditoria({
+        categoria: "cambio",
+        accion: resultado.ok ? "aplicado" : "fallido",
+        actorEmail: session.actor.email,
+        portfolioId,
+        plataforma: provider,
+        entidadTipo: nivel,
+        entidadId: id,
+        entidadNombre: nombreEntidad,
+        titulo: `${session.actor.email.split("@")[0]} cambió ${que} «${nombreEntidad}»: ${resumenDeCambios(plan.diff)}${resultado.ok ? "" : " (falló)"}`,
+        resultado: resultado.ok ? "ok" : "error",
+        etiquetas: etiquetasDeCambios(plan.diff),
+        detalle: { cambios: plan.diff, pasos: resultado.pasos.map((p) => ({ accion: p.action, ok: p.ok, error: p.error })) },
+      });
+    }
 
     if (!resultado.ok) {
       return Response.json(
