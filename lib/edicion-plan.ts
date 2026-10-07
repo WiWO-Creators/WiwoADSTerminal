@@ -202,10 +202,13 @@ export function planEdicion(
   {
     currency,
     nativaGoogle = false,
+    nativaLinkedin = false,
   }: {
     currency: string | null;
     /** true: quien edita tiene conectada su cuenta de Google (API nativa disponible). */
     nativaGoogle?: boolean;
+    /** true: se puede escribir en esta cuenta de LinkedIn por su API directa (ver `accesoNativoLinkedin`). */
+    nativaLinkedin?: boolean;
   },
 ): PlanEdicion {
   const plan: PlanEdicion = { pasos: [], diff: [], problemas: [], pausaAlAplicar: false };
@@ -214,10 +217,10 @@ export function planEdicion(
 
   if (provider === "google") planGoogle(plan, antes, cambios, currency, problema);
   else if (provider === "meta") planMeta(plan, antes, cambios, currency, problema);
-  else if (provider === "linkedin") planLinkedin(plan, antes, cambios, currency, problema);
+  else if (provider === "linkedin") planLinkedin(plan, antes, cambios, currency, problema, nativaLinkedin);
   else problema("plataforma", "Esta plataforma todavía no permite editar.");
 
-  if (plan.pasos.some((p) => p.via === "nativa") && !nativaGoogle) {
+  if (plan.pasos.some((p) => p.via === "nativa" && p.platform === "google") && !nativaGoogle) {
     problema(
       "conexion",
       "Para editar el contenido de un anuncio de Google hay que conectar tu cuenta de Google en Integraciones.",
@@ -243,7 +246,7 @@ export function planEdicion(
     const estado = String((antes.entidad as { estado?: string | null }).estado ?? "").toUpperCase();
     if (cambios.pausar === true) {
       problema("activar", "No se puede pausar y activar a la vez.");
-    } else if (provider === "linkedin") {
+    } else if (provider === "linkedin" && !nativaLinkedin) {
       problema("activar", "LinkedIn no permite reactivar desde WiWO.ADS.");
     } else if (estado === "ACTIVE" || estado === "ENABLED") {
       problema("activar", "Ya está activo: no hay nada que activar.");
@@ -1085,7 +1088,24 @@ function planLinkedin(
   c: CambiosEdicion,
   currency: string | null,
   problema: Reporte,
+  nativo = false,
 ): void {
+  /**
+   * Con la API directa de LinkedIn (`nativo`) un cambio se envía como un solo `PARTIAL_UPDATE` y se lee de vuelta; sin ella,
+   * se usan las acciones de Windsor, que no pueden renombrar un grupo. El nivel de la interfaz se traduce al de la API:
+   * campaña (UI) = grupo de campañas; conjunto (UI) = campaña de LinkedIn.
+   */
+  const pasoNativo = (
+    nivelUi: "campana" | "conjunto",
+    id: string,
+    cambios: Record<string, unknown>,
+    label: string,
+    campos: Array<keyof CambiosEdicion>,
+    sinPausa?: boolean,
+  ): PasoEdicion => ({
+    via: "nativa", platform: "linkedin", action: "linkedin:actualizar", label,
+    params: { nivel: nivelUi === "campana" ? "grupo" : "campana", id, cambios }, campos, sinPausa,
+  });
   if (antes.nivel === "anuncio") {
     problema("contenido", "LinkedIn no permite editar el contenido de un anuncio desde WiWO.ADS. Aquí solo se pausa o se activa.");
     return;
@@ -1094,20 +1114,31 @@ function planLinkedin(
   if (antes.nivel === "campana") {
     const e = antes.entidad;
     if (c.nombre !== undefined && c.nombre.trim() !== (e.nombre ?? "").trim()) {
-      problema("nombre", "LinkedIn no permite renombrar un grupo de campañas desde Windsor: se hace en LinkedIn.");
+      if (!nativo) problema("nombre", "LinkedIn no permite renombrar un grupo de campañas desde Windsor: se hace en LinkedIn.");
+      else if (!c.nombre.trim()) problema("nombre", "El nombre no puede estar vacío.");
+      else {
+        plan.pasos.push(pasoNativo("campana", e.id, { nombre: c.nombre.trim() }, "Renombrar el grupo de campañas de LinkedIn", ["nombre"]));
+        plan.diff.push({ campo: "nombre", etiqueta: "Nombre", antes: vacio(e.nombre), despues: c.nombre.trim() });
+      }
     }
     if (c.presupuesto) {
       const { tipo, monto } = c.presupuesto;
       if (!(monto > 0)) problema("presupuesto", "El presupuesto debe ser mayor a cero.");
       else if (tipo !== "lifetime") problema("presupuesto", "Un grupo de campañas de LinkedIn solo admite presupuesto total.");
       else if (!e.fin) problema("presupuesto", "LinkedIn exige que el grupo tenga fecha de término para aplicar un presupuesto total.");
+      else if (nativo && !currency) problema("presupuesto", "No se conoce la moneda de la cuenta: no se puede cambiar el presupuesto.");
       else if (monto !== e.presupuesto.total) {
-        plan.pasos.push({
-          via: "windsor", platform: "linkedin", action: "set_campaign_group_budget",
-          label: "Cambiar el presupuesto total del grupo",
-          params: { campaign_group_id: e.id, amount: monto }, campos: ["presupuesto"],
-          sinPausa: e.presupuesto.total !== null && monto < e.presupuesto.total,
-        });
+        const baja = e.presupuesto.total !== null && monto < e.presupuesto.total;
+        plan.pasos.push(
+          nativo
+            ? pasoNativo("campana", e.id, { presupuestoTotal: { monto, moneda: currency } }, "Cambiar el presupuesto total del grupo", ["presupuesto"], baja)
+            : {
+                via: "windsor", platform: "linkedin", action: "set_campaign_group_budget",
+                label: "Cambiar el presupuesto total del grupo",
+                params: { campaign_group_id: e.id, amount: monto }, campos: ["presupuesto"],
+                sinPausa: baja,
+              },
+        );
         plan.diff.push({
           campo: "presupuesto", etiqueta: "Presupuesto total del grupo",
           antes: moneda(e.presupuesto.total, currency), despues: moneda(monto, currency),
@@ -1122,11 +1153,15 @@ function planLinkedin(
   if (cambia(c.nombre, e.nombre)) {
     if (!c.nombre!.trim()) problema("nombre", "El nombre no puede estar vacío.");
     else {
-      plan.pasos.push({
-        via: "windsor", platform: "linkedin", action: "rename_campaign",
-        label: "Renombrar la campaña de LinkedIn",
-        params: { campaign_id: e.id, name: c.nombre!.trim() }, campos: ["nombre"],
-      });
+      plan.pasos.push(
+        nativo
+          ? pasoNativo("conjunto", e.id, { nombre: c.nombre!.trim() }, "Renombrar la campaña de LinkedIn", ["nombre"])
+          : {
+              via: "windsor", platform: "linkedin", action: "rename_campaign",
+              label: "Renombrar la campaña de LinkedIn",
+              params: { campaign_id: e.id, name: c.nombre!.trim() }, campos: ["nombre"],
+            },
+      );
       plan.diff.push({ campo: "nombre", etiqueta: "Nombre", antes: vacio(e.nombre), despues: c.nombre!.trim() });
     }
   }
@@ -1155,13 +1190,25 @@ function planLinkedin(
     if (!(monto > 0)) problema("presupuesto", "El presupuesto debe ser mayor a cero.");
     else if (tipo === "lifetime" && !finEfectivo) {
       problema("presupuesto", "LinkedIn exige fecha de término para aplicar un presupuesto total.");
+    } else if (nativo && !currency) {
+      problema("presupuesto", "No se conoce la moneda de la cuenta: no se puede cambiar el presupuesto.");
     } else if (monto !== actual) {
-      plan.pasos.push({
-        via: "windsor", platform: "linkedin", action: "set_campaign_budget",
-        label: `Cambiar el presupuesto ${tipo === "daily" ? "diario" : "total"}`,
-        params: { campaign_id: e.id, budget_type: tipo === "daily" ? "daily" : "total", amount: monto }, campos: ["presupuesto"],
-        sinPausa: actual !== null && monto < actual,
-      });
+      const etiquetaPresupuesto = `Cambiar el presupuesto ${tipo === "daily" ? "diario" : "total"}`;
+      const baja = actual !== null && monto < actual;
+      plan.pasos.push(
+        nativo
+          ? pasoNativo(
+              "conjunto", e.id,
+              tipo === "daily" ? { presupuestoDiario: { monto, moneda: currency } } : { presupuestoTotal: { monto, moneda: currency } },
+              etiquetaPresupuesto, ["presupuesto"], baja,
+            )
+          : {
+              via: "windsor", platform: "linkedin", action: "set_campaign_budget",
+              label: etiquetaPresupuesto,
+              params: { campaign_id: e.id, budget_type: tipo === "daily" ? "daily" : "total", amount: monto }, campos: ["presupuesto"],
+              sinPausa: baja,
+            },
+      );
       plan.diff.push({
         campo: "presupuesto", etiqueta: `Presupuesto ${tipo === "daily" ? "diario" : "total"}`,
         antes: moneda(actual, currency), despues: moneda(monto, currency),

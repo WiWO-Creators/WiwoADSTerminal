@@ -181,6 +181,10 @@ export function AsistenteFlotante({
   const fondo = useRef<HTMLDivElement>(null);
   const archivo = useRef<HTMLInputElement>(null);
   const areaDeTexto = useRef<HTMLTextAreaElement>(null);
+  /** La decisión que el Orb está resolviendo (la pidió el tablero de Decisiones). */
+  const decisionActiva = useRef<string | null>(null);
+  const respuestaConPropuestas = useRef(false);
+  const enviarActual = useRef<(pregunta: string) => Promise<void>>(async () => {});
 
   // Crece con el contenido en vez de quedar en una sola línea siempre —
   // escribir un pedido largo en una caja de una línea obligaba a desplazarse
@@ -273,6 +277,7 @@ export function AsistenteFlotante({
           } else if (evento.t === "tool") {
             setHerramienta(evento.v);
           } else if (evento.t === "proposal") {
+            respuestaConPropuestas.current = true;
             actualizarMensaje(respuesta.id, (m) => ({
               ...m,
               propuestas: [...m.propuestas, { ...evento.v, estado: "pendiente" }],
@@ -290,11 +295,40 @@ export function AsistenteFlotante({
       setCargando(false);
       setHerramienta(null);
       cancelar.current = null;
+      if (decisionActiva.current && respuestaConPropuestas.current) avisarDecision("propuesta");
+      respuestaConPropuestas.current = false;
       // Una respuesta que quedó vacía (error o cancelación) no se deja como burbuja fantasma.
       setMensajes((actuales) =>
         actuales.filter((m) => !(m.id === respuesta.id && m.text === "" && m.propuestas.length === 0)),
       );
     }
+  }
+
+  enviarActual.current = enviar;
+
+  // Decisiones → Orb: pide resolver una decisión, o solo abrir la conversación.
+  useEffect(() => {
+    function alPedir(e: Event) {
+      const d = (e as CustomEvent<{ decisionId: string; texto: string }>).detail;
+      if (!d?.texto) return;
+      decisionActiva.current = d.decisionId;
+      setAbierto(true);
+      void enviarActual.current(d.texto);
+    }
+    function alAbrir() {
+      setAbierto(true);
+    }
+    window.addEventListener("wiwo:orb-pedir", alPedir);
+    window.addEventListener("wiwo:orb-abrir", alAbrir);
+    return () => {
+      window.removeEventListener("wiwo:orb-pedir", alPedir);
+      window.removeEventListener("wiwo:orb-abrir", alAbrir);
+    };
+  }, []);
+
+  function avisarDecision(estado: "propuesta" | "aplicada") {
+    const id = decisionActiva.current;
+    if (id) window.dispatchEvent(new CustomEvent("wiwo:orb-estado", { detail: { decisionId: id, estado } }));
   }
 
   async function aplicar(mensajeId: string, propuesta: PropuestaEnPantalla) {
@@ -327,6 +361,7 @@ export function AsistenteFlotante({
         if (!response.ok || !cuerpo.ok) throw new Error(cuerpo.aviso ?? cuerpo.error ?? "No se pudo aplicar");
         marcar("aplicada", undefined, cuerpo.aviso);
         onCambioAplicado();
+        avisarDecision("aplicada");
       } catch (issue) {
         marcar("error", issue instanceof Error ? issue.message : "No se pudo aplicar");
       }
@@ -348,6 +383,7 @@ export function AsistenteFlotante({
       if (!response.ok || !cuerpo.ok) throw new Error(cuerpo.error ?? "No se pudo aplicar");
       marcar("aplicada");
       onCambioAplicado();
+      avisarDecision("aplicada");
     } catch (issue) {
       marcar("error", issue instanceof Error ? issue.message : "No se pudo aplicar");
     }

@@ -13,6 +13,7 @@ import {
   type Nivel,
   type PlanDeEscritura,
 } from "@/lib/linkedin-escritura-pura";
+import { planDeCreativo, planDePostPatrocinado, rutaParaVerificarAnuncio, type PlanDeAnuncio } from "@/lib/linkedin-anuncios-pura";
 import { cuentasDeLinkedin, enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
 import { ErrorDeLinkedin } from "@/lib/linkedin-nativo-pura";
 import { env } from "cloudflare:workers";
@@ -29,7 +30,8 @@ import { can } from "@/lib/permisos";
  * de configuración (`LINKEDIN_ESCRITURA_CLIENTES=true`), no un descuido ni un cambio de código; LinkedIn además limita el
  * nivel de desarrollo a 5 cuentas agregadas en el portal.
  *
- * Cuerpo: `{ accion, cuentaId, confirmar?, ... }` con `accion` = `actualizar` | `crear-grupo` | `crear-campana`.
+ * Cuerpo: `{ accion, cuentaId, confirmar?, ... }` con `accion` = `actualizar` | `crear-grupo` | `crear-campana` |
+ * `crear-post` (publicación patrocinada oculta) | `crear-creativo` (anuncio: enlaza una publicación a una campaña).
  */
 export const dynamic = "force-dynamic";
 
@@ -41,10 +43,13 @@ type Cuerpo = {
   id?: string;
   cambios?: Cambios;
 } & Partial<DatosDeCampana> & {
+    texto?: string;
+    postUrn?: string;
+    campanaId?: string;
     grupo?: { nombre?: string; inicio?: string; fin?: string; presupuestoTotal?: { monto: string | number; moneda: string } };
   };
 
-function armarPlan(d: Cuerpo): PlanDeEscritura {
+function armarPlan(d: Cuerpo): PlanDeEscritura | PlanDeAnuncio {
   const cuentaId = String(d.cuentaId ?? "");
   switch (d.accion) {
     case "actualizar":
@@ -70,8 +75,12 @@ function armarPlan(d: Cuerpo): PlanDeEscritura {
         intencionPolitica: String(d.intencionPolitica ?? ""),
         entidadAsociada: String(d.entidadAsociada ?? ""),
       });
+    case "crear-post":
+      return planDePostPatrocinado({ cuentaId, organizacion: String(d.entidadAsociada ?? ""), texto: String(d.texto ?? ""), nombre: d.nombre });
+    case "crear-creativo":
+      return planDeCreativo({ cuentaId, campanaId: String(d.campanaId ?? ""), postUrn: String(d.postUrn ?? ""), nombre: d.nombre });
     default:
-      throw new ErrorDeLinkedin("Acción desconocida: use actualizar, crear-grupo o crear-campana.", 400);
+      throw new ErrorDeLinkedin("Acción desconocida: use actualizar, crear-grupo, crear-campana, crear-post o crear-creativo.", 400);
   }
 }
 
@@ -107,7 +116,11 @@ export async function POST(request: Request) {
     }
 
     // Verificación contra la plataforma: el «ok» de una API no basta.
-    const actual = await leerDeLinkedin(rutaDeEntidad(plan.nivel, cuentaId, idDeLaEntidad), token);
+    const rutaDeLectura =
+      plan.nivel === "post" || plan.nivel === "creativo"
+        ? rutaParaVerificarAnuncio(plan.nivel, cuentaId, idDeLaEntidad)
+        : rutaDeEntidad(plan.nivel, cuentaId, idDeLaEntidad);
+    const actual = await leerDeLinkedin(rutaDeLectura, token);
     const diferencias = diferenciasConLoEsperado(plan.esperado, actual);
     await registrarEventoDeIntegracion(
       user,

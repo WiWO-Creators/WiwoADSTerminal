@@ -19,6 +19,7 @@ import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { can, enAlcance } from "@/lib/permisos";
 import { actualizarCatalogoDeCuentas, type WindsorProvider } from "@/lib/windsor";
 import { accesoNativoGoogle } from "@/lib/integration-store";
+import { accesoNativoLinkedin } from "@/lib/linkedin-conexion";
 
 /**
  * Nombres de campo de id que un anuncio recién creado puede devolver.
@@ -154,11 +155,20 @@ export async function POST(request: Request) {
     credencialesGoogle = cuentaGoogle ? await accesoNativoGoogle(session.actor, cuentaGoogle.externalId) : null;
   }
 
+  // Solo si el plan trae pasos de LinkedIn: su conexión es la de quien publica, y las cuentas de clientes solo se escriben si
+  // LINKEDIN_ESCRITURA_CLIENTES lo permite (`accesoNativoLinkedin` devuelve null si no corresponde).
+  let credencialesLinkedin = null;
+  if (plan.steps.some((s) => s.platform === "linkedin" && !s.informativo)) {
+    const cuentaLinkedin = cuentaDe({ platform: "linkedin" }, draft, cuentas);
+    credencialesLinkedin = cuentaLinkedin ? await accesoNativoLinkedin(session.actor, cuentaLinkedin.externalId) : null;
+  }
+
   const { ok: todoBien, pasos: realizados, ids, campanaIncompleta } = await ejecutarPasosDelPlan(
     plan.steps,
     draft,
     cuentas,
     credencialesGoogle,
+    credencialesLinkedin,
   );
 
   await registrarEjecucion(draft, session.actor.email, realizados, todoBien);

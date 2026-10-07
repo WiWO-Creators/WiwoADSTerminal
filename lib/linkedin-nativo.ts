@@ -214,3 +214,57 @@ export async function enviarPlanALinkedin(
   }
   return { id: idDeCreacion(respuesta.headers), status: respuesta.status };
 }
+
+// ------------------------------------------------------------ Páginas de empresa (lectura)
+
+export type PaginaDeLinkedin = { id: string; urn: string; rol: string; estado: string | null; nombre: string | null };
+
+/**
+ * Las páginas de empresa sobre las que la persona conectada tiene algún rol (`organizationAcls`, necesita
+ * `r_organization_admin`). Sirve para saber en nombre de qué páginas puede crear anuncios o publicaciones. Los nombres son
+ * un extra: si LinkedIn no los entrega, se devuelve solo el id.
+ */
+export async function paginasDeLinkedin(accessToken: string): Promise<PaginaDeLinkedin[]> {
+  const cuerpo = await leerDeLinkedin("/rest/organizationAcls?q=roleAssignee&state=APPROVED&count=100", accessToken);
+  const paginas: PaginaDeLinkedin[] = elementos(cuerpo)
+    .map((a) => {
+      const urn = String(a.organization ?? "");
+      return { id: urn.split(":").pop() ?? "", urn, rol: String(a.role ?? ""), estado: typeof a.state === "string" ? a.state : null, nombre: null };
+    })
+    .filter((p) => /^\d+$/.test(p.id));
+  if (paginas.length === 0) return paginas;
+  try {
+    const ids = [...new Set(paginas.map((p) => p.id))].join(",");
+    const lote = (await leerDeLinkedin(`/rest/organizationsLookup?ids=List(${ids})`, accessToken)) as { results?: Record<string, { localizedName?: string }> } | null;
+    for (const p of paginas) p.nombre = lote?.results?.[p.id]?.localizedName ?? null;
+  } catch {
+    // Los nombres son opcionales: sin ellos igual sirve el id.
+  }
+  return paginas;
+}
+
+// ------------------------------------------------------------ Ubicaciones (lectura)
+
+export type UbicacionDeLinkedin = { id: string; nombre: string | null };
+
+/**
+ * Los nombres de ubicaciones de LinkedIn por id (`urn:li:geo:ID`). Sirve para comprobar que un id apunta de verdad al país que
+ * se cree: un id equivocado segmentaría (y gastaría) en otro lugar. Prueba la ruta versionada y, si no existe, la clásica.
+ */
+export async function ubicacionesDeLinkedin(ids: string[], accessToken: string): Promise<UbicacionDeLinkedin[]> {
+  const limpios = ids.filter((id) => /^\d{1,15}$/.test(id));
+  if (limpios.length === 0) return [];
+  const lista = limpios.join(",");
+  let cuerpo: unknown = null;
+  try {
+    cuerpo = await leerDeLinkedin(`/rest/geo?ids=List(${lista})`, accessToken);
+  } catch {
+    cuerpo = await leerDeLinkedin(`/v2/geo?ids=List(${lista})`, accessToken);
+  }
+  const resultados = (cuerpo as { results?: Record<string, Record<string, unknown>> } | null)?.results ?? {};
+  return limpios.map((id) => {
+    const geo = resultados[id] ?? {};
+    const local = geo.defaultLocalizedName as { value?: unknown } | undefined;
+    return { id, nombre: typeof local?.value === 'string' ? local.value : typeof geo.name === 'string' ? geo.name : null };
+  });
+}

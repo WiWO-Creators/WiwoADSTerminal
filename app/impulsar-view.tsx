@@ -11,8 +11,8 @@ import { Surface } from "./ui";
 type Cliente = { id: string; name: string; website?: string | null; accounts: Array<{ externalId: string; name: string; provider: string }> };
 type Campana = { id: string; nombre: string | null; estado: string | null; objetivo: string | null };
 type Conjunto = { id: string; nombre: string | null; estado: string | null; campaignId: string | null };
-type AnuncioExistente = { id: string; nombre: string | null; postId: string; miniatura: string | null; texto: string | null; campana: string | null; conjunto: string | null };
-type Elegida = { postId: string; etiqueta: string; ig?: boolean };
+type AnuncioExistente = { id: string; nombre: string | null; postId: string | null; creativeId?: string | null; miniatura: string | null; texto: string | null; campana: string | null; conjunto: string | null };
+type Elegida = { postId: string; etiqueta: string; ig?: boolean; /** Anuncio sin publicación: se reutiliza su creativo. */ creativeId?: string };
 type CreadoIg = { nombre: string; enlace: string | null; error: string | null };
 type Nuevo = { mediaUrl: string; mediaType: "image" | "video"; message: string; headline: string; landingUrl: string };
 const NUEVO_VACIO: Nuevo = { mediaUrl: "", mediaType: "image", message: "", headline: "", landingUrl: "" };
@@ -24,7 +24,7 @@ const campoClase = "h-11 w-full rounded-xl border border-border bg-background px
  * Boostear un anuncio desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
  * existente. Lo elegido pasa por la misma aprobación que todo; quien aprueba cambios lo publica al instante y queda corriendo.
  */
-export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string }) {
+export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial, onHecho }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string; /** Se llama cuando algo se envió de verdad (a revisión o a publicar). */ onHecho?: () => void }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [cuenta, setCuenta] = useState("");
   const [arbol, setArbol] = useState<{ campanas: Campana[]; conjuntos: Conjunto[] } | null>(null);
@@ -170,6 +170,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
         const j = (await r.json().catch(() => ({}))) as { solicitud?: Enviada; error?: string };
         if (!r.ok || !j.solicitud) throw new Error(j.error ?? "No se pudo enviar");
         setEnviada(j.solicitud);
+        onHecho?.();
         setElegidas((a) => a.filter((e) => !e.ig));
         if (elegidas.every((e) => e.ig)) return;
       } else if (deInstagram.length > 0) {
@@ -185,6 +186,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
           resultados.push({ nombre, enlace: r.ok ? (j.enlace ?? null) : null, error: r.ok ? null : (j.error ?? "No se pudo crear") });
         }
         setCreadosIg(resultados);
+        if (resultados.some((x) => !x.error)) onHecho?.();
         setElegidas((a) => a.filter((e) => !e.ig));
         if (elegidas.every((e) => e.ig)) return;
       }
@@ -199,6 +201,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
       const j = (await r.json()) as { solicitud?: Enviada; error?: string };
       if (!r.ok || !j.solicitud) throw new Error(j.error ?? "No se pudo enviar");
       setEnviada(j.solicitud);
+      onHecho?.();
       setElegidas([]);
       setNuevo(NUEVO_VACIO);
     } catch (e) {
@@ -370,7 +373,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clie
                     <button
                       key={a.id}
                       type="button"
-                      onClick={() => agregar({ postId: a.postId, etiqueta: a.nombre ?? "anuncio" })}
+                      onClick={() => agregar(a.postId ? { postId: a.postId, etiqueta: a.nombre ?? "anuncio" } : { postId: `creativo:${a.creativeId}`, creativeId: a.creativeId ?? undefined, etiqueta: a.nombre ?? "anuncio" })}
                       className="flex w-full items-center gap-3 rounded-xl border border-border p-2 text-left"
                     >
                       {a.miniatura && <span className="size-12 shrink-0 rounded-lg bg-cover bg-center" style={{ backgroundImage: `url(${a.miniatura})` }} />}

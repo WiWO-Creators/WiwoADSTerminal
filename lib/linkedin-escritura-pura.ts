@@ -26,6 +26,8 @@ export type Cambios = {
   estado?: string;
   /** Solo campañas: el grupo comparte presupuesto solo en modo dinámico, que aquí no se maneja. */
   presupuestoDiario?: { monto: string | number; moneda: string };
+  /** Presupuesto total (grupo o campaña). LinkedIn lo exige junto a una fecha de término: quien llama debe comprobarlo. */
+  presupuestoTotal?: { monto: string | number; moneda: string };
   /** Solo en `cuenta`: la organización (`urn:li:organization:ID`) en cuyo nombre se anuncia. */
   referencia?: string;
 };
@@ -78,6 +80,18 @@ export function milisegundosDeFecha(fecha: unknown, que: string): number {
   return ms;
 }
 
+/** Margen sobre «ahora» para que el inicio no quede en el pasado mientras viaja la petición. */
+const MARGEN_DE_INICIO_MS = 2 * 60 * 1000;
+
+/**
+ * El inicio que se envía a LinkedIn. LinkedIn rechaza un inicio anterior al momento de la petición (400 «must be no earlier than»),
+ * y «hoy a las 00:00 UTC» ya pasó casi todo el día: por eso una fecha de hoy o anterior significa «desde ahora». Una fecha futura
+ * se respeta tal cual (medianoche UTC de ese día).
+ */
+export function inicioEfectivo(fecha: unknown, ahora: number = Date.now()): number {
+  return Math.max(milisegundosDeFecha(fecha, "el inicio"), ahora + MARGEN_DE_INICIO_MS);
+}
+
 const carpeta = (nivel: Nivel) => (nivel === "grupo" ? "adCampaignGroups" : "adCampaigns");
 
 /** Ruta de una entidad concreta (para actualizarla o leerla de vuelta). */
@@ -122,6 +136,13 @@ export function planDeActualizacion(datos: { nivel: Nivel; cuentaId: string; id:
     esperado["dailyBudget.amount"] = Number(amount);
     partes.push(`presupuesto diario ${amount} ${currencyCode}`);
   }
+  if (cambios.presupuestoTotal !== undefined) {
+    const amount = montoValido(cambios.presupuestoTotal.monto, "el presupuesto total");
+    const currencyCode = monedaValida(cambios.presupuestoTotal.moneda);
+    set.totalBudget = { amount, currencyCode };
+    esperado["totalBudget.amount"] = Number(amount);
+    partes.push(`presupuesto total ${amount} ${currencyCode}`);
+  }
   if (cambios.referencia !== undefined) {
     if (nivel !== "cuenta") throw new ErrorDeLinkedin("La referencia se cambia en la cuenta, no en el grupo ni en la campaña.", 400);
     const referencia = String(cambios.referencia).trim();
@@ -130,7 +151,7 @@ export function planDeActualizacion(datos: { nivel: Nivel; cuentaId: string; id:
     esperado.reference = referencia;
     partes.push(`referencia ${referencia}`);
   }
-  if (nivel === "cuenta" && (cambios.nombre !== undefined || cambios.estado !== undefined || cambios.presupuestoDiario !== undefined)) {
+  if (nivel === "cuenta" && (cambios.nombre !== undefined || cambios.estado !== undefined || cambios.presupuestoDiario !== undefined || cambios.presupuestoTotal !== undefined)) {
     throw new ErrorDeLinkedin("En la cuenta solo se cambia la referencia.", 400);
   }
   if (Object.keys(set).length === 0) throw new ErrorDeLinkedin("No hay ningún cambio que aplicar.", 400);
@@ -160,7 +181,7 @@ export function planDeGrupo(datos: {
 }): PlanDeEscritura {
   const [cuenta] = soloIds([datos.cuentaId], "cuenta");
   const nombre = nombreValido(datos.nombre, "el grupo");
-  const start = milisegundosDeFecha(datos.inicio, "el inicio");
+  const start = inicioEfectivo(datos.inicio);
   const runSchedule: { start: number; end?: number } = { start };
   if (datos.fin !== undefined) {
     runSchedule.end = milisegundosDeFecha(datos.fin, "el término");
@@ -190,8 +211,12 @@ export type DatosDeCampana = {
   nombre: string;
   inicio: string;
   fin?: string;
-  presupuestoDiario: { monto: string | number; moneda: string };
+  /** El presupuesto es diario O total (uno solo). El total exige `fin`: LinkedIn lo pide junto a `totalBudget`. */
+  presupuestoDiario?: { monto: string | number; moneda: string };
+  presupuestoTotal?: { monto: string | number; moneda: string };
   costoUnitario: { monto: string | number; moneda: string };
+  /** Idioma de la interfaz de LinkedIn a segmentar, uno solo (`["es_ES"]`): LinkedIn no admite varios por campaña. Sin esto se usa `idioma_pais`. */
+  interfaceLocales?: string[];
   /** Ids numéricos de ubicaciones de LinkedIn (`urn:li:geo:ID`). Se piden porque dependen del cliente y no se adivinan. */
   ubicacionesGeo: string[];
   idioma?: string;
@@ -228,16 +253,29 @@ export function planDeCampana(datos: DatosDeCampana): PlanDeEscritura {
   if (!ENTIDAD_ASOCIADA.test(entidad)) throw new ErrorDeLinkedin("La entidad asociada debe ser urn:li:organization:ID o urn:li:person:ID.", 400);
   const geo = soloIds(datos.ubicacionesGeo ?? [], "ubicación");
   if (geo.length === 0) throw new ErrorDeLinkedin("Falta al menos una ubicación para la segmentación.", 400);
-  const idioma = (datos.idioma ?? "en").trim().toLowerCase();
-  const pais = (datos.pais ?? "US").trim().toUpperCase();
-  if (!/^[a-z]{2}$/.test(idioma) || !/^[A-Z]{2}$/.test(pais)) throw new ErrorDeLinkedin("Idioma y país deben ser códigos de 2 letras (por ejemplo en / US).", 400);
-  const start = milisegundosDeFecha(datos.inicio, "el inicio");
+  const idiomaBase = (datos.idioma ?? "en").trim().toLowerCase();
+  const paisBase = (datos.pais ?? "US").trim().toUpperCase();
+  if (!/^[a-z]{2}$/.test(idiomaBase) || !/^[A-Z]{2}$/.test(paisBase)) throw new ErrorDeLinkedin("Idioma y país deben ser códigos de 2 letras (por ejemplo en / US).", 400);
+  const locales = (datos.interfaceLocales && datos.interfaceLocales.length > 0 ? datos.interfaceLocales : [`${idiomaBase}_${paisBase}`]).map((l) => String(l).trim());
+  for (const l of locales) if (!/^[a-z]{2}_[A-Z]{2}$/.test(l)) throw new ErrorDeLinkedin(`Idioma de interfaz inválido: ${l} (use por ejemplo es_ES).`, 400);
+  // Verificado contra LinkedIn real (2026-10-07): «interfaceLocales can not have multiple values». Una campaña, un idioma.
+  if (locales.length > 1) throw new ErrorDeLinkedin("LinkedIn solo admite un idioma de interfaz por campaña: crea una campaña por idioma.", 400);
+  const [idioma, pais] = locales[0].split("_");
+  const start = inicioEfectivo(datos.inicio);
   const runSchedule: { start: number; end?: number } = { start };
   if (datos.fin !== undefined) {
     runSchedule.end = milisegundosDeFecha(datos.fin, "el término");
     if (runSchedule.end <= start) throw new ErrorDeLinkedin("El término debe ser posterior al inicio.", 400);
   }
-  const diario = { amount: montoValido(datos.presupuestoDiario.monto, "el presupuesto diario"), currencyCode: monedaValida(datos.presupuestoDiario.moneda) };
+  if ((datos.presupuestoDiario === undefined) === (datos.presupuestoTotal === undefined)) {
+    throw new ErrorDeLinkedin("Indique el presupuesto diario o el total (solo uno).", 400);
+  }
+  if (datos.presupuestoTotal !== undefined && runSchedule.end === undefined) {
+    throw new ErrorDeLinkedin("Un presupuesto total necesita fecha de término.", 400);
+  }
+  const presupuesto = datos.presupuestoDiario !== undefined
+    ? { clave: "dailyBudget" as const, amount: montoValido(datos.presupuestoDiario.monto, "el presupuesto diario"), currencyCode: monedaValida(datos.presupuestoDiario.moneda) }
+    : { clave: "totalBudget" as const, amount: montoValido(datos.presupuestoTotal!.monto, "el presupuesto total"), currencyCode: monedaValida(datos.presupuestoTotal!.moneda) };
   const unitario = { amount: montoValido(datos.costoUnitario.monto, "el costo unitario"), currencyCode: monedaValida(datos.costoUnitario.moneda) };
   const politicalIntent = String(datos.intencionPolitica ?? "").trim().toUpperCase();
   if (!(INTENCIONES_POLITICAS as readonly string[]).includes(politicalIntent)) {
@@ -263,12 +301,12 @@ export function planDeCampana(datos: DatosDeCampana): PlanDeEscritura {
     audienceExpansionEnabled: false,
     offsiteDeliveryEnabled: false,
     creativeSelection: "ROUND_ROBIN",
-    dailyBudget: diario,
+    [presupuesto.clave]: { amount: presupuesto.amount, currencyCode: presupuesto.currencyCode },
     unitCost: unitario,
     targetingCriteria: {
       include: {
         and: [
-          { or: { "urn:li:adTargetingFacet:interfaceLocales": [`urn:li:locale:${idioma}_${pais}`] } },
+          { or: { "urn:li:adTargetingFacet:interfaceLocales": locales.map((l) => `urn:li:locale:${l}`) } },
           { or: { "urn:li:adTargetingFacet:locations": geo.map((id) => `urn:li:geo:${id}`) } },
         ],
       },
@@ -281,8 +319,8 @@ export function planDeCampana(datos: DatosDeCampana): PlanDeEscritura {
     ruta: `/rest/adAccounts/${cuenta}/adCampaigns`,
     cabeceras: {},
     cuerpo,
-    esperado: { name: nombre, status: "DRAFT", "dailyBudget.amount": Number(diario.amount) },
-    resumen: `Crear la campaña «${nombre}» en borrador dentro del grupo ${grupo} (${objectiveType}, ${costType}, ${diario.amount} ${diario.currencyCode} al día).`,
+    esperado: { name: nombre, status: "DRAFT", [`${presupuesto.clave}.amount`]: Number(presupuesto.amount) },
+    resumen: `Crear la campaña «${nombre}» en borrador dentro del grupo ${grupo} (${objectiveType}, ${costType}, ${presupuesto.amount} ${presupuesto.currencyCode} ${presupuesto.clave === "dailyBudget" ? "al día" : "en total"}).`,
   };
 }
 

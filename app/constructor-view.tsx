@@ -4,6 +4,8 @@ import { PresupuestoEnLinea } from "./presupuesto-mes";
 import { SegmentacionMeta } from "./segmentacion-meta";
 import { Campo, Seccion } from "./constructor-ui";
 import { LimiteDeGastoMeta, OptimizacionMeta } from "./meta-avanzado";
+import { CampanaDeLinkedin } from "./linkedin-avanzado";
+import { LINKEDIN_POR_DEFECTO } from "@/lib/constructor-linkedin";
 import { CampanaGoogleBusqueda, GrupoGoogleBusqueda, RecursosGoogleBusqueda } from "./google-busqueda";
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -79,7 +81,7 @@ import {
   type SemillaDeCampana,
   type SpecialAdCategory,
 } from "@/lib/constructor";
-import { ACTIVE_PLATFORMS, LECTURA_PLATFORMS, nombreDeNivel, platformLabel, type Platform } from "@/lib/plataformas";
+import { CONSTRUCTOR_PLATFORMS, LECTURA_PLATFORMS, nombreDeNivel, platformLabel, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
 import {
   precargarPublicaciones,
@@ -390,6 +392,7 @@ function borradorInicial(
     // "adjuntar" no tiene efecto de todos modos (ver `buildPlan`), pero
     // dejarlo en true igual es más simple que bifurcar acá.
     activarConjuntoYAnuncio: true,
+    linkedin: { ...LINKEDIN_POR_DEFECTO, ubicacionesGeo: [] },
   };
 }
 
@@ -464,12 +467,12 @@ export function ConstructorView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Qué plataforma se ve en el selector tipo carrusel de Conjunto y Anuncio,
-  // cuando hay más de una elegida. Orden estable: el de ACTIVE_PLATFORMS, no
+  // cuando hay más de una elegida. Orden estable: el de CONSTRUCTOR_PLATFORMS, no
   // el orden en que se fueron marcando los botones.
   const [plataformaActiva, setPlataformaActiva] = useState<Platform>(
     draft.platforms[0] ?? "google",
   );
-  const plataformasElegidas = ACTIVE_PLATFORMS.filter((p) =>
+  const plataformasElegidas = CONSTRUCTOR_PLATFORMS.filter((p) =>
     draft.platforms.includes(p),
   );
   // Solo Google (campaña nueva): el formulario sigue la estructura de Google Ads, no la de Meta.
@@ -1635,7 +1638,7 @@ function FaseCampana({
 
         <Campo etiqueta="PLATAFORMAS" className="mt-4">
           <div className="flex flex-wrap gap-2">
-            {ACTIVE_PLATFORMS.map((value) => {
+            {CONSTRUCTOR_PLATFORMS.map((value) => {
               // Sin cliente elegido todavía no hay nada que evaluar — el
               // bloqueo es sobre las cuentas DE ESE cliente, no una regla
               // general de la plataforma.
@@ -1673,7 +1676,7 @@ function FaseCampana({
               );
             })}
             {/* Plataformas que se leen pero no se pueden crear desde acá (LinkedIn): visibles y bloqueadas, con el motivo. */}
-            {LECTURA_PLATFORMS.filter((value) => !ACTIVE_PLATFORMS.includes(value)).map((value) => (
+            {LECTURA_PLATFORMS.filter((value) => !CONSTRUCTOR_PLATFORMS.includes(value)).map((value) => (
               <span
                 key={value}
                 title={`${platformLabel(value)} se lee en la tabla de Cliente, pero no se pueden crear campañas desde acá: Windsor solo permite pausar, activar, cambiar presupuesto, nombre, fechas y público de las que ya existen.`}
@@ -1685,7 +1688,7 @@ function FaseCampana({
               </span>
             ))}
           </div>
-          {ACTIVE_PLATFORMS.some(
+          {CONSTRUCTOR_PLATFORMS.some(
             (value) =>
               draft.portfolioId &&
               !cuentas.some((c) => c.provider === value) &&
@@ -1825,9 +1828,25 @@ function FaseCampana({
           <LimiteDeGastoMeta draft={draft} onChange={onChange} moneda={monedaDeMeta(draft, cuentas)} />
         </>
       )}
+      {draft.platforms.includes("linkedin") && (
+        <CampanaDeLinkedin
+          draft={draft}
+          onChange={onChange}
+          moneda={cuentaDeLinkedin(draft, cuentas)?.currency ?? null}
+          paginaDeLaCuenta={cuentaDeLinkedin(draft, cuentas)?.pageId ?? null}
+        />
+      )}
       {soloGoogle && <CampanaDeGoogle draft={draft} cuentas={cuentas} onChange={onChange} />}
     </>
   );
+}
+
+/** La cuenta de LinkedIn elegida (o la única que tiene el cliente). */
+function cuentaDeLinkedin(draft: CampaignDraft, cuentas: Cuenta[]): Cuenta | null {
+  const deLinkedin = cuentas.filter((c) => c.provider === "linkedin");
+  const elegida = draft.accountByPlatform.linkedin;
+  if (elegida) return deLinkedin.find((c) => c.externalId === elegida) ?? null;
+  return deLinkedin.length === 1 ? deLinkedin[0] : null;
 }
 
 /** Todo lo que en Google Ads se define en la CAMPAÑA, en el orden en que Google lo muestra. */

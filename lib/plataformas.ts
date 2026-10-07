@@ -116,6 +116,12 @@ export type PlatformSpec = {
    * presupuesto, nombre, fechas) con las acciones que Windsor ofrece. LinkedIn está así.
    */
   administraExistentes?: boolean;
+  /**
+   * `true`: el Constructor puede CREAR campañas en ella, aunque no sea `activa`. Es un permiso aparte a propósito: volver
+   * `activa` a una plataforma la mete también en el simulador, el asistente, las alertas y las sugerencias, que todavía no
+   * saben de LinkedIn. LinkedIn crea por su API directa (no por Windsor), y solo si hay conexión.
+   */
+  creaEnConstructor?: boolean;
   /** Campos de Windsor para la serie diaria por cuenta. */
   camposDiarios: string[];
   /**
@@ -551,6 +557,7 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
     activa: false,
     soloLectura: true,
     administraExistentes: true,
+    creaEnConstructor: true,
     // Verificado con get_fields y una lectura real de las cuentas de Colbún. Aquí `campaign` es el conjunto
     // y `campaign_group_*` la campaña; `lib/linkedin.ts` traduce las filas al vocabulario común.
     camposDiarios: [
@@ -616,6 +623,18 @@ export const PLATFORM: Record<Platform, PlatformSpec> = {
 export const ACTIVE_PLATFORMS: Platform[] = PLATFORMS.filter(
   (id) => PLATFORM[id].activa,
 );
+
+/**
+ * Las plataformas en las que el Constructor puede crear campañas: las activas (Google y Meta, por Windsor) más las que
+ * lo declaran aparte (LinkedIn, por su API directa). El orden es el de `PLATFORMS`, el mismo que usa la pantalla.
+ */
+export const CONSTRUCTOR_PLATFORMS: Platform[] = PLATFORMS.filter(
+  (id) => PLATFORM[id].activa || PLATFORM[id].creaEnConstructor === true,
+);
+
+export function puedeConstruir(value: string): value is Platform {
+  return isPlatform(value) && (PLATFORM[value].activa || PLATFORM[value].creaEnConstructor === true);
+}
 
 /**
  * Las que se LEEN: las activas más las de solo lectura (LinkedIn). Para todo lo que sea crear, editar,

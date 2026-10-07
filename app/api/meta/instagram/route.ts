@@ -2,7 +2,7 @@ import { getSession } from "@/app/sesion";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
-import { crearAnuncioDesdeInstagram, ErrorDeMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
+import { crearAnuncioDesdeCreativo, crearAnuncioDesdeInstagram, ErrorDeMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { can, enAlcance } from "@/lib/permisos";
 import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafolios-store";
@@ -13,7 +13,7 @@ import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafol
  */
 export const dynamic = "force-dynamic";
 
-type Cuerpo = { portfolioId?: string; accountId?: string; conjuntoId?: string; mediaId?: string; nombre?: string };
+type Cuerpo = { portfolioId?: string; accountId?: string; conjuntoId?: string; mediaId?: string; /** Boostear un anuncio existente que no usa una publicación: se reutiliza su creativo. */ creativeId?: string; nombre?: string };
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -23,21 +23,23 @@ export async function POST(request: Request) {
   if (!metaNativoConfigurado()) return fail("La conexión directa con Meta todavía no está configurada.", 503);
   const b = (await request.json()) as Cuerpo;
   const accountId = (b.accountId ?? "").trim();
-  if (!b.portfolioId || !accountId || !b.conjuntoId || !b.mediaId) return fail("Faltan datos: cliente, cuenta, conjunto y publicación.", 400);
+  if (!b.portfolioId || !accountId || !b.conjuntoId || (!b.mediaId && !b.creativeId)) return fail("Faltan datos: cliente, cuenta, conjunto y publicación o anuncio.", 400);
   if (!enAlcance(session.actor, b.portfolioId)) return fail("Ese cliente no está en tu alcance", 403);
   const duenio = (await accountIndex()).get(normalizeAccountId(accountId));
   if (!duenio || duenio.id !== b.portfolioId) return fail("Esa cuenta no pertenece a este cliente", 403);
   const cliente = (await listPortfolios()).find((p) => p.id === b.portfolioId);
-  if (!cliente?.instagramId) return fail("Este cliente no tiene su cuenta de Instagram declarada.", 409);
+  if (!b.creativeId && !cliente?.instagramId) return fail("Este cliente no tiene su cuenta de Instagram declarada.", 409);
   const nombre = (b.nombre ?? "").trim() || "Impulso de Instagram";
   try {
-    const r = await crearAnuncioDesdeInstagram(accountId, {
-      nombre,
-      conjuntoId: b.conjuntoId,
-      instagramUserId: cliente.instagramId,
-      mediaId: b.mediaId,
-      paginaId: cliente.accountPages[accountId] ?? cliente.pageId,
-    });
+    const r = b.creativeId
+      ? await crearAnuncioDesdeCreativo(accountId, { nombre, conjuntoId: b.conjuntoId, creativeId: b.creativeId })
+      : await crearAnuncioDesdeInstagram(accountId, {
+          nombre,
+          conjuntoId: b.conjuntoId,
+          instagramUserId: cliente!.instagramId,
+          mediaId: b.mediaId!,
+          paginaId: cliente!.accountPages[accountId] ?? cliente!.pageId,
+        });
     await registrarEjecucion(
       { portfolioId: b.portfolioId, name: nombre, platforms: ["meta"] },
       session.actor.email,
@@ -53,8 +55,8 @@ export async function POST(request: Request) {
       entidadTipo: "anuncio",
       entidadId: r.anuncioId,
       entidadNombre: nombre,
-      titulo: `${session.actor.email.split("@")[0]} impulsó una publicación de Instagram: «${nombre}»`,
-      detalle: { conjuntoId: b.conjuntoId, mediaId: b.mediaId, anuncioId: r.anuncioId },
+      titulo: `${session.actor.email.split("@")[0]} impulsó ${b.creativeId ? "un anuncio existente" : "una publicación de Instagram"}: «${nombre}»`,
+      detalle: { conjuntoId: b.conjuntoId, mediaId: b.mediaId ?? null, creativeId: b.creativeId ?? null, anuncioId: r.anuncioId },
     });
     return Response.json({ ...r, estado: "ACTIVE", enlace: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${accountId}&selected_ad_ids=${r.anuncioId}` }, { headers: { "cache-control": "no-store" } });
   } catch (error) {

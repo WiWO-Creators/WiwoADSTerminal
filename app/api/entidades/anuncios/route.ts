@@ -35,9 +35,11 @@ export async function GET(request: Request) {
     const detalle = await fetchDetalleDeCuenta("meta", accountId);
     const campanas = new Map(detalle.campanas.map((c) => [c.id, c.nombre]));
     const conjuntos = new Map(detalle.conjuntos.map((c) => [c.id, c.nombre]));
+    // Todos los anuncios se pueden boostear: con publicación, por su id; sin ella, reutilizando su creativo.
     const anuncios = detalle.anuncios
-      .filter((a) => a.publicacion.id)
+      .filter((a) => a.publicacion.id || a.contenido.creativeId)
       .map((a) => ({
+        creativeId: a.contenido.creativeId,
         id: a.id,
         nombre: a.nombre,
         estado: a.estado,

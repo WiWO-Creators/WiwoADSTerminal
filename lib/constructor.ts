@@ -3,7 +3,8 @@ import { CTA_ETIQUETAS, esCta, type CallToAction } from "@/lib/cta";
 import { parsearPalabraClave } from "@/lib/palabras-clave";
 import type { DatosBusqueda, DiaDeSemana } from "@/lib/google-ads-nativo";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
-import { ACTIVE_PLATFORMS, platformLabel } from "@/lib/plataformas";
+import { CONSTRUCTOR_PLATFORMS, platformLabel } from "@/lib/plataformas";
+import { normalizarLinkedin, parametrosLinkedin, type EntradaLinkedin, type LinkedinDraft } from "@/lib/constructor-linkedin";
 import type { Platform } from "@/lib/plataformas";
 import { unidadesMenoresMeta } from "@/lib/monedas";
 import { nombreCompuesto } from "@/lib/nomenclatura";
@@ -970,6 +971,8 @@ export type CampaignDraft = {
    * porque ya pasaron por las aprobaciones). Se conserva en el borrador por compatibilidad y se ignora.
    */
   activarConjuntoYAnuncio: boolean;
+  /** Lo que LinkedIn necesita además de lo común (ver `lib/constructor-linkedin.ts`). */
+  linkedin: LinkedinDraft;
 };
 
 /** Cuenta de un cliente, tal como la expone `/api/clientes`. */
@@ -1240,6 +1243,26 @@ export function problemaDeUrlPublica(
  * Los límites no son de la aplicación: son de Google y de Meta. Avisar acá
  * evita que un anuncio se rechace después de haberlo aprobado.
  */
+/** El borrador, traducido a lo que `parametrosLinkedin` necesita. Lo comparten la validación y el plan para no divergir. */
+function entradaLinkedin(draft: CampaignDraft, cuenta: CuentaCliente | null): EntradaLinkedin {
+  const objetivo = objetivoDe(draft, "linkedin");
+  return {
+    linkedin: draft.linkedin,
+    objetivo,
+    mediaType: draft.mediaType,
+    paises: draft.targetCountries.length > 0 ? draft.targetCountries : (cuenta?.countries ?? []),
+    haySegmentacionFina: draft.targetPlaces.length > 0 || draft.geoRadius !== null,
+    idiomas: draft.targetLanguages,
+    presupuesto: draft.budgetByPlatform.linkedin ?? draft.dailyBudget,
+    modo: draft.budgetMode,
+    fin: draft.endDate,
+    moneda: cuenta?.currency ?? null,
+    paginaDeLaCuenta: cuenta?.pageId ?? null,
+    hoy: new Date().toISOString().slice(0, 10),
+    nombre: nombreCompuesto(OBJECTIVES[objetivo].sigla, "linkedin", draft.name),
+  };
+}
+
 export function validateDraft(
   draft: CampaignDraft,
   cuentas: CuentaCliente[],
@@ -1336,6 +1359,15 @@ export function validateDraft(
         "accountByPlatform",
         `${platformLabel(platform)}: elige en cuál de sus ${delPlatform.length} cuentas se publica`,
       );
+    }
+  }
+
+  if (draft.platforms.includes("linkedin")) {
+    const cuentaLi = cuentaElegida(draft, cuentas, "linkedin");
+    if (cuentaLi) {
+      const li = parametrosLinkedin(entradaLinkedin(draft, cuentaLi));
+      if (!li.ok) for (const motivo of li.motivos) add("linkedin", motivo);
+      else for (const aviso of li.avisos) add("linkedin", aviso, false);
     }
   }
 
@@ -2365,6 +2397,38 @@ export function buildPlan(
     steps.push(...sinMeta);
   }
 
+  // LinkedIn: no lo crea Windsor, se crea con su API directa. Un grupo de campañas y una campaña dentro de él, ambos en
+  // BORRADOR (no sirven ni gastan); el anuncio exige un rol sobre la página y todavía no se crea desde aquí.
+  if (draft.platforms.includes("linkedin")) {
+    const cuentaLi = cuentaElegida(draft, cuentas, "linkedin");
+    const li = cuentaLi ? parametrosLinkedin(entradaLinkedin(draft, cuentaLi)) : null;
+    if (li?.ok) {
+      steps.push({
+        platform: "linkedin",
+        via: "nativa",
+        action: "linkedin:create_group",
+        label: `Crear el grupo de campañas «${li.grupo.nombre}» en LinkedIn (borrador)`,
+        params: { ...li.grupo },
+      });
+      steps.push({
+        platform: "linkedin",
+        via: "nativa",
+        action: "linkedin:create_campaign",
+        label: `Crear la campaña «${li.campana.nombre}» en LinkedIn (borrador)`,
+        params: { ...li.campana, grupoId: MARCADOR_PASO_ANTERIOR },
+      });
+      steps.push({
+        platform: "linkedin",
+        action: "informativo",
+        label: "Anuncio de LinkedIn",
+        informativo: true,
+        params: {
+          nota: "El anuncio (la publicación y su enlace a la campaña) exige un rol de publicador sobre la página de empresa en LinkedIn y todavía no se crea desde aquí. La campaña queda en borrador, sin gastar, hasta que tenga un anuncio.",
+        },
+      });
+    }
+  }
+
   const budgets: Partial<Record<Platform, BudgetAdvice>> = {};
   for (const plataforma of draft.platforms) {
     budgets[plataforma] = recommendBudget(portfolio, plataforma, snapshot, excluirCampanasDePresupuesto);
@@ -2419,7 +2483,7 @@ function idsNumericos(valor: unknown): string[] {
 
 export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
   const platforms = (Array.isArray(body.platforms) ? body.platforms : []).filter(
-    (value): value is Platform => ACTIVE_PLATFORMS.includes(value as Platform),
+    (value): value is Platform => CONSTRUCTOR_PLATFORMS.includes(value as Platform),
   );
   const objective: Objective = (
     ["trafico", "leads", "ventas", "alcance", "interaccion"] as const
@@ -2430,7 +2494,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
   const objetivosValidos = ["trafico", "leads", "ventas", "alcance", "interaccion"];
   const objectiveByPlatform: Partial<Record<Platform, Objective>> = {};
   if (body.objectiveByPlatform && typeof body.objectiveByPlatform === "object") {
-    for (const platform of ACTIVE_PLATFORMS) {
+    for (const platform of CONSTRUCTOR_PLATFORMS) {
       const valor = (body.objectiveByPlatform as Record<string, unknown>)[platform];
       if (typeof valor === "string" && objetivosValidos.includes(valor) && valor !== objective) {
         objectiveByPlatform[platform] = valor as Objective;
@@ -2440,7 +2504,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
 
   const accountByPlatform: Partial<Record<Platform, string>> = {};
   if (body.accountByPlatform && typeof body.accountByPlatform === "object") {
-    for (const platform of ACTIVE_PLATFORMS) {
+    for (const platform of CONSTRUCTOR_PLATFORMS) {
       const value = (body.accountByPlatform as Record<string, unknown>)[
         platform
       ];
@@ -2582,6 +2646,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
       body.brandSafety === "restringido" || body.brandSafety === "ampliado"
         ? body.brandSafety
         : "estandar",
+    linkedin: normalizarLinkedin(body.linkedin),
     existingCampaign: normalizeExistingCampaign(body.existingCampaign),
     existingAdset: normalizeExistingAdset(body.existingAdset),
     // Default true a propósito: es el ahorro de pasos que se pidió. Solo se
@@ -2595,7 +2660,7 @@ function normalizeBudgetByPlatform(
 ): Partial<Record<Platform, number>> {
   const salida: Partial<Record<Platform, number>> = {};
   if (!value || typeof value !== "object") return salida;
-  for (const plataforma of ACTIVE_PLATFORMS) {
+  for (const plataforma of CONSTRUCTOR_PLATFORMS) {
     const monto = (value as Record<string, unknown>)[plataforma];
     if (typeof monto === "number" && Number.isFinite(monto)) {
       salida[plataforma] = monto;

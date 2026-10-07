@@ -322,7 +322,7 @@ function armar(
   }
 
   return {
-    id: `${senal.tipo}-${claveDeCampana(c)}-${dia}`,
+    id: `${senal.tipo}-${claveDeCampana(c)}-${semanaDe(new Date(generatedAt))}`,
     rule: senal.tipo,
     severity: regla.severity,
     portfolioId: cliente.id,
@@ -371,7 +371,6 @@ export type EntradaDePresupuesto = {
  * `en_ritmo` no sugiere nada. Es del cliente entero: no apunta a una campaña.
  */
 export function sugerenciasDePresupuesto(entradas: EntradaDePresupuesto[], ahora: Date): Sugerencia[] {
-  const dia = iso(ahora);
   const generatedAt = ahora.getTime();
   const salida: Sugerencia[] = [];
 
@@ -379,7 +378,7 @@ export function sugerenciasDePresupuesto(entradas: EntradaDePresupuesto[], ahora
     if (r.estado === "en_ritmo") continue;
     const money = (micros: number) => moneda(Math.round(micros), mon);
     const base = {
-      id: `presupuesto_ritmo-${cliente.id}-${dia}`,
+      id: `presupuesto_ritmo-${cliente.id}-${semanaDe(ahora)}`,
       rule: "presupuesto_ritmo",
       portfolioId: cliente.id,
       client: cliente.nombre,
@@ -467,11 +466,10 @@ export type EntradaDeMedicion = {
  * la acción es siempre «revisar».
  */
 export function sugerenciasDeMedicion(entradas: EntradaDeMedicion[], ahora: Date): Sugerencia[] {
-  const dia = iso(ahora);
   const generatedAt = ahora.getTime();
   return entradas.flatMap(({ cliente, hallazgos }) =>
     hallazgos.map((h) => ({
-      id: `medicion_${h.id}-${cliente.id}-${dia}`,
+      id: `medicion_${h.id}-${cliente.id}-${semanaDe(ahora)}`,
       rule: `medicion_${h.id}`,
       severity: (h.severidad === "alta" ? "high" : "medium") as SeveridadSugerencia,
       portfolioId: cliente.id,
@@ -623,3 +621,6 @@ export function sugerenciasDeCampanaApagada(entradas: EntradaDeCampanaApagada[],
   }
   return salida;
 }
+
+/** Número de semana (desde 1970): los hallazgos duran una semana con el mismo id, así no se repiten cada día. */
+export const semanaDe = (ahora: Date): number => Math.floor(ahora.getTime() / (7 * 86_400_000));

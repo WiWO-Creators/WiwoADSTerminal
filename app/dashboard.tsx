@@ -126,6 +126,8 @@ type ItemDeMenu = {
    * Se excluye también de las tarjetas de Inicio, ver `modulosDeInicio`.
    */
   bloqueado?: boolean;
+  /** No aparece en el menú ni en las tarjetas, pero la ventana sigue en el código (por ejemplo, la Sala de control). */
+  oculto?: boolean;
 };
 
 const navItems: ItemDeMenu[] = [
@@ -137,13 +139,16 @@ const navItems: ItemDeMenu[] = [
     icono: Lightbulb,
     resumen: "Cambios que se pueden hacer ahora: pausar, ajustar presupuesto o subir contenido nuevo.",
   },
-  { key: "control", label: "Sala de control", icono: Home },
+  // Oculta del menú por decisión del equipo; la ventana sigue en el código.
+  { key: "control", label: "Sala de control", icono: Home, oculto: true },
   {
     key: "medicion",
     label: "Salud de medición",
-    roles: ["admin", "supervisor"],
+    roles: ["admin"],
     icono: HeartPulse,
     resumen: "¿Se mide bien lo que se paga? GA4, Tag Manager, eventos clave y conversiones.",
+    // Visible pero inactivo por ahora (decisión del equipo): se muestra con «Próximamente».
+    bloqueado: true,
   },
   {
     key: "inversion",
@@ -190,6 +195,8 @@ const navItems: ItemDeMenu[] = [
     roles: ["admin", "supervisor", "analyst"],
     icono: FlaskConical,
     resumen: "Proyecta qué podría dar un monto, con el historial real del cliente.",
+    // Visible pero inactivo por ahora (decisión del equipo): se muestra con «Próximamente».
+    bloqueado: true,
   },
 ];
 
@@ -209,6 +216,8 @@ const navItemsGestion: ItemDeMenu[] = [
     roles: ["admin", "supervisor"],
     icono: ShieldAlert,
     resumen: "Reglas como las de Meta y Google: por ejemplo pausar un anuncio al llegar a cierto gasto.",
+    // Visible pero inactivo por ahora (decisión del equipo): se muestra con «Próximamente».
+    bloqueado: true,
   },
   {
     key: "diagnostico",
@@ -231,6 +240,8 @@ const navItemsGestion: ItemDeMenu[] = [
     roles: ["admin", "supervisor"],
     icono: UsersRound,
     resumen: "Carga una base de clientes (Excel o CSV) para audiencias y lookalike.",
+    // Visible pero inactivo por ahora (decisión del equipo): se muestra con «Próximamente».
+    bloqueado: true,
   },
 ];
 
@@ -870,6 +881,7 @@ export default function WiwoDashboard({
           )}
           {view === "clients" && (
             <ClientesView
+              puedeVerMedicion={initialSnapshot.user.role === "admin"}
               performance={performanceConAnuncios}
               cargandoAnuncios={cargandoAnuncios}
               onDatosCambiaron={() => {
@@ -951,7 +963,7 @@ export default function WiwoDashboard({
           )}
           {view === "solicitudes" && <SolicitudesView />}
           {view === "reglas" && <ReglasView clienteId={clienteSeleccionado} />}
-          {view === "medicion" && (initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor") && (
+          {view === "medicion" && initialSnapshot.user.role === "admin" && (
             <MedicionView clienteId={clienteSeleccionado} performance={performance} puedeEditar onElegirCliente={setClienteSeleccionado} />
           )}
           {view === "inversion" && (
@@ -1016,7 +1028,7 @@ export default function WiwoDashboard({
 }
 
 function puedeVerItem(item: ItemDeMenu, role: string): boolean {
-  return !item.roles || item.roles.includes(role);
+  return !item.oculto && (!item.roles || item.roles.includes(role));
 }
 
 /**

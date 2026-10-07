@@ -293,8 +293,11 @@ export function cuerpoDeCuentaDePrueba(datos: { nombre?: string; moneda?: string
 /** Un id numérico de una cabecera (`x-linkedin-id`, `x-restli-id`…); `null` si no es un número. */
 export function idDeCabeceraCreada(valor: string | null | undefined): string | null {
   const id = (valor ?? "").trim();
-  return SOLO_ID.test(id) ? id : null;
+  // Las cuentas, grupos y campañas devuelven un número; las publicaciones y los creativos, un URN.
+  return SOLO_ID.test(id) || URN_CREADO.test(id) ? id : null;
 }
+
+const URN_CREADO = /^urn:li:(share|ugcPost|sponsoredCreative):[A-Za-z0-9_-]+$/;
 
 /** Días que le quedan a un token (redondeado hacia abajo); negativo si ya venció; `null` si no se sabe. */
 export function diasHastaVencer(expiraEn: number | null, ahora: number): number | null {

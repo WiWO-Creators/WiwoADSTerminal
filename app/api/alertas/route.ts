@@ -72,7 +72,9 @@ export async function GET(request: Request) {
       }
       deGasto = alertasDeLimiteDeGasto(visibles, gastado, new Date());
     }
-    const alertas = [...deGasto, ...generarAlertas(visibles, campanas)].map((a) => ({
+    // Las alertas del cliente entero (medición, Tag Manager) son de los Directores; el resto ve las de campañas.
+    const esDirector = can(session.actor, "aprobar_presupuesto");
+    const alertas = [...deGasto, ...generarAlertas(visibles, campanas).filter((a) => esDirector || a.plataforma !== null)].map((a) => ({
       ...a,
       enlaces: enlacesDeAlerta(a.id, porId.get(a.clienteId)),
     }));
