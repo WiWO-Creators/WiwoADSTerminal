@@ -24,7 +24,7 @@ const campoClase = "h-11 w-full rounded-xl border border-border bg-background px
  * Boostear un anuncio desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
  * existente. Lo elegido pasa por la misma aprobación que todo; quien aprueba cambios lo publica al instante y queda corriendo.
  */
-export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial, onHecho }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string; /** Se llama cuando algo se envió de verdad (a revisión o a publicar). */ onHecho?: () => void }) {
+export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial, cuentaInicial, onHecho }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string; /** Cuenta de Meta de la campaña inicial, para clientes con varias. */ cuentaInicial?: string; /** Se llama cuando algo se envió de verdad (a revisión o a publicar). */ onHecho?: () => void }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [cuenta, setCuenta] = useState("");
   const [arbol, setArbol] = useState<{ campanas: Campana[]; conjuntos: Conjunto[] } | null>(null);
@@ -51,7 +51,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial, onHecho 
         if (!vivo) return;
         const c = j.portfolios.find((p) => p.id === clienteId) ?? null;
         setCliente(c);
-        setCuenta(c?.accounts.find((a) => a.provider === "meta")?.externalId ?? "");
+        setCuenta((cuentaInicial && c?.accounts.find((a) => a.provider === "meta" && a.externalId.replace(/^act_/, "") === cuentaInicial.replace(/^act_/, ""))?.externalId) || (c?.accounts.find((a) => a.provider === "meta")?.externalId ?? ""));
         setArbol(null);
         setCampanaId("");
         setConjuntoId("");
@@ -63,7 +63,7 @@ export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial, onHecho 
     return () => {
       vivo = false;
     };
-  }, [clienteId]);
+  }, [clienteId, cuentaInicial]);
 
   // Campañas y conjuntos de esa cuenta.
   useEffect(() => {

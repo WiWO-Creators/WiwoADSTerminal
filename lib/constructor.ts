@@ -3,6 +3,7 @@ import { CTA_ETIQUETAS, esCta, type CallToAction } from "@/lib/cta";
 import { parsearPalabraClave } from "@/lib/palabras-clave";
 import type { DatosBusqueda, DiaDeSemana } from "@/lib/google-ads-nativo";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
+import { META_SURFACES } from "@/lib/formatos-meta-pura";
 import { CONSTRUCTOR_PLATFORMS, platformLabel } from "@/lib/plataformas";
 import { normalizarLinkedin, parametrosLinkedin, type EntradaLinkedin, type LinkedinDraft } from "@/lib/constructor-linkedin";
 import type { Platform } from "@/lib/plataformas";
@@ -352,14 +353,7 @@ export const META_PLACEMENTS: Record<string, string> = {
  * silencio). "Vacío es automáticas" aplica igual que en Ubicaciones: sin
  * nada marcado, Meta reparte sola entre todos los formatos de la red.
  */
-export const META_SURFACES: Record<
-  string,
-  { label: string; facebook: string; instagram: string }
-> = {
-  feed: { label: "Feed", facebook: "feed", instagram: "stream" },
-  historias: { label: "Historias", facebook: "story", instagram: "story" },
-  reels: { label: "Reels", facebook: "facebook_reels", instagram: "reels" },
-};
+export { META_SURFACES };
 
 export type GoogleChannel = "search" | "display" | "pmax";
 

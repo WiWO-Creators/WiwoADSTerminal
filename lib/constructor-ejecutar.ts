@@ -226,7 +226,7 @@ async function ejecutarPasoLinkedin(
     return {
       ok: false,
       error:
-        "Para crear en LinkedIn conecta tu cuenta de LinkedIn en Integraciones. En cuentas de clientes, además, la escritura debe estar habilitada (LINKEDIN_ESCRITURA_CLIENTES).",
+        "Para crear en LinkedIn hace falta la conexión de LinkedIn del equipo (un administrador la conecta una vez en Integraciones). En cuentas de clientes, además, la escritura debe estar habilitada (LINKEDIN_ESCRITURA_CLIENTES).",
       raw: null,
     };
   }

@@ -9,6 +9,7 @@ import {
   detalleCampanaLinkedin,
   detalleCampanaMeta,
   detalleConjuntoGaql,
+  gruposDeRecursosGaql,
   detalleConjuntoGoogle,
   palabraClaveGaql,
   type PalabraClave,
@@ -28,7 +29,11 @@ import {
   consultarGaql,
   GAQL_ANUNCIOS,
   GAQL_CAMPANAS,
+  GAQL_EXTENSIONES,
+  extensionesActualesDeFilas,
   GAQL_GRUPOS,
+  GAQL_GRUPOS_DE_RECURSOS,
+  GAQL_RECURSOS_DE_GRUPO,
   GAQL_PALABRAS,
   GoogleAdsNativoError,
   type CredencialesGoogle,
@@ -218,11 +223,17 @@ async function fetchDetalleGoogleNativo(
   accountId: string,
   cred: CredencialesGoogle,
 ): Promise<DetalleDeCuenta> {
-  const [campanas, conjuntos, anuncios, palabras] = await Promise.all([
+  // Los grupos de recursos son de Performance Max: si la lectura falla (cuenta sin PMax, permisos) no se cae el resto.
+  const sinGrupos = (): Promise<Array<Record<string, unknown>>> => Promise.resolve([]);
+  const [campanas, conjuntos, anuncios, palabras, gruposRecursos, recursos, filasExtensiones] = await Promise.all([
     consultarGaql(cred, accountId, GAQL_CAMPANAS),
     consultarGaql(cred, accountId, GAQL_GRUPOS),
     consultarGaql(cred, accountId, GAQL_ANUNCIOS),
     consultarGaql(cred, accountId, GAQL_PALABRAS),
+    consultarGaql(cred, accountId, GAQL_GRUPOS_DE_RECURSOS).catch(sinGrupos),
+    consultarGaql(cred, accountId, GAQL_RECURSOS_DE_GRUPO).catch(sinGrupos),
+    // Extensiones: si la lectura falla (permisos), la campaña se muestra igual, sin ellas.
+    consultarGaql(cred, accountId, GAQL_EXTENSIONES).catch(sinGrupos),
   ]);
   // Con la API nativa se leyeron TODAS las palabras clave: un grupo sin
   // ninguna queda con lista vacía (no `null`, que significaría "sin leer").
@@ -232,14 +243,26 @@ async function fetchDetalleGoogleNativo(
     if (!k) continue;
     porGrupo.set(k.grupoId, [...(porGrupo.get(k.grupoId) ?? []), k.palabra]);
   }
+  const gruposDeRecursos = gruposDeRecursosGaql(gruposRecursos, recursos);
   return {
     provider: "google",
     accountId,
-    campanas: unicosPorId(nonNull(campanas.map((f) => detalleCampanaGaql(f, accountId)))),
+    campanas: unicosPorId(nonNull(campanas.map((f) => detalleCampanaGaql(f, accountId)))).map((c) => {
+      const ext = extensionesActualesDeFilas(filasExtensiones, c.id);
+      const conExtensiones = {
+        ...c,
+        extensiones: {
+          sitelinks: ext.filter((e) => e.tipo === "SITELINK").map((e) => ({ texto: e.texto, url: e.url, descripcion1: e.descripcion1, descripcion2: e.descripcion2 })),
+          destacados: ext.filter((e) => e.tipo === "CALLOUT").map((e) => e.texto),
+        },
+      };
+      return c.objetivo === "PERFORMANCE_MAX" ? { ...conExtensiones, gruposDeRecursos: gruposDeRecursos.filter((g) => g.campaignId === c.id) } : conExtensiones;
+    }),
     conjuntos: unicosPorId(nonNull(conjuntos.map((f) => detalleConjuntoGaql(f, accountId)))).map(
       (g) => ({ ...g, palabrasClave: porGrupo.get(g.id) ?? [] }),
     ),
     anuncios: unicosPorId(nonNull(anuncios.map((f) => detalleAnuncioGaql(f, accountId)))),
+    gruposDeRecursos,
     fuente: "nativa",
     avisos: [],
   };

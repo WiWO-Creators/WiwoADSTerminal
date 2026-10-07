@@ -141,6 +141,9 @@ function PanelDeMemoria({ clienteId, clienteNombre, onCerrar }: { clienteId: str
   );
 }
 
+/** «Sí», «dale», «hazlo»…: una respuesta corta que aprueba lo propuesto. */
+const AFIRMATIVO = /^\s*(s[ií]|dale|ok(ay)?|hazlo|h[aá]zlo|adelante|claro|de acuerdo|listo|activ[aá]lo|aplic[aá]lo|p[aá]usalo|confirmo|procede)[\s.!¡]*$/i;
+
 const FRASES_DE_ESPERA = ["Trabajando…", "Pensando…", "Revisando los datos…", "Armando la respuesta…", "Ordenando las ideas…"];
 
 /** Mientras no hay un aviso concreto de lo que se está haciendo, rota entre varias frases en vez de repetir una. */
@@ -183,7 +186,11 @@ export function AsistenteFlotante({
   const areaDeTexto = useRef<HTMLTextAreaElement>(null);
   /** La decisión que el Orb está resolviendo (la pidió el tablero de Decisiones). */
   const decisionActiva = useRef<string | null>(null);
+  /** Id de este chat: une en la auditoría lo que se preguntó, lo que el bot usó y lo que respondió. */
+  const conversacionId = useRef<string>(typeof crypto !== "undefined" ? crypto.randomUUID() : "");
   const respuestaConPropuestas = useRef(false);
+  /** Cómo terminó el último intento de aplicar una propuesta. */
+  const resultadoDeAplicar = useRef<{ estado: EstadoDePropuesta; error?: string }>({ estado: "pendiente" });
   const enviarActual = useRef<(pregunta: string) => Promise<void>>(async () => {});
 
   // Crece con el contenido en vez de quedar en una sola línea siempre —
@@ -213,9 +220,52 @@ export function AsistenteFlotante({
     setMensajes((actuales) => actuales.map((m) => (m.id === id ? cambio(m) : m)));
   }
 
+  /**
+   * Un «sí» corto después de una propuesta pendiente es la aprobación de la persona: se aplica por el mismo camino del botón
+   * (el servidor vuelve a validar y a comprobar permisos) y no se vuelve a llamar al modelo.
+   */
+  async function aprobarPorChat(limpia: string): Promise<boolean> {
+    if (!puedeAprobar || !AFIRMATIVO.test(limpia)) return false;
+    const ultimo = [...mensajes].reverse().find((m) => m.role === "assistant");
+    const aplicables = ultimo?.propuestas.filter((p) => p.estado === "pendiente" && (p.tipo === "estado" || p.tipo === "edicion")) ?? [];
+    // Un «sí» no basta para tocar dinero: lo del presupuesto se aprueba con el botón de su tarjeta, viendo el antes y el después.
+    const tocaDinero = (p: PropuestaEnPantalla) => p.tipo === "edicion" && (p.cambios.presupuesto !== undefined || p.cambios.limiteGasto !== undefined);
+    const pendientes = aplicables.filter((p) => !tocaDinero(p));
+    if (!ultimo || aplicables.length === 0) return false;
+    if (pendientes.length === 0) {
+      const usuario: Mensaje = { id: nuevoId(), role: "user", text: limpia, propuestas: [] };
+      const aviso: Mensaje = { id: nuevoId(), role: "assistant", text: "Lo del presupuesto no se aplica con un «sí»: apruébalo con el botón de su tarjeta, donde ves el antes y el después.", propuestas: [] };
+      setMensajes((a) => [...a, usuario, aviso]);
+      setTexto("");
+      return true;
+    }
+    const usuario: Mensaje = { id: nuevoId(), role: "user", text: limpia, propuestas: [] };
+    const respuesta: Mensaje = { id: nuevoId(), role: "assistant", text: "Aplicando…", propuestas: [] };
+    setMensajes((a) => [...a, usuario, respuesta]);
+    setTexto("");
+    setCargando(true);
+    const lineas: string[] = [];
+    let todoBien = true;
+    for (const p of pendientes) {
+      await aplicar(ultimo.id, p);
+      const r = resultadoDeAplicar.current;
+      const nombre = "nombre" in p ? p.nombre : "cambio";
+      if (r.estado === "aplicada") lineas.push(`Listo: ${nombre}.`);
+      else {
+        todoBien = false;
+        lineas.push(`No se pudo aplicar ${nombre}: ${r.error ?? "error desconocido"}.`);
+      }
+    }
+    setCargando(false);
+    actualizarMensaje(respuesta.id, (m) => ({ ...m, text: lineas.join("\n") }));
+    if (todoBien) avisarDecision("aplicada");
+    return true;
+  }
+
   async function enviar(pregunta: string) {
     const limpia = pregunta.trim();
     if (!limpia || cargando) return;
+    if (await aprobarPorChat(limpia)) return;
     setErrorDeCarga(null);
 
     const usuario: Mensaje = {
@@ -246,6 +296,7 @@ export function AsistenteFlotante({
           rango,
           clienteId,
           clienteNombre,
+          conversacionId: conversacionId.current,
           csv: adjunto,
         }),
       });
@@ -333,11 +384,13 @@ export function AsistenteFlotante({
 
   async function aplicar(mensajeId: string, propuesta: PropuestaEnPantalla) {
     if (propuesta.tipo !== "estado" && propuesta.tipo !== "edicion") return;
-    const marcar = (estado: EstadoDePropuesta, error?: string, aviso?: string) =>
+    const marcar = (estado: EstadoDePropuesta, error?: string, aviso?: string) => {
+      resultadoDeAplicar.current = { estado, error };
       actualizarMensaje(mensajeId, (m) => ({
         ...m,
         propuestas: m.propuestas.map((p) => (p.id === propuesta.id ? { ...p, estado, error, aviso } : p)),
       }));
+    };
     marcar("aplicando");
     if (propuesta.tipo === "edicion") {
       // Lo que se aplica no es lo que dibujó el modelo: el servidor vuelve a leer
@@ -412,12 +465,14 @@ export function AsistenteFlotante({
 
   function reiniciar() {
     cancelar.current?.abort();
+    conversacionId.current = crypto.randomUUID();
     setMensajes([]);
     setCsv(null);
     setErrorDeCarga(null);
   }
 
   const vacio = mensajes.length === 0;
+  const ultimoDelAsistente = [...mensajes].reverse().find((m) => m.role === "assistant");
   const [verMemoria, setVerMemoria] = useState(false);
   const ultima = mensajes[mensajes.length - 1];
   const esperandoTexto = cargando && ultima?.role === "assistant" && ultima.text === "";
@@ -529,6 +584,15 @@ export function AsistenteFlotante({
                   >
                     {m.role === "assistant" ? conNegritas(m.text) : m.text}
                   </div>
+                )}
+                {m.role === "assistant" && decisionActiva.current && !cargando && m.id === ultimoDelAsistente?.id && m.text && (
+                  <button
+                    type="button"
+                    onClick={() => void enviar("Amplía: explícame el diagnóstico completo con las cifras, las causas posibles y las alternativas.")}
+                    className="self-start rounded-full border border-brand/40 px-3 py-1 text-[0.7rem] font-bold text-brand hover:bg-brand/10"
+                  >
+                    Ampliar la explicación
+                  </button>
                 )}
                 {m.propuestas.map((p) => (
                   <TarjetaDePropuesta

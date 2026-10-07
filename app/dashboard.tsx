@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Building2,
   Cog,
@@ -61,7 +61,9 @@ import type {
   PerformanceSnapshot,
 } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
-import { ROLE_LABELS, type Role } from "@/lib/permisos";
+import { etiquetaDeCargo } from "@/lib/jerarquia-pura";
+import { AvisoDeActualizacion } from "./actualizacion";
+import { AvisoVerComo, SelectorVerComo, type VerComo } from "./ver-como";
 import { RANGO_POR_DEFECTO, type RangoId } from "@/lib/rangos";
 import { fetchConReintento } from "@/lib/fetch-reintento";
 import { haceTiempo } from "@/lib/tiempo";
@@ -147,8 +149,8 @@ const navItems: ItemDeMenu[] = [
     roles: ["admin"],
     icono: HeartPulse,
     resumen: "¿Se mide bien lo que se paga? GA4, Tag Manager, eventos clave y conversiones.",
-    // Visible pero inactivo por ahora (decisión del equipo): se muestra con «Próximamente».
-    bloqueado: true,
+    // Oculto: «Salud de medición» en el menú es ahora el antiguo Dashboard C-Level. Esta ventana sigue en el código.
+    oculto: true,
   },
   {
     key: "inversion",
@@ -159,9 +161,9 @@ const navItems: ItemDeMenu[] = [
   },
   {
     key: "health",
-    label: "Dashboard C-Level",
+    label: "Salud de medición",
     icono: LineChart,
-    resumen: "Resultados por objetivo y estado de las campañas y de las fuentes de datos.",
+    resumen: "Resultados por objetivo, estado de las campañas y salud de las fuentes de datos.",
   },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
@@ -206,7 +208,8 @@ const navItemsGestion: ItemDeMenu[] = [
   {
     key: "historial",
     label: "Auditoría",
-    roles: ["admin", "supervisor", "analyst"],
+    // Solo Directores y Admins (el rol administrador).
+    roles: ["admin"],
     icono: History,
     resumen: "Todo queda registrado: pedidos al bot, solicitudes, decisiones y cada cambio con su antes y después.",
   },
@@ -316,6 +319,7 @@ export type DashboardIdentity = {
   email: string;
   displayName: string;
   role: string;
+  cargo?: string | null;
   portfolioIds: string[];
 };
 
@@ -374,7 +378,13 @@ export default function WiwoDashboard({
   signOutPath,
   initialSnapshot,
   initialView = "decisiones",
+  verComo = null,
+  puedeVerComo = false,
 }: {
+  /** Un administrador viendo la app como esta persona (solo lectura). */
+  verComo?: VerComo | null;
+  /** Quien entró es administrador: puede elegir a quién ver. */
+  puedeVerComo?: boolean;
   signOutPath: string;
   initialSnapshot: {
     user: DashboardIdentity;
@@ -656,7 +666,8 @@ export default function WiwoDashboard({
 
   useEffect(() => {
     let cancelado = false;
-    void (async () => {
+    const revisar = async () => {
+      if (document.visibilityState === "hidden") return;
       try {
         const response = await fetch("/api/actualizar", { cache: "no-store" });
         if (!response.ok) return;
@@ -676,7 +687,7 @@ export default function WiwoDashboard({
           const ultimo = Number(
             window.localStorage.getItem("wiwo-ads-ultima-actualizacion-auto") ?? 0,
           );
-          if (Date.now() - ultimo > 60 * 60 * 1000) {
+          if (Date.now() - ultimo > 15 * 60 * 1000) {
             window.localStorage.setItem(
               "wiwo-ads-ultima-actualizacion-auto",
               String(Date.now()),
@@ -687,11 +698,43 @@ export default function WiwoDashboard({
       } catch {
         // Sin estado de actualización el botón simplemente no aparece.
       }
-    })();
+    };
+    void revisar();
+    // Se vuelve a mirar cada 5 minutos: así, con la app abierta, la actualización de cada hora ocurre sola (el servidor decide si toca).
+    const t = window.setInterval(() => void revisar(), 5 * 60 * 1000);
     return () => {
       cancelado = true;
+      window.clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al montar
+  }, []);
+
+  // Actualización de la app: se guarda dónde estaba la persona y, al volver, se retoma.
+  const guardarProgresoDelTablero = useCallback(() => {
+    try {
+      window.sessionStorage.setItem("wiwo_progreso_dashboard", JSON.stringify({ view, cliente: clienteSeleccionado, builder: builderContexto, ts: Date.now() }));
+      window.sessionStorage.setItem("wiwo_reanudar", "1");
+    } catch {
+      // Sin almacenamiento del navegador, se actualiza igual sin recordar dónde estaba.
+    }
+  }, [view, clienteSeleccionado, builderContexto]);
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem("wiwo_reanudar") !== "1") return;
+      const crudo = window.sessionStorage.getItem("wiwo_progreso_dashboard");
+      window.sessionStorage.removeItem("wiwo_reanudar");
+      window.sessionStorage.removeItem("wiwo_progreso_dashboard");
+      const p = crudo ? (JSON.parse(crudo) as { view?: ViewKey; cliente?: string | null; builder?: BuilderContexto | null; ts?: number }) : null;
+      if (p && p.ts && Date.now() - p.ts < 5 * 60_000) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- retoma dónde estaba la persona al volver de una actualización
+        if (p.cliente) setClienteSeleccionado(p.cliente);
+        if (p.builder) setBuilderContexto(p.builder);
+        if (p.view) setView(p.view);
+      }
+      toast.success("WiWO.ADS se actualizó", { description: "Seguimos donde estabas." });
+    } catch {
+      // Un progreso ilegible se ignora.
+    }
   }, []);
 
   // Se piden en cuanto hay un cliente elegido (no solo al abrir «Cliente»): cuando la persona llega a la tabla,
@@ -798,6 +841,8 @@ export default function WiwoDashboard({
     )}
     <SidebarProvider>
       <AppSidebar
+        verComo={verComo}
+        puedeVerComo={puedeVerComo}
         view={view}
         currentUser={initialSnapshot.user}
         signOutPath={signOutPath}
@@ -828,6 +873,8 @@ export default function WiwoDashboard({
       />
 
       <SidebarInset className="min-w-0 bg-canvas">
+        {verComo && <AvisoVerComo verComo={verComo} />}
+        <AvisoDeActualizacion alGuardar={guardarProgresoDelTablero} />
         <AppHeader
           view={view}
           performance={performance}
@@ -842,7 +889,7 @@ export default function WiwoDashboard({
           onSelectCliente={(portfolioId) => {
             // Cambiar de cliente cambia con quién se trabaja, no dónde:
             // antes esto además mandaba siempre a Clientes, y quien estaba en
-            // el Dashboard C-Level o en el Creador de campañas perdía su lugar.
+            // Salud de medición o en el Creador de campañas perdía su lugar.
             setClienteSeleccionado(
               portfolioId === TODOS_LOS_CLIENTES ? null : portfolioId,
             );
@@ -853,7 +900,19 @@ export default function WiwoDashboard({
             un control importante (un botón, la última fila de una tabla)
             justo detrás del orbe flotante al hacer scroll hasta el final. */}
         <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
-          {view === "decisiones" && <DecisionesView modo="pagina" clienteId={clienteSeleccionado} rango={performance.rango.id} />}
+          {view === "decisiones" && <DecisionesView
+              modo="pagina"
+              clienteId={clienteSeleccionado}
+              rango={performance.rango.id}
+              onCrearAnuncio={
+                puedeCrearCampanas
+                  ? (destino) => {
+                      setBuilderContexto({ modo: "adjuntar", attachTo: destino as unknown as AttachToConjunto });
+                      setView("builder");
+                    }
+                  : undefined
+              }
+            />}
           {view === "control" && (
             <ControlRoomView
               nombre={initialSnapshot.user.displayName.trim().split(/\s+/)[0] || "equipo"}
@@ -976,7 +1035,7 @@ export default function WiwoDashboard({
               {impulsarAbierto && <ImpulsarView clienteId={clienteSeleccionado} puedeAprobar={initialSnapshot.user.role !== "analyst"} />}
             </DialogContent>
           </Dialog>
-          {view === "historial" && <AuditoriaView />}
+          {view === "historial" && initialSnapshot.user.role === "admin" && <AuditoriaView />}
           {view === "team" && (
             <EquipoView
               portfolios={performance.portfolios.map((item) => ({
@@ -1057,7 +1116,11 @@ function AppSidebar({
   rango,
   puedeAprobar,
   onCambioAplicado,
+  verComo,
+  puedeVerComo,
 }: {
+  verComo: VerComo | null;
+  puedeVerComo: boolean;
   view: ViewKey;
   currentUser: DashboardIdentity;
   signOutPath: string;
@@ -1223,7 +1286,7 @@ function AppSidebar({
           </p>
           <div className="mt-2 flex items-center gap-2 group-data-[collapsible=icon]:mt-0">
             <span className="inline-block rounded-md bg-primary px-2 py-0.5 text-[0.65rem] font-extrabold tracking-wide text-primary-foreground uppercase group-data-[collapsible=icon]:hidden">
-              {ROLE_LABELS[currentUser.role as Role] ?? currentUser.role}
+              {etiquetaDeCargo(currentUser.role, currentUser.cargo)}
             </span>
             {puedeVerItem(itemEquipo, currentUser.role) && (
               // Solo el engranaje, al lado del rol: las dos cosas hablan de
@@ -1249,6 +1312,7 @@ function AppSidebar({
               </button>
             )}
           </div>
+          {(puedeVerComo || verComo) && <SelectorVerComo actual={verComo} />}
         </div>
         <a
           href={signOutPath}
@@ -1419,7 +1483,7 @@ function AppHeader({
             title={
               ultimaActualizacion
                 ? `Catálogo de campañas actualizado ${haceTiempo(ultimaActualizacion)}. Se actualiza solo cada semana; pulsa para hacerlo ahora.`
-                : "Actualizar datos desde Windsor. Se actualiza solo cada semana."
+                : "Actualizar datos desde Windsor. Se actualiza solo cada hora."
             }
             className="flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3.5 text-xs font-bold text-foreground transition-colors hover:border-brand disabled:opacity-70"
           >

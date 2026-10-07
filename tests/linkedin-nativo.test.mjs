@@ -172,4 +172,5 @@ test("los alcances de anuncios y de administración son los que LinkedIn aceptó
   assert.deepEqual([...p.ALCANCES.administrar], ["rw_ads"]);
   assert.deepEqual([...p.ALCANCES.anuncios], ["r_organization_admin", "r_organization_social", "w_organization_social"]);
   assert.deepEqual([...p.ALCANCES.leads], ["r_marketing_leadgen_automation"]);
+  assert.deepEqual([...p.ALCANCES.perfil], ["r_basicprofile"]);
 });

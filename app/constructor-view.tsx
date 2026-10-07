@@ -291,6 +291,9 @@ function CampoDinero({
   );
 }
 
+/** Dónde se guarda el borrador mientras la app se actualiza (ver app/actualizacion.tsx). */
+const CLAVE_PROGRESO_CONSTRUCTOR = "wiwo_progreso_constructor";
+
 function borradorInicial(
   attachTo?: ConstructorAttachTo,
   clienteGlobal?: string | null,
@@ -437,9 +440,38 @@ export function ConstructorView({
 } = {}) {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cargando, setCargando] = useState(true);
-  const [draft, setDraft] = useState<CampaignDraft>(() =>
-    borradorInicial(attachTo, clienteGlobal, semillaIA),
-  );
+  const [draft, setDraft] = useState<CampaignDraft>(() => {
+    // Tras una actualización de la app, se retoma el borrador que se estaba armando (solo si se guardó hace menos de 5 minutos).
+    if (typeof window !== "undefined") {
+      try {
+        const crudo = window.sessionStorage.getItem(CLAVE_PROGRESO_CONSTRUCTOR);
+        if (crudo) {
+          window.sessionStorage.removeItem(CLAVE_PROGRESO_CONSTRUCTOR);
+          const p = JSON.parse(crudo) as { draft?: CampaignDraft; ts?: number };
+          if (p.draft && p.ts && Date.now() - p.ts < 5 * 60_000) return { ...borradorInicial(attachTo, clienteGlobal, semillaIA), ...p.draft };
+        }
+      } catch {
+        // Un borrador ilegible se ignora: se parte de cero.
+      }
+    }
+    return borradorInicial(attachTo, clienteGlobal, semillaIA);
+  });
+  // Antes de que la app se actualice, se guarda el borrador para recuperarlo al volver.
+  const borradorRef = useRef(draft);
+  useEffect(() => {
+    borradorRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    const guardar = () => {
+      try {
+        window.sessionStorage.setItem(CLAVE_PROGRESO_CONSTRUCTOR, JSON.stringify({ draft: borradorRef.current, ts: Date.now() }));
+      } catch {
+        // Sin almacenamiento del navegador no se puede recordar: la actualización sigue.
+      }
+    };
+    window.addEventListener("wiwo:guardar-progreso", guardar);
+    return () => window.removeEventListener("wiwo:guardar-progreso", guardar);
+  }, []);
   // Qué parte del formulario se ve (0 campaña, 1 conjunto, 2 anuncio): una a la
   // vez, como en Meta. Si se viene de "+ Añadir conjunto/anuncio", la campaña (y
   // el conjunto) ya existen y se parte por lo que falta.
@@ -1284,6 +1316,15 @@ const OBJETIVOS_DE_PLATAFORMA: Partial<
     { label: "Promoción de la aplicación", objetivo: null, motivo: "Las campañas de app necesitan la app en una tienda y su registro de conversiones. Todavía no se pueden crear desde aquí." },
     { label: "Visitas a tiendas locales", objetivo: null, motivo: "Necesita una ficha de Google Business Profile vinculada a la cuenta. Todavía no se puede crear desde aquí." },
   ],
+  // Los cinco objetivos de LinkedIn que se comprobaron contra su API (2026-10-07), con los nombres de su interfaz.
+  linkedin: [
+    { label: "Notoriedad de marca", objetivo: "alcance" },
+    { label: "Visitas al sitio web", objetivo: "trafico" },
+    { label: "Interacción", objetivo: "interaccion" },
+    { label: "Generación de clientes potenciales", objetivo: "leads" },
+    { label: "Conversiones en el sitio web", objetivo: "ventas" },
+    { label: "Visualizaciones de video", objetivo: null, motivo: "LinkedIn lo ofrece, pero todavía no se puede crear desde aquí." },
+  ],
 };
 
 function ObjetivosPorPlataforma({
@@ -1972,6 +2013,12 @@ function FaseConjunto({
         titulo={`Solo ${platformLabel(plataformaActiva)}`}
         detalle="Ajustes que existen únicamente en esta plataforma"
       />
+      {plataformaActiva === "linkedin" && (
+        <NotaDeLinkedin>
+          En LinkedIn el presupuesto, el calendario y el país de arriba se aplican a la campaña. La declaración política, la página, la puja y las ubicaciones
+          están en la fase Campaña, en «Solo LinkedIn».
+        </NotaDeLinkedin>
+      )}
       {conMeta && (
         <>
           <Seccion titulo="Conversión" completa>
@@ -2579,6 +2626,12 @@ function FaseAnuncio({
         titulo={`Solo ${platformLabel(plataformaActiva)}`}
         detalle="Ajustes que existen únicamente en esta plataforma"
       />
+      {plataformaActiva === "linkedin" && (
+        <NotaDeLinkedin>
+          El anuncio de LinkedIn todavía no se crea desde aquí: necesita una publicación de la página de empresa y un rol de publicador sobre ella. Al publicar, se crea el
+          grupo de campañas y la campaña en BORRADOR (no sirven ni gastan) y queda esperando su anuncio.
+        </NotaDeLinkedin>
+      )}
       {conMeta && (
         <>
           <Seccion titulo="Identidad" completa>
@@ -3397,6 +3450,16 @@ function TarjetaDeVista({
   );
 }
 
+/** Aviso dentro de una fase cuando la plataforma activa es LinkedIn y esa fase no tiene ajustes propios. */
+function NotaDeLinkedin({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="flex items-start gap-2 rounded-xl border border-foreground/10 bg-card/40 p-3 text-xs leading-5 text-foreground/55">
+      <Info className="mt-0.5 size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 const FILTROS_VISTA = [
   { id: "todas", label: "Todas" },
   { id: "google", label: "Google" },
@@ -3440,7 +3503,11 @@ function VistaPrevia({ draft, cuentas }: { draft: CampaignDraft; cuentas: Cuenta
       </div>
 
       {vistas.length === 0 ? (
-        <p className="text-xs text-foreground/40">Elige al menos una plataforma.</p>
+        <p className="text-xs text-foreground/40">
+          {draft.platforms.includes("linkedin")
+            ? "LinkedIn todavía no tiene vista previa aquí: el anuncio se crea aparte, con una publicación de la página."
+            : "Elige al menos una plataforma."}
+        </p>
       ) : (
         <>
           {/* Apiladas hacia abajo, no en tira horizontal: en la columna

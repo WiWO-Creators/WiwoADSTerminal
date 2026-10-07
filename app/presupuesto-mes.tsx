@@ -9,7 +9,7 @@ import { platformLabel } from "@/lib/plataformas";
 import { totalDeEntidades } from "@/lib/presupuesto-entidades";
 import type { PresupuestoDeEntidad, TotalDePresupuesto } from "@/lib/presupuesto-entidades";
 import { cn } from "@/lib/utils";
-import { Surface } from "./ui";
+import { Surface, ThinkingOrb } from "./ui";
 
 type SegmentoDePresupuesto = {
   id: string;
@@ -112,7 +112,25 @@ export function usePresupuesto(portfolioId: string): RespuestaDePresupuesto | nu
 export function PresupuestoDelMes({ portfolioId }: { portfolioId: string }) {
   const datos = usePresupuesto(portfolioId);
   const [monedaElegida, setMonedaElegida] = useState<string | null>(null);
-  if (datos === undefined || datos === null) return null;
+  if (datos === undefined) {
+    return (
+      <Surface className="flex items-center gap-3 p-4">
+        <ThinkingOrb size="xs" state="generating" label="" />
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-foreground">Cargando presupuesto e inversión…</p>
+          <p className="text-xs leading-5 text-foreground/55">Se está leyendo lo gastado y lo asignado a cada campaña; la primera vez puede tardar unos segundos.</p>
+        </div>
+      </Surface>
+    );
+  }
+  if (datos === null) {
+    return (
+      <Surface className="flex items-center gap-3 p-4">
+        <Wallet className="size-4 shrink-0 text-foreground/40" />
+        <p className="text-xs leading-5 text-foreground/60">No se pudo leer el presupuesto ahora. Cambia de cliente y vuelve, o recarga la página.</p>
+      </Surface>
+    );
+  }
 
   const p = datos.presupuesto;
   const entidades = datos.campanas?.entidades ?? [];

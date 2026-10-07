@@ -1,3 +1,5 @@
+import { marcarContenidoRenovado } from "@/lib/contenido-renovado";
+import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
 /**
  * Solicitudes de publicación: guardado, aprobación y seguimiento. Las reglas puras (estados, mensajes) viven en
  * `solicitudes-pura.ts`.
@@ -201,8 +203,8 @@ export async function crearSolicitudDeEdicion(
 ): Promise<Solicitud> {
   if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar cambios a revisión.", 403);
   const prep = await prepararEdicion({ actor, provider: e.provider as Platform, accountId: e.accountId, nivel: e.nivel, id: e.id, cambios: e.cambios });
-  const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
-  if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.mensaje}`, 422);
+  const bloqueantes = prep.plan.problemas.filter((p) => p.bloqueante);
+  if (bloqueantes.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${[...new Set(bloqueantes.map((p) => p.mensaje))].join(" · ")}`, 422);
   if (!hayAlgoQueAplicar(prep.plan)) throw new ErrorDeSolicitud("No hay ningún cambio que enviar.", 422);
   const cliente = (await listPortfolios()).find((p) => p.id === prep.portfolioId);
   if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
@@ -259,8 +261,8 @@ export async function crearSolicitudDeContenido(actor: Actor, piezas: ContenidoN
     if (!duenio || duenio.id !== p.portfolioId) throw new ErrorDeSolicitud("Esa cuenta no pertenece a este cliente.", 403);
     if (!p.adsetId) throw new ErrorDeSolicitud("Falta el conjunto de destino.");
     const errores = validarContenido(p.datos);
-    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores[0]}`, 422);
-    if (!(cliente.accountPages[p.accountId] ?? cliente.pageId)) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
+    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores.join(" · ")}`, 422);
+    if (!(await paginaDeLaCuenta(cliente, p.accountId))) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
   }
   const id = crypto.randomUUID();
   const titulo = piezas.length === 1 ? tituloDeContenido(piezas[0].datos) : `${piezas.length} piezas de contenido nuevo`;
@@ -309,6 +311,10 @@ export async function crearSolicitud(actor: Actor, borradores: Array<Partial<Cam
   if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar creaciones a revisión.", 403);
   if (borradores.length === 0 || borradores.length > 20) throw new ErrorDeSolicitud("Una solicitud lleva entre 1 y 20 piezas.");
 
+  // Un cliente que no existe se dice así, no como «no tiene ninguna cuenta».
+  for (const b of borradores) {
+    if (b.portfolioId && !(await listPortfolios()).some((p) => p.id === b.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no existe.", 404);
+  }
   const armados = [];
   for (const b of borradores) {
     try {
@@ -320,10 +326,8 @@ export async function crearSolicitud(actor: Actor, borradores: Array<Partial<Cam
   }
   const clienteId = armados[0].draft.portfolioId;
   if (armados.some((a) => a.draft.portfolioId !== clienteId)) throw new ErrorDeSolicitud("Todas las piezas deben ser del mismo cliente.");
-  for (const a of armados) {
-    const bloqueante = a.plan.issues.find((i) => i.blocking);
-    if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.message}`, 422);
-  }
+  const faltas = [...new Set(armados.flatMap((a) => a.plan.issues.filter((i) => i.blocking).map((i) => i.message)))];
+  if (faltas.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${faltas.join(" · ")}`, 422);
 
   const primero = armados[0].draft;
   const titulo = tituloDeSolicitud(primero, armados.length);
@@ -484,7 +488,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const c = d as unknown as ContenidoNuevo;
       try {
         const cliente = (await listPortfolios()).find((p) => p.id === c.portfolioId);
-        const paginaId = cliente?.accountPages[c.accountId] ?? cliente?.pageId;
+        const paginaId = cliente ? await paginaDeLaCuenta(cliente, c.accountId) : null;
         if (!paginaId) throw new Error("Este cliente no tiene una Página de Facebook asociada.");
         const destinos = { paginaId, instagramUserId: cliente?.instagramId };
         const creativos =
@@ -497,6 +501,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
         for (const pieza of creativos) {
           const r = await crearAnuncioConCreativo(c.accountId, { nombre: pieza.nombre, conjuntoId: c.adsetId, creativo: pieza.creativo });
           anuncios.push({ provider: "meta", accountId: c.accountId, id: r.anuncioId });
+          await marcarContenidoRenovado("meta", c.campaignId);
           pasosTotales.push({ platform: "meta", action: "ads:create_content", label: pieza.nombre, ok: true, error: null, raw: r } as PasoEjecutado);
         }
         await registrarAuditoria({
@@ -580,9 +585,10 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           instagramUserId: cliente?.instagramId,
           mediaId: ig.mediaId,
           facebook: ig.facebook,
-          paginaId: cliente?.accountPages[ig.accountId] ?? cliente?.pageId,
+          paginaId: cliente ? ((await paginaDeLaCuenta(cliente, ig.accountId)) ?? undefined) : undefined,
         });
         anuncios.push({ provider: "meta", accountId: ig.accountId, id: r.anuncioId });
+        await marcarContenidoRenovado("meta", ig.campaignId);
         await registrarAuditoria({
           categoria: "creacion",
           accion: "publicada",
@@ -637,6 +643,8 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const cuentaMeta = armado.draft.existingCampaign?.accountId ?? armado.cuentas.find((c) => c.provider === armado.draft.platforms[0])?.externalId ?? "";
       for (const a of idsDeAnunciosCreados(r.pasos, r.ids)) anuncios.push({ ...a, accountId: a.provider === armado.draft.existingCampaign?.platform ? armado.draft.existingCampaign.accountId : cuentaMeta });
       const campaignId = armado.draft.existingCampaign?.campaignId ?? r.ids.campaign ?? null;
+      // Un anuncio nuevo dentro de una campaña que ya existía la deja con contenido renovado.
+      if (r.ok && armado.draft.existingCampaign) await marcarContenidoRenovado(armado.draft.existingCampaign.platform, armado.draft.existingCampaign.campaignId);
       const enlace = enlaceDeCampana(armado.draft.platforms[0], cuentaMeta, campaignId);
       if (enlace && !enlaces.some((e) => e.url === enlace.url)) enlaces.push(enlace);
       if (!r.ok) {
@@ -649,6 +657,10 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
     }
   }
 
+  // El texto técnico queda en los pasos (resultado_json) y en la bitácora; quien creó la solicitud ve uno que entiende.
+  if (fallo && /WINDSOR_API_KEY|META_SYSTEM_USER_TOKEN|ANTHROPIC_API_KEY|Falta conectar|no está configurad/i.test(fallo)) {
+    fallo = "La conexión con la plataforma no está disponible ahora. Avisa a un administrador.";
+  }
   await getRawDb()
     .prepare("UPDATE solicitudes SET estado = ?, error_texto = ?, resultado_json = ?, enlaces_json = ?, publicada_at = ?, avisada = 0 WHERE id = ?")
     .bind(fallo ? "fallida" : "publicada", fallo, JSON.stringify({ pasos: pasosTotales.map((p) => ({ platform: p.platform, action: p.action, ok: p.ok, error: p.error })), anuncios }), JSON.stringify(enlaces), Date.now(), id)
@@ -662,6 +674,8 @@ export async function rechazarSolicitud(actor: Actor, id: string, nota: string):
   if (!f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
   if (!puedeRevisarEsta(actor, f)) throw new ErrorDeSolicitud("Los cambios de presupuesto los revisa un Director Digital o superior.", 403);
   if (!puedeTransicionar("rechazar", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Esa solicitud ya no está pendiente.", 409);
+  // Quien creó la solicitud necesita saber qué cambiar: sin motivo no se rechaza.
+  if (!nota.trim()) throw new ErrorDeSolicitud("Escribe el motivo del rechazo: quien la creó lo verá.", 400);
   await getRawDb()
     .prepare("UPDATE solicitudes SET estado = 'rechazada', revisor_email = ?, revisor_nombre = ?, nota_revision = ?, resuelta_at = ?, avisada = 0 WHERE id = ? AND estado = 'pendiente'")
     .bind(actor.email, nombreDe(actor), nota.trim().slice(0, 500) || null, Date.now(), id)

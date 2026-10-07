@@ -62,6 +62,8 @@ export async function GET(request: Request) {
         fuente: detalle.fuente,
         avisos: detalle.avisos,
         ...entidad,
+        // Performance Max: el contenido vive en los grupos de recursos de la campaña (solo con la cuenta de Google conectada).
+        ...(nivel === "campana" && detalle.gruposDeRecursos ? { gruposDeRecursos: detalle.gruposDeRecursos.filter((g) => g.campaignId === id) } : {}),
       },
       { headers: NO_STORE },
     );

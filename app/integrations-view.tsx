@@ -48,6 +48,7 @@ import type { PerformanceAccountSummary } from "@/lib/performance-store";
 import type { PortfolioSummary } from "@/lib/portafolios";
 import { CONECTABLES, platformLabel } from "@/lib/plataformas";
 import { OrbeDeBoton, Surface } from "./ui";
+import { LinkedinCard } from "./linkedin-card";
 
 type WindsorAccount = { name: string; currency: string | null };
 
@@ -459,6 +460,7 @@ export function IntegrationsView({
                 }
               />
             ))}
+        {!loading && <LinkedinCard canManage={canManage} />}
       </div>
 
       <CatalogoPanel canManage={canManage} />
@@ -740,6 +742,11 @@ function TablaEstadoPorCliente({ portfolios }: { portfolios: PortfolioSummary[] 
           const meta = estadoDePlataforma(
             portfolio.accounts.filter((a) => a.provider === "meta"),
           );
+          // LinkedIn y TikTok solo se muestran en los clientes que tienen cuentas ahí (no se llena la tabla de insignias vacías).
+          const otras = (["linkedin", "tiktok"] as const)
+            .map((proveedor) => ({ proveedor, cuentas: portfolio.accounts.filter((a) => (a.provider as string) === proveedor) }))
+            .filter((x) => x.cuentas.length > 0)
+            .map((x) => ({ label: x.proveedor === "linkedin" ? "LinkedIn" : "TikTok", info: estadoDePlataforma(x.cuentas) }));
           return (
             <div
               key={portfolio.id}
@@ -751,6 +758,9 @@ function TablaEstadoPorCliente({ portfolios }: { portfolios: PortfolioSummary[] 
               <div className="flex flex-wrap gap-2">
                 <CeldaEstado label="Google" info={google} />
                 <CeldaEstado label="Meta" info={meta} />
+                {otras.map((o) => (
+                  <CeldaEstado key={o.label} label={o.label} info={o.info} />
+                ))}
               </div>
             </div>
           );

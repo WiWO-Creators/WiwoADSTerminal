@@ -22,6 +22,8 @@ type Cuerpo = {
   clienteId?: string | null;
   clienteNombre?: string | null;
   csv?: { nombre?: string; texto?: string } | null;
+  /** Id del chat que genera la pantalla: une lo que se registra en la auditoría. */
+  conversacionId?: string;
 };
 
 /**
@@ -66,6 +68,8 @@ export async function POST(request: Request) {
     return fallo("Falta la pregunta", 400);
   }
 
+  // Id del chat (lo genera la pantalla): une preguntas, herramientas y respuestas para poder ver la conversación completa.
+  const conversacionId = typeof cuerpo.conversacionId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(cuerpo.conversacionId) ? cuerpo.conversacionId : null;
   // Auditoría: lo que la persona le pide al bot (antes de sumar el archivo adjunto).
   const preguntaDePersona = mensajes[mensajes.length - 1].content;
   await registrarAuditoria({
@@ -75,7 +79,7 @@ export async function POST(request: Request) {
     portfolioId: cuerpo.clienteId ?? null,
     portfolioNombre: cuerpo.clienteNombre ?? null,
     titulo: `Le pidió al bot: «${recortar(preguntaDePersona, 140)}»`,
-    detalle: { pregunta: recortar(preguntaDePersona, 1200), conArchivo: Boolean(cuerpo.csv?.texto), cliente: cuerpo.clienteNombre ?? null },
+    detalle: { pregunta: recortar(preguntaDePersona, 1200), conArchivo: Boolean(cuerpo.csv?.texto), cliente: cuerpo.clienteNombre ?? null, conversacion: conversacionId },
   });
 
   const csvTexto = cuerpo.csv?.texto;
@@ -106,6 +110,7 @@ export async function POST(request: Request) {
             actor: session.actor,
             rango,
             clienteId: cuerpo.clienteId ?? null,
+            conversacionId,
             mensajes,
           },
           emitir,

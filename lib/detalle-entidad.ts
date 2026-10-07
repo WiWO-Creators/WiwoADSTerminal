@@ -215,6 +215,13 @@ export type DetalleCampana = {
   presencia?: string | null;
   /** Solo Google (lectura nativa): rotación de anuncios (`OPTIMIZE`, `ROTATE_INDEFINITELY`…). */
   rotacion?: string | null;
+  /** Solo Google Performance Max (lectura nativa): sus grupos de recursos. */
+  gruposDeRecursos?: GrupoDeRecursos[];
+  /** Solo Google (lectura nativa): enlaces de sitio y textos destacados de la campaña. */
+  extensiones?: {
+    sitelinks: Array<{ texto: string; url: string; descripcion1: string; descripcion2: string }>;
+    destacados: string[];
+  };
 };
 
 /**
@@ -1110,12 +1117,36 @@ export function detalleAnuncioLinkedin(fila: Row): DetalleAnuncio | null {
   };
 }
 
+/** Un recurso de un grupo de recursos de Performance Max. */
+export type RecursoDeGrupo = {
+  /** Tipo de recurso de Google: `HEADLINE`, `LONG_HEADLINE`, `DESCRIPTION`, `MARKETING_IMAGE`, `LOGO`, `YOUTUBE_VIDEO`… */
+  campo: string;
+  estado: string | null;
+  texto: string | null;
+  imagenUrl: string | null;
+  videoYoutube: string | null;
+};
+
+/** Grupo de recursos de una campaña Performance Max: lo que hace de «anuncio» en esa campaña. */
+export type GrupoDeRecursos = {
+  id: string;
+  campaignId: string;
+  nombre: string | null;
+  estado: string | null;
+  urlsFinales: string[];
+  path1: string | null;
+  path2: string | null;
+  recursos: RecursoDeGrupo[];
+};
+
 export type DetalleDeCuenta = {
   provider: Platform;
   accountId: string;
   campanas: DetalleCampana[];
   conjuntos: DetalleConjunto[];
   anuncios: DetalleAnuncio[];
+  /** Solo Google con lectura nativa: grupos de recursos de Performance Max. */
+  gruposDeRecursos?: GrupoDeRecursos[];
   /**
    * De dónde salió. `windsor`: solo entidades con actividad en la ventana.
    * `nativa`: la API de la propia plataforma, con todo lo que existe.
@@ -1135,4 +1166,44 @@ export function unicosPorId<T extends { id: string }>(items: T[]): T[] {
     if (!vistos.has(item.id)) vistos.set(item.id, item);
   }
   return [...vistos.values()];
+}
+
+/** Filas de `GAQL_GRUPOS_DE_RECURSOS` y `GAQL_RECURSOS_DE_GRUPO` → grupos de recursos con sus recursos. Parte pura. */
+export function gruposDeRecursosGaql(grupos: Row[], recursos: Row[]): GrupoDeRecursos[] {
+  const porGrupo = new Map<string, RecursoDeGrupo[]>();
+  for (const fila of recursos) {
+    const grupoId = texto(registro(fila.assetGroup).id);
+    const vinculo = registro(fila.assetGroupAsset);
+    const asset = registro(fila.asset);
+    const campo = texto(vinculo.fieldType);
+    if (!grupoId || !campo) continue;
+    porGrupo.set(grupoId, [
+      ...(porGrupo.get(grupoId) ?? []),
+      {
+        campo,
+        estado: texto(vinculo.status),
+        texto: texto(registro(asset.textAsset).text),
+        imagenUrl: texto(registro(registro(asset.imageAsset).fullSize).url),
+        videoYoutube: texto(registro(asset.youtubeVideoAsset).youtubeVideoId),
+      },
+    ]);
+  }
+  const salida: GrupoDeRecursos[] = [];
+  for (const fila of grupos) {
+    const g = registro(fila.assetGroup);
+    const id = texto(g.id);
+    const campaignId = texto(registro(fila.campaign).id);
+    if (!id || !campaignId) continue;
+    salida.push({
+      id,
+      campaignId,
+      nombre: texto(g.name),
+      estado: texto(g.status),
+      urlsFinales: (Array.isArray(g.finalUrls) ? g.finalUrls : []).filter((u): u is string => typeof u === "string" && u !== ""),
+      path1: texto(g.path1),
+      path2: texto(g.path2),
+      recursos: porGrupo.get(id) ?? [],
+    });
+  }
+  return salida;
 }

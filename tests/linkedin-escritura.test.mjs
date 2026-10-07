@@ -105,7 +105,8 @@ test("diferenciasConLoEsperado detecta lo que LinkedIn no dejó como se pidió",
 test("la intención política es obligatoria, no tiene valor por defecto y solo admite los 3 valores de LinkedIn", () => {
   assert.equal(e.planDeCampana(CAMPANA).cuerpo.politicalIntent, "NOT_DECLARED");
   assert.equal(e.planDeCampana({ ...CAMPANA, intencionPolitica: "not_political" }).cuerpo.politicalIntent, "NOT_POLITICAL");
-  const { intencionPolitica: _omitida, ...sinDeclarar } = CAMPANA;
+  const sinDeclarar = { ...CAMPANA };
+  delete sinDeclarar.intencionPolitica;
   assert.throws(() => e.planDeCampana(sinDeclarar), /intención política/);
   assert.throws(() => e.planDeCampana({ ...CAMPANA, intencionPolitica: "NO" }), /intención política/);
 });
@@ -138,7 +139,8 @@ test("el presupuesto total va como totalBudget (grupo o campaña) y se verifica 
 });
 
 test("la campaña admite presupuesto total (con término) o diario, nunca los dos ni ninguno", () => {
-  const { presupuestoDiario: _d, ...base } = CAMPANA;
+  const base = { ...CAMPANA };
+  delete base.presupuestoDiario;
   const total = e.planDeCampana({ ...base, fin: "2099-11-15", presupuestoTotal: { monto: 500, moneda: "usd" } });
   assert.deepEqual(total.cuerpo.totalBudget, { amount: "500", currencyCode: "USD" });
   assert.equal("dailyBudget" in total.cuerpo, false);

@@ -6,10 +6,21 @@ import {
   cancelarSolicitud,
   ErrorDeSolicitud,
   marcarActiva,
+  obtener,
   rechazarSolicitud,
 } from "@/lib/solicitudes";
 
 export const dynamic = "force-dynamic";
+
+/** El detalle de una solicitud: solo la ve quien la creó o quien puede revisarla. */
+export async function GET(_request: Request, contexto: { params: Promise<{ id: string }> }) {
+  const session = await getSession();
+  if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
+  const { id } = await contexto.params;
+  const solicitud = await obtener(session.actor, id);
+  if (!solicitud) return fail("No encontré esa solicitud.", 404);
+  return Response.json({ solicitud }, { headers: { "cache-control": "no-store" } });
+}
 
 /** Una acción sobre una solicitud: `aprobar`, `rechazar` (con `nota`), `cancelar` o `marcar_activa`. */
 export async function POST(request: Request, contexto: { params: Promise<{ id: string }> }) {

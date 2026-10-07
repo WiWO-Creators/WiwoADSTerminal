@@ -19,6 +19,7 @@ import type { AdSummary } from "@/lib/performance-store";
 import type { SugerenciaVista } from "@/lib/sugerencias-store";
 import { cn } from "@/lib/utils";
 import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
+import { ElegirDondeCrear, type DestinoDeCreacion } from "./crear-en";
 import { ImpulsarView } from "./impulsar-view";
 import { ThinkingOrb } from "./ui";
 
@@ -43,6 +44,7 @@ function tipoDe(s: SugerenciaVista): string {
   if (s.accion?.tipo === "contenido") return "Contenido";
   if (s.accion?.tipo === "presupuesto") return "Presupuesto";
   if (s.accion?.tipo === "pausar") return "Pausar";
+  if (s.rule.startsWith("ficha_")) return "Ficha";
   return s.rule.startsWith("medicion_") ? "Medición" : "Revisar";
 }
 
@@ -81,7 +83,10 @@ export function BotonDeSugerencias({
   clienteId,
   rango,
   modo = "boton",
+  onCrearAnuncio,
 }: {
+  /** «Subir contenido»: abre el Constructor para crear un anuncio nuevo dentro de la campaña de la decisión. */
+  onCrearAnuncio?: (destino: DestinoDeCreacion) => void;
   /** `pagina`: las tarjetas ocupan la pantalla (Decisiones); `boton`: un botón que las abre en un diálogo. */
   modo?: "boton" | "pagina";
   /** Cliente que se mira en el Dashboard; sin cliente, las de toda la cartera visible. */
@@ -101,9 +106,11 @@ export function BotonDeSugerencias({
   const [seleccionId, setSeleccionId] = useState<string | null>(null);
   const [reactivando, setReactivando] = useState<SugerenciaVista | null>(null);
   const [revisando, setRevisando] = useState<SugerenciaVista | null>(null);
+  const [creandoAnuncioDe, setCreandoAnuncioDe] = useState<SugerenciaVista | null>(null);
   /** La decisión cuyo cambio se está haciendo en el editor: se resuelve solo si el cambio se aplica. */
   const [editorDe, setEditorDe] = useState<SugerenciaVista | null>(null);
   const aplicadoEnEditor = useRef(false);
+  const cerrarSolucionada = useRef<(id: string) => Promise<void>>(async () => {});
   /** Lo que el Orb hizo con cada decisión: propuso una solución o ya la aplicó. */
   const [orb, setOrb] = useState<Record<string, "propuesta" | "aplicada">>({});
 
@@ -112,6 +119,8 @@ export function BotonDeSugerencias({
       const d = (e as CustomEvent<{ decisionId: string; estado: "propuesta" | "aplicada" }>).detail;
       if (!d) return;
       setOrb((a) => ({ ...a, [d.decisionId]: d.estado }));
+      // El Orb aplicó el cambio con el «sí» de la persona: la decisión queda solucionada.
+      if (d.estado === "aplicada") void cerrarSolucionada.current(d.decisionId);
     }
     window.addEventListener("wiwo:orb-estado", alEstado);
     return () => window.removeEventListener("wiwo:orb-estado", alEstado);
@@ -149,6 +158,19 @@ export function BotonDeSugerencias({
       cancelado = true;
     };
   }, [clienteId, leer]);
+
+  // La lista se vuelve a leer cada minuto y al volver a la pestaña: lo que ya se resolvió (por ejemplo, contenido que se acaba de subir) sale solo.
+  useEffect(() => {
+    const refrescar = () => {
+      if (document.visibilityState === "visible") void leer().catch(() => undefined);
+    };
+    const t = window.setInterval(refrescar, 60_000);
+    document.addEventListener("visibilitychange", refrescar);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", refrescar);
+    };
+  }, [leer]);
 
   const pendientes = datos?.pendientes ?? [];
   // En pantalla completa hay cola con filtros y se elige cuál ver; en el diálogo, siempre la primera.
@@ -220,12 +242,28 @@ export function BotonDeSugerencias({
     });
   }
 
+  /**
+   * «Subir contenido»: la campaña de la tarjeta ya viene elegida. En Meta se abre el flujo de subir o impulsar con esa campaña
+   * y su cuenta cargadas; en Google (y el resto) se abre directo el editor de esa campaña, donde se edita el contenido.
+   */
+  function subirContenido(s: SugerenciaVista) {
+    // Con el Constructor disponible: se crea un anuncio nuevo en la campaña de la decisión y la persona elige la pieza.
+    if (onCrearAnuncio && s.clienteId && s.entityId) setCreandoAnuncioDe(s);
+    else if (s.provider === "meta") setSubiendo(s);
+    else {
+      // La decisión se cierra cuando se aplique un cambio en el editor.
+      setEditorDe(s);
+      aplicadoEnEditor.current = false;
+      void abrirEnEditor(s, false);
+    }
+  }
+
   /** ✓ */
   async function aprobar(s: SugerenciaVista) {
     if (!puede || trabajando) return;
     if (s.accion?.tipo === "contenido") {
       setDx(0);
-      setSubiendo(s);
+      subirContenido(s);
       return;
     }
     if (s.accion?.tipo === "reactivar") {
@@ -257,9 +295,8 @@ export function BotonDeSugerencias({
       `Resuelve esta decisión de ${s.clienteNombre} en ${s.platform}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
       `Diagnóstico: ${s.diagnosis}`,
       `Sugerencia: ${s.proposedAction}`,
-      "Lee primero los datos reales de la campaña y propón el cambio concreto (no cambies nada sin que yo lo apruebe). Si no hace falta ningún cambio, dímelo.",
+      "Responde en máximo 3 líneas: qué pasa de verdad y UNA acción concreta como pregunta corta. Deja la propuesta lista; si digo «sí», se aplica. Si no hace falta ningún cambio, dímelo en una línea.",
     ].join("\n");
-    setOrb((a) => ({ ...a, [s.id]: "propuesta" }));
     window.dispatchEvent(new CustomEvent("wiwo:orb-pedir", { detail: { decisionId: s.id, texto } }));
   }
 
@@ -272,6 +309,17 @@ export function BotonDeSugerencias({
       quitar(s);
     }
   }
+
+  useEffect(() => {
+    cerrarSolucionada.current = async (id: string) => {
+      const s = pendientes.find((x) => x.id === id);
+      if (!s) return;
+      if (await resolver(s, "approve")) {
+        toast.success("El Orb solucionó la decisión");
+        quitar(s);
+      }
+    };
+  });
 
   /** El editor se cerró: si no se aplicó nada, la decisión sigue pendiente y se dice. */
   function alCerrarEditor() {
@@ -581,13 +629,13 @@ export function BotonDeSugerencias({
                     <button
                       type="button"
                       onPointerDown={(ev) => ev.stopPropagation()}
-                      onClick={() => setSubiendo(actual)}
+                      onClick={() => subirContenido(actual)}
                       className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
                     >
                       Subir contenido a esta campaña
                     </button>
                   )}
-                  {puede && (
+                  {(
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -826,6 +874,7 @@ export function BotonDeSugerencias({
             clienteId={subiendo.clienteId}
             puedeAprobar={puede}
             campanaInicial={subiendo.entityId ?? undefined}
+            cuentaInicial={subiendo.accountId ?? undefined}
             onHecho={() => {
               // Se cierra la decisión solo cuando el contenido ya se envió.
               const s = subiendo;
@@ -889,6 +938,14 @@ export function BotonDeSugerencias({
         puedeAprobar={puede}
         onOpenChange={(a) => !a && alCerrarEditor()}
         onAplicado={() => void alAplicarEnEditor()}
+      />
+
+      <ElegirDondeCrear
+        nivel={creandoAnuncioDe ? "anuncio" : null}
+        clienteId={creandoAnuncioDe?.clienteId ?? ""}
+        inicial={creandoAnuncioDe?.accountId && creandoAnuncioDe.entityId ? { accountId: creandoAnuncioDe.accountId, campaignId: creandoAnuncioDe.entityId } : undefined}
+        onCerrar={() => setCreandoAnuncioDe(null)}
+        onElegir={(destino) => onCrearAnuncio?.(destino)}
       />
 
       <AlertDialog open={revisando !== null} onOpenChange={(a) => !a && setRevisando(null)}>

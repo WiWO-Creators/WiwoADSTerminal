@@ -10,6 +10,7 @@ import {
   ETIQUETAS_DE_CAMBIO,
   type CategoriaDeAuditoria,
 } from "@/lib/auditoria-pura";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { EjecucionesView } from "./ejecuciones-view";
 import { PantallaDeCarga, StatCard, Surface } from "./ui";
@@ -44,13 +45,14 @@ const campo = "h-10 rounded-full border border-border bg-background px-3 text-sm
 const fecha = (ms: number) => new Date(ms).toLocaleString("es-CL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 /** Los detalles que conviene leer de un vistazo: antes y después, el pedido, el motivo, lo que falló. */
-function Detalle({ e }: { e: Evento }) {
+function Detalle({ e, onConversacion }: { e: Evento; onConversacion?: (id: string) => void }) {
   const d = e.detalle ?? {};
   const cambios = (Array.isArray(d.cambios) ? d.cambios : []) as Cambio[];
   const pasos = (Array.isArray(d.pasos) ? d.pasos : []) as Array<{ accion?: string; etiqueta?: string; ok?: boolean; error?: string | null }>;
   const texto = (v: unknown) => (typeof v === "string" && v ? v : null);
   const filas: Array<[string, string]> = [];
   if (texto(d.pregunta)) filas.push(["Pedido", d.pregunta as string]);
+  if (texto(d.respuesta)) filas.push(["Respuesta del bot", d.respuesta as string]);
   if (texto(d.herramienta)) filas.push(["Herramienta", d.herramienta as string]);
   if (d.entrada && typeof d.entrada === "object") filas.push(["Datos que usó", JSON.stringify(d.entrada)]);
   if (texto(d.resultado)) filas.push(["Resultado", d.resultado as string]);
@@ -96,11 +98,86 @@ function Detalle({ e }: { e: Evento }) {
           {l.etiqueta || "Revisar en la plataforma"}
         </a>
       ))}
+      {e.categoria === "asistente" && texto(d.conversacion) && onConversacion && (
+        <button type="button" onClick={() => onConversacion(d.conversacion as string)} className="rounded-full border border-brand/40 px-3 py-1.5 text-xs font-bold text-brand hover:bg-brand/10">
+          Ver la conversación completa
+        </button>
+      )}
       {filas.length === 0 && cambios.length === 0 && pasos.length === 0 && enlaces.length === 0 && <p className="text-foreground/50">Sin más detalle.</p>}
       <p className="text-[0.65rem] text-foreground/40">
         {e.actor.email} · {fecha(e.cuando)}
       </p>
     </div>
+  );
+}
+
+/** El chat completo con el bot: lo que se preguntó, lo que el bot usó y lo que respondió, en orden. */
+function ConversacionDelBot({ id, onCerrar }: { id: string | null; onCerrar: () => void }) {
+  const [eventos, setEventos] = useState<Evento[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!id) return;
+    let vivo = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- limpia lo anterior al abrir otra conversación
+    setEventos(null);
+    setError(null);
+    fetch(`/api/auditoria?conversacion=${encodeURIComponent(id)}`, { cache: "no-store" })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(j?.error ?? "No se pudo cargar la conversación");
+        if (vivo) setEventos(((j?.eventos ?? []) as Evento[]).slice().sort((a, b) => a.cuando - b.cuando));
+      })
+      .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : "No se pudo cargar la conversación"));
+    return () => {
+      vivo = false;
+    };
+  }, [id]);
+  const quien = eventos?.[0]?.actor;
+  return (
+    <Dialog open={id !== null} onOpenChange={(a) => !a && onCerrar()}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Conversación con el bot</DialogTitle>
+          <DialogDescription>{quien ? `${quien.nombre ?? quien.email} · ${eventos?.[0] ? fecha(eventos[0].cuando) : ""}` : "Lo preguntado, lo que el bot usó y lo que respondió."}</DialogDescription>
+        </DialogHeader>
+        {error && <p className="text-sm text-danger">{error}</p>}
+        {!eventos && !error && <p className="text-sm text-muted-foreground">Cargando…</p>}
+        {eventos && eventos.length === 0 && <p className="text-sm text-muted-foreground">No hay registro de esta conversación.</p>}
+        <div className="space-y-3">
+          {(eventos ?? []).map((e) => {
+            const d = (e.detalle ?? {}) as Record<string, unknown>;
+            if (e.accion === "pregunta") {
+              return (
+                <div key={e.id} className="flex flex-col items-end gap-1">
+                  <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl bg-primary px-3.5 py-2.5 text-sm font-medium text-primary-foreground">{String(d.pregunta ?? e.titulo)}</div>
+                  <span className="text-[0.65rem] text-foreground/40">{e.actor.nombre ?? e.actor.email} · {fecha(e.cuando)}</span>
+                </div>
+              );
+            }
+            if (e.accion === "respuesta") {
+              return (
+                <div key={e.id} className="flex flex-col items-start gap-1">
+                  <div className="max-w-[92%] whitespace-pre-wrap rounded-2xl bg-field px-3.5 py-2.5 text-sm leading-6 text-foreground">{String(d.respuesta ?? e.titulo)}</div>
+                  {Array.isArray(d.propuestasDetalle) && d.propuestasDetalle.length > 0 && (
+                    <ul className="max-w-[92%] space-y-1 rounded-xl border border-brand/30 bg-brand/5 px-3 py-2 text-xs leading-5 text-foreground/80">
+                      <li className="font-bold text-foreground">Propuestas que dejó el bot</li>
+                      {(d.propuestasDetalle as unknown[]).map((x, i) => <li key={i}>• {String(x)}</li>)}
+                    </ul>
+                  )}
+                  <span className="text-[0.65rem] text-foreground/40">Bot · {fecha(e.cuando)}{typeof d.propuestas === "number" ? ` · dejó ${d.propuestas} propuesta(s)` : ""}</span>
+                </div>
+              );
+            }
+            return (
+              <p key={e.id} className={cn("text-[0.7rem] leading-5", e.resultado === "error" ? "text-danger" : "text-foreground/45")}>
+                ⚙ {e.titulo}
+                {d.entrada && typeof d.entrada === "object" ? ` · ${JSON.stringify(d.entrada).slice(0, 160)}` : ""}
+              </p>
+            );
+          })}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -120,6 +197,22 @@ export function AuditoriaView() {
   const [datos, setDatos] = useState<{ eventos: Evento[]; resumen: Resumen } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [abierto, setAbierto] = useState<string | null>(null);
+  const [conversacion, setConversacion] = useState<string | null>(null);
+  // Todos los clientes y todas las personas del equipo, no solo los que aparecen en lo que se está viendo.
+  const [todosLosClientes, setTodosLosClientes] = useState<Array<[string, string]>>([]);
+  const [todasLasPersonas, setTodasLasPersonas] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/clientes", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { portfolios?: Array<{ id: string; name: string; archivado?: boolean }> } | null) =>
+        setTodosLosClientes((j?.portfolios ?? []).filter((p) => !p.archivado).map((p) => [p.id, p.name] as [string, string]).sort((a, b) => a[1].localeCompare(b[1], "es"))),
+      )
+      .catch(() => undefined);
+    fetch("/api/equipo", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { members?: Array<{ email: string }> } | null) => setTodasLasPersonas((j?.members ?? []).map((m) => m.email).sort()))
+      .catch(() => undefined);
+  }, []);
 
   const cargar = useCallback(async () => {
     if (pestana === "tecnico") return;
@@ -150,8 +243,11 @@ export function AuditoriaView() {
     return () => window.clearInterval(t);
   }, [cargar]);
 
-  const personas = useMemo(() => [...new Set((datos?.eventos ?? []).map((e) => e.actor.email))].sort(), [datos]);
-  const clientes = useMemo(() => [...new Map((datos?.eventos ?? []).filter((e) => e.cliente).map((e) => [e.cliente!.id, e.cliente!.nombre ?? e.cliente!.id])).entries()], [datos]);
+  const personas = useMemo(() => [...new Set([...todasLasPersonas, ...(datos?.eventos ?? []).map((e) => e.actor.email)])].sort(), [datos, todasLasPersonas]);
+  const clientes = useMemo(
+    () => [...new Map([...todosLosClientes, ...(datos?.eventos ?? []).filter((e) => e.cliente).map((e) => [e.cliente!.id, e.cliente!.nombre ?? e.cliente!.id] as [string, string])]).entries()],
+    [datos, todosLosClientes],
+  );
   const resumen = datos?.resumen;
 
   return (
@@ -253,13 +349,14 @@ export function AuditoriaView() {
                     </span>
                     <ChevronDown className={cn("mt-1 size-4 shrink-0 text-foreground/40 transition-transform", abierta && "rotate-180")} />
                   </button>
-                  {abierta && <Detalle e={e} />}
+                  {abierta && <Detalle e={e} onConversacion={setConversacion} />}
                 </Surface>
               );
             })}
           </div>
         </>
       )}
+      <ConversacionDelBot id={conversacion} onCerrar={() => setConversacion(null)} />
     </div>
   );
 }

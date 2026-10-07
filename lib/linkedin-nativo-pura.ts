@@ -29,6 +29,8 @@ export const ALCANCES = {
    * 2026-10-07: LinkedIn los acepta para esta app sin pedir ningún otro producto.
    */
   anuncios: ["r_organization_admin", "r_organization_social", "w_organization_social"],
+  /** Perfil básico: solo el nombre de quien autorizó, para mostrar con qué cuenta de LinkedIn se conectó. Está entre los alcances de la app. */
+  perfil: ["r_basicprofile"],
   /** Lead Sync API: leer las respuestas de los formularios. */
   leads: ["r_marketing_leadgen_automation"],
 } as const;

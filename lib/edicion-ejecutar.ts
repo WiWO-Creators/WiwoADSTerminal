@@ -1,8 +1,13 @@
+import { CAMPOS_DE_CONTENIDO, marcarContenidoRenovado } from "@/lib/contenido-renovado";
 import type { PasoEjecutado } from "@/lib/constructor-ejecutar";
 import type { CambiosRsa, CredencialesGoogle } from "@/lib/google-ads-nativo";
 import {
   actualizarAnuncioRsa,
   actualizarCampanaGoogle,
+  actualizarExtensionesCampana,
+  actualizarGrupoDeRecursos,
+  type CambiosExtensiones,
+  type CambiosGrupoDeRecursos,
   GoogleAdsNativoError,
   type CambiosCampanaGoogle,
 } from "@/lib/google-ads-nativo";
@@ -12,7 +17,7 @@ import { diferenciasConLoEsperado, planDeActualizacion, rutaDeEntidad, type Camb
 import { enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
 import { ErrorDeLinkedin } from "@/lib/linkedin-nativo-pura";
 import type { NivelEntidad, Platform } from "@/lib/plataformas";
-import { executeWindsorAction } from "@/lib/windsor";
+import { ejecutarConRespaldo } from "@/lib/windsor-respaldo";
 
 /** Acción de Windsor que ACTIVA cada nivel (Google y Meta). LinkedIn no tiene una receta verificada. */
 function activacion(
@@ -154,7 +159,11 @@ export async function ejecutarPasosDeEdicion({
       } else {
         try {
           const r =
-            paso.action === "ads:update_campaign"
+            paso.action === "ads:update_campaign_assets"
+              ? await actualizarExtensionesCampana(credencialesGoogle, accountId, String(paso.params.campaign_id), paso.params.cambios as CambiosExtensiones)
+              : paso.action === "ads:update_asset_group"
+              ? await actualizarGrupoDeRecursos(credencialesGoogle, accountId, String(paso.params.asset_group_id), paso.params.cambios as CambiosGrupoDeRecursos)
+              : paso.action === "ads:update_campaign"
               ? await actualizarCampanaGoogle(
                   credencialesGoogle,
                   accountId,
@@ -170,7 +179,7 @@ export async function ejecutarPasosDeEdicion({
         }
       }
     } else {
-      const r = await executeWindsorAction(provider, accountId, paso.action, paso.params);
+      const r = await ejecutarConRespaldo(provider, accountId, paso.action, paso.params);
       ok = r.ok;
       error = r.ok ? null : (r.error ?? "Windsor rechazó el cambio");
       raw = r.raw;
@@ -202,7 +211,7 @@ export async function ejecutarPasosDeEdicion({
     } else if (!receta) {
       resultadoPausa = { ok: false, error: "No se pudo determinar cómo pausar esto." };
     } else {
-      const r = await executeWindsorAction(provider, accountId, receta.action, receta.params);
+      const r = await ejecutarConRespaldo(provider, accountId, receta.action, receta.params);
       resultadoPausa = { ok: r.ok, error: r.ok ? null : (r.error ?? null) };
       realizados.push({
         platform: provider,
@@ -226,7 +235,7 @@ export async function ejecutarPasosDeEdicion({
   } else if (activarAlFinal) {
     const receta = activacion(provider, nivel, ids);
     if (!receta) return { ok: false, pasos: realizados, pausa: null };
-    const r = await executeWindsorAction(provider, accountId, receta.action, receta.params);
+    const r = await ejecutarConRespaldo(provider, accountId, receta.action, receta.params);
     realizados.push({
       platform: provider,
       action: receta.action,
@@ -239,5 +248,9 @@ export async function ejecutarPasosDeEdicion({
     if (!r.ok) return { ok: false, pasos: realizados, pausa: null };
   }
 
+  // Si lo aplicado tocó contenido (texto, título, imagen, URL, botón, titulares…), la campaña cuenta como renovada ahora.
+  if (pasos.some((p) => p.campos.some((c) => CAMPOS_DE_CONTENIDO.has(String(c))))) {
+    await marcarContenidoRenovado(provider, ids.campaignId ?? (nivel === "campana" ? ids.id : null));
+  }
   return { ok: true, pasos: realizados, pausa: resultadoPausa };
 }

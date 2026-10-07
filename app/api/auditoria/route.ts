@@ -9,7 +9,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
-  if (!can(session.actor, "ver_operacion")) return fail("No tienes permiso para ver la auditoría", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
+  // La auditoría es de los Directores y Admins (quien aprueba presupuesto), no de supervisores ni analistas.
+  if (!can(session.actor, "aprobar_presupuesto")) return fail("La auditoría es de los Directores y Admins.", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   const p = new URL(request.url).searchParams;
   const dias = Number(p.get("dias") ?? 0);
   const datos = await listarAuditoria(session.actor, {
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
     texto: p.get("q") || undefined,
     desde: Number.isFinite(dias) && dias > 0 ? Date.now() - dias * 86_400_000 : undefined,
     soloImportantes: p.get("importantes") === "1",
+    conversacion: p.get("conversacion") || undefined,
     limite: 300,
   });
   return Response.json(datos, { headers: { "cache-control": "no-store" } });

@@ -68,6 +68,8 @@ export type DashboardUser = {
   email: string;
   displayName: string;
   role: string;
+  /** Cargo en el equipo (Admin, Director, Director Digital, Digital Lead, Digital Creator), si lo tiene. */
+  cargo?: string | null;
   /** Portafolios asignados a esta persona. Sirve para preseleccionar el
    * cliente al entrar (el primero de la lista), no solo para restringir
    * el alcance de quien ya está acotado a `portfolioIds` — un rol que ve
@@ -514,7 +516,7 @@ async function upsertUser(
   // control de quién pertenece al equipo.
   const row = await db
     .prepare(
-      "SELECT id, email, display_name, role FROM users WHERE id = ? LIMIT 1",
+      "SELECT id, email, display_name, role, cargo FROM users WHERE id = ? LIMIT 1",
     )
     .bind(identity.id)
     .first<UserRow>();
@@ -525,6 +527,7 @@ async function upsertUser(
     email: row.email,
     displayName: row.display_name,
     role: row.role,
+    cargo: (row as { cargo?: string | null }).cargo ?? null,
     portfolioIds: identity.portfolioIds,
   };
 }

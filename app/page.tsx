@@ -50,6 +50,8 @@ export default async function Home({
     <WiwoDashboard
       signOutPath={signOutPath}
       initialSnapshot={initialSnapshot}
+      verComo={session.verComo ?? null}
+      puedeVerComo={(session.realActor ?? session.actor).role === "admin"}
       initialView={params.view === "integrations" ? "integrations" : session.actor.role === "client" ? "control" : "decisiones"}
     />
   );

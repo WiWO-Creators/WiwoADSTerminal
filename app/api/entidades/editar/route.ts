@@ -6,7 +6,7 @@ import { ejecutarPasosDeEdicion } from "@/lib/edicion-ejecutar";
 import { hayAlgoQueAplicar, verificarCambios, type AntesDeEdicion, type CambiosEdicion } from "@/lib/edicion-plan";
 import { armarAntes, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servicio";
 import { actualizarAnuncioRsa,
-  actualizarCampanaGoogle, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
+  actualizarCampanaGoogle, actualizarExtensionesCampana, actualizarGrupoDeRecursos, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { etiquetasDeCambios, resumenDeCambios } from "@/lib/auditoria-pura";
@@ -77,6 +77,8 @@ export async function POST(request: Request) {
       if (error instanceof ErrorDeSolicitud) return fail(error.message, error.status);
       if (error instanceof ErrorDeEdicion) return Response.json({ error: error.message }, { status: error.status, headers: NO_STORE });
       console.error("WiWO.ADS solicitar edición", error);
+      // Sin poder leer lo publicado (Windsor o la plataforma no respondieron) no se arma el cambio: se dice y no se envía nada.
+      if (error instanceof WindsorError) return fail("No se pudo leer lo publicado en la plataforma en este momento, así que no se envió nada. Intenta de nuevo en un rato.", 502);
       return fail("No se pudo enviar el cambio a revisión", 500);
     }
   }
@@ -106,7 +108,11 @@ export async function POST(request: Request) {
       const nativo = plan.pasos.find((p) => p.via === "nativa");
       if (nativo && credencialesGoogle && bloqueantes.length === 0) {
         try {
-          if (nativo.action === "ads:update_campaign") {
+          if (nativo.action === "ads:update_campaign_assets") {
+            await actualizarExtensionesCampana(credencialesGoogle, accountId, String(nativo.params.campaign_id), nativo.params.cambios as never, { validateOnly: true });
+          } else if (nativo.action === "ads:update_asset_group") {
+            await actualizarGrupoDeRecursos(credencialesGoogle, accountId, String(nativo.params.asset_group_id), nativo.params.cambios as never, { validateOnly: true });
+          } else if (nativo.action === "ads:update_campaign") {
             await actualizarCampanaGoogle(credencialesGoogle, accountId, String(nativo.params.campaign_id), nativo.params.cambios as never, {
               validateOnly: true,
             });

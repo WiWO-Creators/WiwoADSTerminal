@@ -27,3 +27,14 @@ export function puedeModificarPorJerarquia(cargoActor: string | null | undefined
   if (mio >= NIVELES_DE_CARGO.admin) return true;
   return mio > nivelDeCargo(cargoObjetivo);
 }
+
+/** Cómo se llama una persona en la pantalla: su cargo (Admin, Director, Director Digital, Digital Lead, Digital Creator) y, sin cargo, su rol. */
+export function etiquetaDeCargo(role: string, cargo: string | null | undefined): string {
+  const nivel = nivelDeCargo(cargo);
+  if (nivel === NIVELES_DE_CARGO.admin) return "Admin";
+  if (nivel === NIVELES_DE_CARGO.director) return "Director";
+  if (nivel === NIVELES_DE_CARGO.directorDigital) return "Director Digital";
+  if (nivel === NIVELES_DE_CARGO.lead) return "Digital Lead";
+  if (nivel === NIVELES_DE_CARGO.creator) return "Digital Creator";
+  return role === "admin" ? "Admin" : role === "supervisor" ? "Digital Lead" : role === "analyst" ? "Digital Creator" : role === "client" ? "Cliente" : role;
+}

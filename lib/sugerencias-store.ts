@@ -26,6 +26,7 @@ import {
   type Sugerencia,
   sugerenciasDeContenido,
   type EntradaDeContenido,
+  DIAS_SIN_CONTENIDO,
   sugerenciasDeCampanaApagada,
   type EntradaDeCampanaApagada,
 } from "@/lib/sugerencias";
@@ -33,7 +34,9 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { recortar } from "@/lib/auditoria-pura";
 import { ultimoAnuncioGooglePorCampana } from "@/lib/google-ads-nativo";
 import { accesoNativoGoogle } from "@/lib/integration-store";
+import { contenidoRenovadoEn } from "@/lib/contenido-renovado";
 import { campanasVivasDeMeta, metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
+import { sugerenciasDeFicha, type EntradaDeFicha } from "@/lib/sugerencias-ficha-pura";
 import { idDeCuentaMeta, soloVigentes, type CampanasVivasPorCuenta } from "@/lib/sugerencias-verificacion-pura";
 
 export class ErrorDeSugerencias extends Error {
@@ -291,6 +294,24 @@ export async function evaluarSugerencias(
     }
   }
 
+  // Ficha: datos del cliente que faltan y estorban (presupuesto, KPI, Página, Instagram, GA4, GTM).
+  const entradasDeFicha: EntradaDeFicha[] = [];
+  for (const c of clientes) {
+    const p = metasPorId.get(c.id);
+    if (!p) continue;
+    entradasDeFicha.push({
+      cliente: { id: c.id, nombre: c.nombre },
+      tieneMeta: Object.values(p.accountProviders).includes("meta"),
+      pageId: p.pageId,
+      instagramId: p.instagramId,
+      kpiPrincipal: p.kpiPrincipal,
+      presupuestoMensual: Boolean(p.monthlyBudgetMicros),
+      metaDeCpaORoas: Boolean(p.targetCpaMicros || p.targetRoas),
+      ga4: Boolean(p.ga4PropertyId),
+      gtmEstado: p.gtmEstado,
+    });
+  }
+
   // Contenido: campañas de Meta activas cuyo último anuncio es viejo. Una lectura por cuenta; si falla, no se sugiere nada.
   const entradasDeContenido: EntradaDeContenido[] = [];
   if (metaNativoConfigurado()) {
@@ -367,9 +388,29 @@ export async function evaluarSugerencias(
     }
   }
 
+  // Lo que se renovó desde WiWO.ADS cuenta como contenido nuevo (la plataforma tarda en reflejarlo en su historial). Una campaña con
+  // contenido al día no se sugiere y, si ya tenía la decisión pendiente, se retira.
+  const limiteDeEdad = ahora.getTime() - DIAS_SIN_CONTENIDO * 86_400_000;
+  const alDia: EntradaDeContenido[] = [];
+  for (const e of entradasDeContenido) {
+    const renovado = await contenidoRenovadoEn(e.provider, e.campanaId);
+    if (renovado && renovado > (e.ultimoAnuncio ?? 0)) {
+      e.ultimoAnuncio = renovado;
+      e.soloCota = false;
+    }
+    if (e.ultimoAnuncio !== null && !e.soloCota && e.ultimoAnuncio > limiteDeEdad) alDia.push(e);
+  }
+  for (const e of alDia) {
+    await getRawDb()
+      .prepare("DELETE FROM decisions WHERE status = 'pending' AND rule = 'contenido_desactualizado' AND entity_id = ? AND provider = ?")
+      .bind(e.campanaId, e.provider)
+      .run();
+  }
+  const entradasDeContenidoVigentes = entradasDeContenido.filter((e) => !alDia.includes(e));
+
   const candidatasSinVerificar = [
     ...sugerenciasDeCampanaApagada(entradasApagadas, ahora),
-    ...sugerenciasDeContenido(entradasDeContenido, ahora),
+    ...sugerenciasDeContenido(entradasDeContenidoVigentes, ahora),
     ...generarSugerencias(
     clientes,
     // Solo plataformas donde el cambio se puede aplicar: LinkedIn se lee, pero no se escribe.
@@ -379,6 +420,7 @@ export async function evaluarSugerencias(
     ),
     ...sugerenciasDePresupuesto(entradasDePresupuesto, ahora),
     ...sugerenciasDeMedicion(entradasDeMedicion, ahora),
+    ...sugerenciasDeFicha(entradasDeFicha, ahora),
   ];
 
   // Windsor va horas atrás: lo de Meta se confirma contra la plataforma antes de mostrarse. Si Meta no responde, se conserva.
@@ -562,7 +604,7 @@ export async function listarPendientesDeAlcance(
   if (!todos && propios.length === 0) return { pendientes: [], puedeResolver: can(actor, "aprobar_cambios") };
   const filtroAlcance = todos ? "" : `AND portfolio_id IN (${propios.map(() => "?").join(",")})`;
   // Las advertencias de GA4 y de medición son de los Directores (administradores).
-  const filtroMedicion = can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%'";
+  const filtroMedicion = can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%' AND rule NOT LIKE 'ficha_%'";
   const filas = await getRawDb()
     .prepare(
       `SELECT ${COLUMNAS} FROM decisions
@@ -595,7 +637,7 @@ export async function listarSugerencias(
     db
       .prepare(
         `SELECT ${COLUMNAS} FROM decisions
-         WHERE ${dueno} AND status = 'pending' AND expires_at > ? ${can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%'"}
+         WHERE ${dueno} AND status = 'pending' AND expires_at > ? ${can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%' AND rule NOT LIKE 'ficha_%'"}
            AND (snoozed_until IS NULL OR snoozed_until <= ?)
          ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
            generated_at DESC`,

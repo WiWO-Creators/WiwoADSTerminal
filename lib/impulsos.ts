@@ -1,3 +1,4 @@
+import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
 /**
  * «Impulsa estos links en el conjunto o campaña X»: resuelve los links a publicaciones reales de la Página y de
  * Instagram del cliente, encuentra el destino por nombre y deja las solicitudes listas para que un supervisor las apruebe.
@@ -148,7 +149,7 @@ export async function solicitarImpulsos(
   }
 
   // 2) Links → publicaciones reales de la Página y de Instagram del cliente.
-  const pageId = cliente.accountPages[elegido.accountId] ?? cliente.pageId;
+  const pageId = await paginaDeLaCuenta(cliente, elegido.accountId);
   if (!pageId) return vacio("La cuenta de Meta de este cliente no tiene una Página de Facebook asociada.");
   const desde = isoHaceDias(DIAS_ATRAS);
   const hasta = isoHaceDias(0);

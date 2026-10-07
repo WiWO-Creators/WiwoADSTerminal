@@ -64,9 +64,10 @@ function credenciales(): { clientId: string; clientSecret: string } {
 }
 
 /** Alcances según los productos aprobados. Pedir uno no aprobado hace fallar toda la autorización. */
-export function alcancesSolicitados(productos: { leads?: boolean; administrar?: boolean; anuncios?: boolean } = {}): string[] {
+export function alcancesSolicitados(productos: { leads?: boolean; administrar?: boolean; anuncios?: boolean; perfil?: boolean } = {}): string[] {
   return [
     ...ALCANCES.lectura,
+    ...(productos.perfil ? ALCANCES.perfil : []),
     ...(productos.administrar ? ALCANCES.administrar : []),
     ...(productos.anuncios ? ALCANCES.anuncios : []),
     ...(productos.leads ? ALCANCES.leads : []),
@@ -102,6 +103,22 @@ export async function renovarTokenDeLinkedin(refreshToken: string): Promise<Toke
 }
 
 /** GET a la API REST de LinkedIn. `ruta` ya viene armada por `linkedin-nativo-pura.ts` (Rest.li no admite re-codificarla). */
+/**
+ * El nombre de quien autorizó (necesita `r_basicprofile`). Es solo informativo: si LinkedIn no lo entrega, devuelve `null` y la
+ * conexión sigue igual. Usa la ruta clásica `/v2/me`, que no lleva la cabecera de versión de las rutas nuevas.
+ */
+export async function nombreDeQuienAutorizo(accessToken: string): Promise<string | null> {
+  try {
+    const respuesta = await fetch(`${BASE}/v2/me`, { cache: "no-store", signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS), headers: { authorization: `Bearer ${accessToken}` } });
+    if (!respuesta.ok) return null;
+    const j = (await respuesta.json().catch(() => null)) as { localizedFirstName?: string; localizedLastName?: string } | null;
+    const nombre = [j?.localizedFirstName, j?.localizedLastName].filter((x): x is string => typeof x === "string" && x.trim() !== "").join(" ").trim();
+    return nombre || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function leerDeLinkedin(ruta: string, accessToken: string): Promise<unknown> {
   const respuesta = await fetch(`${BASE}${ruta}`, {
     cache: "no-store",

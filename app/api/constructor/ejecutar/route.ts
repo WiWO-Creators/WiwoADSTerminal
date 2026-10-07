@@ -1,3 +1,4 @@
+import { marcarContenidoRenovado } from "@/lib/contenido-renovado";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
@@ -172,6 +173,7 @@ export async function POST(request: Request) {
   );
 
   await registrarEjecucion(draft, session.actor.email, realizados, todoBien);
+  if (todoBien && draft.existingCampaign) await marcarContenidoRenovado(draft.existingCampaign.platform, draft.existingCampaign.campaignId);
   await registrarAuditoria({
     categoria: "creacion",
     accion: todoBien ? "publicada" : "fallida",

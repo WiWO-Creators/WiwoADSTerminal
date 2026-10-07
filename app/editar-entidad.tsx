@@ -16,6 +16,8 @@ import type {
 } from "@/lib/detalle-entidad";
 import type { CambiosEdicion, CambioVisible, Problema, Verificacion } from "@/lib/edicion-plan";
 import { formatearPalabraClave } from "@/lib/palabras-clave";
+import { DIAS_DE_LA_SEMANA } from "@/lib/horario-meta-pura";
+import { FORMATOS_META, formatosDeSegmentacion, META_SURFACES, POSICIONES_META, REDES_CON_POSICIONES, type FormatoMeta, type RedConPosiciones } from "@/lib/formatos-meta-pura";
 import type { NivelEntidad } from "@/lib/plataformas";
 import { atribucionesAdmitidas } from "@/lib/constructor";
 import { OrbeDeBoton } from "./ui";
@@ -92,6 +94,17 @@ function inicial(p: Props): Record<string, string> {
       v.cuotaPorcentaje = "50";
       v.presencia = p.campana.presencia === "PRESENCE" ? "presencia" : p.campana.presencia === "PRESENCE_OR_INTEREST" ? "presencia_o_interes" : "";
       v.plantillaSeguimiento = p.campana.urlSeguimiento ?? "";
+      v.sitelinks = (p.campana.extensiones?.sitelinks ?? []).map((e) => [e.texto, e.url, e.descripcion1, e.descripcion2].join(" | ")).join("\n");
+      v.destacados = (p.campana.extensiones?.destacados ?? []).join("\n");
+      (p.campana.gruposDeRecursos ?? []).forEach((g, i) => {
+        const de = (campo: string) => g.recursos.filter((r) => r.campo === campo && r.texto).map((r) => r.texto as string).join("\n");
+        v[`gr${i}:titulares`] = de("HEADLINE");
+        v[`gr${i}:largos`] = de("LONG_HEADLINE");
+        v[`gr${i}:desc`] = de("DESCRIPTION");
+        v[`gr${i}:url`] = g.urlsFinales[0] ?? "";
+        v[`gr${i}:path1`] = g.path1 ?? "";
+        v[`gr${i}:path2`] = g.path2 ?? "";
+      });
     }
     v.estrategiaPuja = p.campana.puja.estrategia ?? "";
     v.categoriaEspecial = p.campana.categoriasEspeciales[0] ?? "";
@@ -112,6 +125,8 @@ function inicial(p: Props): Record<string, string> {
       ? "todos"
       : c.segmentacion.generos.length === 1 ? (c.segmentacion.generos[0] === 1 ? "hombres" : "mujeres") : "todos";
     v.plataformas = (c.segmentacion?.plataformas ?? []).join(",");
+    v.formatos = formatosDeSegmentacion(c.segmentacionCruda).join(",");
+    for (const red of REDES_CON_POSICIONES) v[`pos:${red}`] = (c.segmentacion?.posiciones?.[red] ?? []).join(",");
     if (p.provider === "meta") {
       const cruda = (c.segmentacionCruda ?? {}) as Record<string, unknown>;
       const ids = (lista: unknown): string[] => (Array.isArray(lista) ? lista : []).map((x) => String((x as { id?: unknown }).id ?? "")).filter(Boolean);
@@ -213,6 +228,37 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
     }
     if (cambio("presencia") && ahora.presencia) c.presencia = ahora.presencia as CambiosEdicion["presencia"];
     if (cambio("plantillaSeguimiento")) c.plantillaSeguimiento = ahora.plantillaSeguimiento ?? "";
+    // Enlaces de sitio y textos destacados: las listas completas que deben quedar.
+    if (p.campana?.extensiones && (cambio("sitelinks") || cambio("destacados"))) {
+      const filas = (t: string | undefined) => (t ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
+      c.extensiones = {
+        ...(cambio("sitelinks")
+          ? {
+              sitelinks: filas(ahora.sitelinks).map((linea) => {
+                const [texto = "", url = "", descripcion1 = "", descripcion2 = ""] = linea.split("|").map((x) => x.trim());
+                return { texto, url, descripcion1, descripcion2 };
+              }),
+            }
+          : {}),
+        ...(cambio("destacados") ? { destacados: filas(ahora.destacados) } : {}),
+      };
+    }
+    // Performance Max: textos y URL del grupo de recursos (de a un grupo por cambio).
+    const lineas = (t: string | undefined) => (t ?? "").split("\n").map((x) => x.trim()).filter(Boolean);
+    for (const [i, g] of (p.campana?.gruposDeRecursos ?? []).entries()) {
+      const k = (n: string) => `gr${i}:${n}`;
+      if (!["titulares", "largos", "desc", "url", "path1", "path2"].some((n) => cambio(k(n)))) continue;
+      c.grupoDeRecursos = {
+        id: g.id,
+        ...(cambio(k("titulares")) ? { titulares: lineas(ahora[k("titulares")]) } : {}),
+        ...(cambio(k("largos")) ? { titulosLargos: lineas(ahora[k("largos")]) } : {}),
+        ...(cambio(k("desc")) ? { descripciones: lineas(ahora[k("desc")]) } : {}),
+        ...(cambio(k("url")) ? { urlsFinales: lineas(ahora[k("url")]) } : {}),
+        ...(cambio(k("path1")) ? { path1: ahora[k("path1")] ?? "" } : {}),
+        ...(cambio(k("path2")) ? { path2: ahora[k("path2")] ?? "" } : {}),
+      };
+      break;
+    }
   }
   if (cambio("estrategiaPuja") && ahora.estrategiaPuja) c.estrategiaPuja = ahora.estrategiaPuja;
   if (cambio("categoriaEspecial")) c.categoriaEspecial = ahora.categoriaEspecial ?? "";
@@ -225,6 +271,16 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
     if (cambio("audExcluir")) c.audienciasExcluir = csv(ahora.audExcluir);
     if (cambio("atribucion") && ahora.atribucion) c.atribucion = ahora.atribucion as CambiosEdicion["atribucion"];
   }
+  if (cambio("horModo") || cambio("horDias") || cambio("horDesde") || cambio("horHasta")) {
+    if (ahora.horModo === "todo") c.horario = [];
+    else if (ahora.horModo === "tramo") {
+      c.horario = [{ dias: (ahora.horDias ?? "").split(",").filter(Boolean).map(Number), desde: Number(ahora.horDesde ?? 9), hasta: Number(ahora.horHasta ?? 18) }];
+    }
+  }
+  for (const red of REDES_CON_POSICIONES) {
+    if (cambio(`pos:${red}`)) c.posiciones = { ...(c.posiciones ?? {}), [red]: (ahora[`pos:${red}`] ?? "").split(",").filter(Boolean) };
+  }
+  if (cambio("formatos")) c.formatos = (ahora.formatos ?? "").split(",").filter(Boolean) as FormatoMeta[];
   if (cambio("plataformas")) {
     c.plataformas = (ahora.plataformas ?? "").split(",").filter(Boolean) as CambiosEdicion["plataformas"];
   }
@@ -540,6 +596,46 @@ export function EditarEntidad(props: Props) {
             <Campo etiqueta="Plantilla de URL de seguimiento" ayuda="Vacía, se quita la que tenga.">
               <Input value={valores.plantillaSeguimiento ?? ""} onChange={(e) => poner("plantillaSeguimiento")(e.target.value)} placeholder="{lpurl}?utm_source=google" />
             </Campo>
+            {props.campana?.extensiones && (
+              <fieldset className="space-y-3 rounded-xl border border-foreground/10 p-3">
+                <legend className="px-1 text-xs font-bold text-foreground/70">Extensiones de la campaña</legend>
+                <Campo etiqueta="Enlaces de sitio" ayuda="Uno por línea: texto | URL | descripción 1 | descripción 2. El texto admite 25 caracteres; las dos descripciones (35) van juntas o ninguna. Hasta 20.">
+                  <Textarea rows={5} value={valores.sitelinks ?? ""} onChange={(e) => poner("sitelinks")(e.target.value)} placeholder="Contacto | https://sitio.cl/contacto | Escríbenos | Te respondemos hoy" />
+                </Campo>
+                <Campo etiqueta="Textos destacados" ayuda="Uno por línea, hasta 25 caracteres cada uno. Hasta 20.">
+                  <Textarea rows={4} value={valores.destacados ?? ""} onChange={(e) => poner("destacados")(e.target.value)} />
+                </Campo>
+              </fieldset>
+            )}
+            {(props.campana?.gruposDeRecursos ?? []).map((g, i) => (
+              <fieldset key={g.id} className="space-y-3 rounded-xl border border-foreground/10 p-3">
+                <legend className="px-1 text-xs font-bold text-foreground/70">Performance Max · {g.nombre ?? `grupo ${g.id}`}</legend>
+                <p className="text-[0.7rem] leading-4 text-foreground/45">
+                  Un texto por línea. Los textos de Google no se editan: se reemplazan, y los que no cambias se conservan. Las imágenes, los videos y el logo
+                  ({g.recursos.filter((r) => r.imagenUrl).length} imágenes, {g.recursos.filter((r) => r.videoYoutube).length} videos) se leen pero no se cambian desde aquí.
+                </p>
+                <Campo etiqueta="Titulares" ayuda="3 a 15, hasta 30 caracteres cada uno.">
+                  <Textarea rows={6} value={valores[`gr${i}:titulares`] ?? ""} onChange={(e) => poner(`gr${i}:titulares`)(e.target.value)} />
+                </Campo>
+                <Campo etiqueta="Títulos largos" ayuda="1 a 5, hasta 90 caracteres cada uno.">
+                  <Textarea rows={3} value={valores[`gr${i}:largos`] ?? ""} onChange={(e) => poner(`gr${i}:largos`)(e.target.value)} />
+                </Campo>
+                <Campo etiqueta="Descripciones" ayuda="2 a 5, hasta 90 caracteres; al menos una de 60 o menos.">
+                  <Textarea rows={4} value={valores[`gr${i}:desc`] ?? ""} onChange={(e) => poner(`gr${i}:desc`)(e.target.value)} />
+                </Campo>
+                <Campo etiqueta="URL final">
+                  <Input value={valores[`gr${i}:url`] ?? ""} onChange={(e) => poner(`gr${i}:url`)(e.target.value)} />
+                </Campo>
+                <div className="grid grid-cols-2 gap-3">
+                  <Campo etiqueta="Ruta visible 1">
+                    <Input value={valores[`gr${i}:path1`] ?? ""} onChange={(e) => poner(`gr${i}:path1`)(e.target.value)} />
+                  </Campo>
+                  <Campo etiqueta="Ruta visible 2">
+                    <Input value={valores[`gr${i}:path2`] ?? ""} onChange={(e) => poner(`gr${i}:path2`)(e.target.value)} />
+                  </Campo>
+                </div>
+              </fieldset>
+            ))}
           </>
         )}
 
@@ -731,6 +827,85 @@ export function EditarEntidad(props: Props) {
                   );
                 })}
               </div>
+            </Campo>
+            <Campo etiqueta="Formatos" ayuda="Dónde se muestra dentro de Facebook e Instagram. Sin marcar ninguno, son automáticos. Exige haber marcado Facebook o Instagram en Redes.">
+              <div className="flex flex-wrap gap-3 text-sm">
+                {FORMATOS_META.map((f) => {
+                  const marcados = (valores.formatos ?? "").split(",").filter(Boolean);
+                  return (
+                    <label key={f} className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={marcados.includes(f)}
+                        onChange={(e) => poner("formatos")((e.target.checked ? [...marcados, f] : marcados.filter((x) => x !== f)).join(","))}
+                      />
+                      {META_SURFACES[f].label}
+                    </label>
+                  );
+                })}
+              </div>
+            </Campo>
+            <Campo etiqueta="Horario de entrega" ayuda="Solo con presupuesto TOTAL del conjunto y fecha de término (Meta lo exige). Para varios tramos distintos, pídeselo al Thinking Orb.">
+              <div className="space-y-2">
+                <NativeSelect value={valores.horModo ?? ""} onChange={(e) => poner("horModo")(e.target.value)}>
+                  <NativeSelectOption value="">Sin cambios</NativeSelectOption>
+                  <NativeSelectOption value="todo">Todo el día, todos los días</NativeSelectOption>
+                  <NativeSelectOption value="tramo">Solo en estos días y horas</NativeSelectOption>
+                </NativeSelect>
+                {valores.horModo === "tramo" && (
+                  <>
+                    <div className="flex flex-wrap gap-3 text-sm">
+                      {DIAS_DE_LA_SEMANA.map((nombre, d) => {
+                        const marcados = (valores.horDias ?? "").split(",").filter(Boolean);
+                        return (
+                          <label key={nombre} className="flex items-center gap-1.5">
+                            <input
+                              type="checkbox"
+                              checked={marcados.includes(String(d))}
+                              onChange={(e) => poner("horDias")((e.target.checked ? [...marcados, String(d)] : marcados.filter((x) => x !== String(d))).join(","))}
+                            />
+                            {nombre.slice(0, 3)}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      Desde
+                      <Input className="w-20" type="number" min={0} max={23} value={valores.horDesde ?? "9"} onChange={(e) => poner("horDesde")(e.target.value)} />
+                      hasta
+                      <Input className="w-20" type="number" min={1} max={24} value={valores.horHasta ?? "18"} onChange={(e) => poner("horHasta")(e.target.value)} />
+                      h
+                    </div>
+                  </>
+                )}
+              </div>
+            </Campo>
+            <Campo etiqueta="Todas las ubicaciones" ayuda="Elige cada ubicación por red. Sin marcar ninguna en una red, Meta las reparte sola en esa red. La red debe estar marcada arriba en Redes.">
+              <details className="rounded-xl border border-foreground/10 p-3">
+                <summary className="cursor-pointer text-sm font-semibold text-foreground/80">Ver y elegir ubicaciones</summary>
+                <div className="mt-3 space-y-3">
+                  {REDES_CON_POSICIONES.map((red: RedConPosiciones) => {
+                    const marcadas = (valores[`pos:${red}`] ?? "").split(",").filter(Boolean);
+                    return (
+                      <div key={red}>
+                        <p className="font-micro mb-1 text-[0.6rem] text-foreground/50">{red === "audience_network" ? "AUDIENCE NETWORK" : red.toUpperCase()}</p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
+                          {POSICIONES_META[red].map((p) => (
+                            <label key={p.valor} className="flex items-center gap-1.5">
+                              <input
+                                type="checkbox"
+                                checked={marcadas.includes(p.valor)}
+                                onChange={(e) => poner(`pos:${red}`)((e.target.checked ? [...marcadas, p.valor] : marcadas.filter((x) => x !== p.valor)).join(","))}
+                              />
+                              {p.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
             </Campo>
             <Campo etiqueta="Países" ayuda="Códigos de 2 letras separados por coma: CL, PE.">
               <Input value={valores.paises ?? ""} onChange={(e) => poner("paises")(e.target.value)} />

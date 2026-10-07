@@ -9,7 +9,7 @@ import { ACCION, valoresDeParametros, type Nivel } from "@/lib/acciones-estado";
 import { puedeAdministrar } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 import { estadoDeEntidadMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
-import { executeWindsorAction } from "@/lib/windsor";
+import { ejecutarConRespaldo } from "@/lib/windsor-respaldo";
 
 /**
  * Pausa o activa una campaña, un conjunto o un anuncio ya existente.
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, sinCambios: true, estado: antes.status, efectivo: antes.efectivo }, { headers: NO_STORE });
   }
 
-  const resultado = await executeWindsorAction(
+  const resultado = await ejecutarConRespaldo(
     provider,
     body.accountId,
     action,

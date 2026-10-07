@@ -1,3 +1,4 @@
+import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     }
     // La página propia de la cuenta si la tiene; si no, la del cliente — el
     // mismo orden que ya usa el resto del Constructor.
-    const pageId = cliente.accountPages[idCuenta] ?? cliente.pageId;
+    const pageId = await paginaDeLaCuenta(cliente, idCuenta);
     if (!pageId) {
       return Response.json(
         {
