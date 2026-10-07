@@ -8,7 +8,7 @@ import { etiquetaCta } from "@/lib/cta";
 import { dimensionesDe, type Dimension } from "@/lib/desglose";
 import { ErrorDeDesglose, fetchDesglose } from "@/lib/desglose-store";
 import { fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
-import type { CambioVisible, CambiosEdicion } from "@/lib/edicion-plan";
+import { hayAlgoQueAplicar, type CambioVisible, type CambiosEdicion } from "@/lib/edicion-plan";
 import { clienteDeLaCuenta, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servicio";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { DEFINICION_KPI } from "@/lib/kpis-cliente";
@@ -17,6 +17,9 @@ import { moneda as formatoMoneda } from "@/lib/monedas";
 import { listPortfolios } from "@/lib/portafolios-store";
 import { calcularPresupuesto, ETIQUETA_RITMO } from "@/lib/presupuesto";
 import { OBJECTIVES, type Objective, type LugarSegmentable } from "@/lib/constructor";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { recortar, resumenDeEntrada } from "@/lib/auditoria-pura";
+import { solicitarContenido } from "@/lib/contenido-ia";
 import { solicitarImpulsos } from "@/lib/impulsos";
 import { listarReglasMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { interpretarReglaMeta } from "@/lib/reglas-meta-pura";
@@ -189,7 +192,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
   {
     name: "enviar_campana_a_revision",
     description:
-      "Toma una propuesta que acabas de armar con abrir_constructor (en este mismo turno) y la deja ENVIADA A REVISIÓN de un supervisor como una campaña completa, para todas las plataformas elegidas a la vez. No publica nada: al aprobarse se crea pausada en cada plataforma. Úsala cuando la persona quiera que la campaña quede lista sin tener que abrir el Constructor, o cuando el pedido sea claro y completo. Si el sistema devuelve un problema (por ejemplo, Meta necesita una imagen), explícalo en una línea y dile qué falta; no inventes imágenes ni datos. Nunca la uses si faltan datos que solo la persona puede dar (qué se promociona).",
+      "Toma una propuesta que acabas de armar con abrir_constructor (en este mismo turno) y la deja ENVIADA A REVISIÓN de un supervisor como una campaña completa, para todas las plataformas elegidas a la vez. No publica nada: al aprobarse se crea y queda corriendo en cada plataforma. Úsala cuando la persona quiera que la campaña quede lista sin tener que abrir el Constructor, o cuando el pedido sea claro y completo. Si el sistema devuelve un problema (por ejemplo, Meta necesita una imagen), explícalo en una línea y dile qué falta; no inventes imágenes ni datos. Nunca la uses si faltan datos que solo la persona puede dar (qué se promociona).",
     input_schema: {
       type: "object",
       properties: {
@@ -203,7 +206,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
   {
     name: "impulsar_publicaciones",
     description:
-      "A partir de LINKS de publicaciones de Facebook o de Instagram del cliente que la persona pegó, prepara un impulso por publicación dentro de una campaña o un conjunto de Meta que YA existe y lo deja ENVIADO A REVISIÓN de un supervisor. Basta con la campaña o con el conjunto (se buscan por nombre, ej. «giveaway»): si solo dan la campaña, el sistema elige su conjunto activo y te dice cuál en supuestos. No publica nada: al aprobarse se crea pausado y la persona recibe un enlace para revisarlo en la plataforma. Úsala sin pedir más datos cuando pidan impulsar/boostear contenido con links. Si devuelve conjuntos_posibles, pregunta cuál; si devuelve descartados, explica cada motivo; cuenta siempre los supuestos.",
+      "A partir de LINKS de publicaciones de Facebook o de Instagram del cliente que la persona pegó, prepara un impulso por publicación dentro de una campaña o un conjunto de Meta que YA existe y lo deja ENVIADO A REVISIÓN de un supervisor. Basta con la campaña o con el conjunto (se buscan por nombre, ej. «giveaway»): si solo dan la campaña, el sistema elige su conjunto activo y te dice cuál en supuestos. No publica nada: al aprobarse se crea y queda corriendo, y la persona recibe un enlace para revisarlo en la plataforma. Úsala sin pedir más datos cuando pidan impulsar/boostear contenido con links. Si devuelve conjuntos_posibles, pregunta cuál; si devuelve descartados, explica cada motivo; cuenta siempre los supuestos.",
     input_schema: {
       type: "object",
       properties: {
@@ -214,6 +217,39 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
         regla: { type: "string", description: "Nombre de una regla automatizada de Meta ya existente (ej. «highquality») que la persona quiere asignar al anuncio nuevo. No se modifica esa regla: se crea una propia con su misma condición sobre el anuncio nuevo. Si no sabes cuáles hay, llama antes a reglas_de_meta." },
       },
       required: ["links"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "subir_contenido",
+    description:
+      "Sube CONTENIDO NUEVO a un conjunto de Meta que ya existe y lo deja ENVIADO A APROBACIÓN: varias imágenes (cada una un anuncio, también para Stories con imágenes verticales 9:16) o un carrusel (una pieza con 2 a 10 tarjetas). Las imágenes deben ser direcciones https públicas (si la persona no tiene links, dile que las suba desde Impulsar → Varias imágenes o Carrusel). Basta con la campaña o el conjunto (se buscan por nombre). Si falta el enlace de destino, usa el sitio del cliente; si falta el botón, «Más información»: dilo en los supuestos. Al aprobarse, el contenido se crea y queda corriendo. Si devuelve conjuntos_posibles, pregunta cuál; si devuelve avisos, cuéntalos (por ejemplo, que el conjunto no cubre Stories).",
+    input_schema: {
+      type: "object",
+      properties: {
+        cliente_id: { type: "string", description: "Id del cliente (el activo en pantalla si hay uno)." },
+        campana: { type: "string", description: "Nombre o parte del nombre de la campaña de destino." },
+        conjunto: { type: "string", description: "Nombre o parte del nombre del conjunto de destino (opcional si das la campaña)." },
+        formato: { type: "string", enum: ["imagenes", "carrusel"], description: "imagenes: un anuncio por imagen. carrusel: una sola pieza con tarjetas." },
+        imagenes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "Dirección https pública de la imagen." },
+              titulo: { type: "string", description: "Título de la imagen o tarjeta (obligatorio en carrusel)." },
+              descripcion: { type: "string" },
+              enlace: { type: "string", description: "Destino propio de esa imagen (opcional)." },
+            },
+            required: ["url"],
+            additionalProperties: false,
+          },
+        },
+        mensaje: { type: "string", description: "Texto principal del anuncio." },
+        enlace: { type: "string", description: "Enlace de destino (opcional: se usa el sitio del cliente)." },
+        cta: { type: "string", description: "Botón: LEARN_MORE, SHOP_NOW, SIGN_UP, CONTACT_US, GET_QUOTE, BOOK_NOW, DOWNLOAD, SUBSCRIBE, SEE_MORE o NO_BUTTON." },
+      },
+      required: ["formato", "imagenes", "mensaje"],
       additionalProperties: false,
     },
   },
@@ -580,6 +616,7 @@ const ROTULO_DE_HERRAMIENTA: Record<string, string[]> = {
   listar_clientes: ["Consultando clientes…", "Repasando la cartera…", "Buscando al cliente…"],
   recordar: ["Guardando en la memoria…", "Tomando nota…", "Anotándolo para la próxima…"],
   enviar_campana_a_revision: ["Enviando a revisión…", "Dejando la campaña lista para aprobar…"],
+  subir_contenido: ["Armando el contenido…", "Revisando el destino…", "Preparando la solicitud…"],
   reglas_de_meta: ["Leyendo las reglas de Meta…"],
   impulsar_publicaciones: ["Buscando las publicaciones…", "Preparando los impulsos…", "Armando la solicitud…"],
   olvidar: ["Borrando de la memoria…", "Quitando esa nota…"],
@@ -660,8 +697,9 @@ ${memoria}
 ` : ""}
 
 - Reglas: si piden «asígnale la regla X» a un impulso, pasa regla=X a impulsar_publicaciones (la regla de Meta no se modifica: se crea una propia con su condición sobre el anuncio nuevo, y lo dices). Si piden ver las reglas existentes, usa reglas_de_meta.
-- Impulsos con links: si la persona pega links de publicaciones de Facebook o Instagram y pide impulsarlas en una campaña o conjunto existente, usa impulsar_publicaciones de inmediato, con lo que dio (basta la campaña o el conjunto). Nunca publica: queda enviada a revisión de un supervisor, y al aprobarse se crea pausada. Dilo así, sin prometer que ya está funcionando, y cuenta los supuestos (por ejemplo, qué conjunto elegiste).
-- Campañas completas: cuando el pedido es claro (qué se promociona, y plataformas y objetivo deducibles), arma la propuesta con abrir_constructor y, si la persona quiere que quede lista sin abrir el Constructor, envíala con enviar_campana_a_revision: crea la campaña de todas las plataformas a la vez, pausada, tras la aprobación de un supervisor. Si Meta necesita una imagen y no la dieron, dilo y deja la propuesta abierta para que la suban; no inventes imágenes.
+- Contenido nuevo: si piden subir imágenes (varias, en carrusel, para Stories o feed) a una campaña o conjunto, usa subir_contenido con las URLs https que den; queda enviado a aprobación y, al aprobarse, corriendo. Di qué asumiste (enlace del sitio, botón) y los avisos de ubicaciones.
+- Impulsos con links: si la persona pega links de publicaciones de Facebook o Instagram y pide impulsarlas en una campaña o conjunto existente, usa impulsar_publicaciones de inmediato, con lo que dio (basta la campaña o el conjunto). Nunca publica: queda enviada a revisión de un supervisor, y al aprobarse se crea y queda corriendo. Dilo así: todavía no existe en la plataforma, queda pendiente de aprobación, sin prometer que ya está funcionando, y cuenta los supuestos (por ejemplo, qué conjunto elegiste).
+- Campañas completas: cuando el pedido es claro (qué se promociona, y plataformas y objetivo deducibles), arma la propuesta con abrir_constructor y, si la persona quiere que quede lista sin abrir el Constructor, envíala con enviar_campana_a_revision: crea la campaña de todas las plataformas a la vez, ya corriendo, tras la aprobación de un supervisor. Si Meta necesita una imagen y no la dieron, dilo y deja la propuesta abierta para que la suban; no inventes imágenes.
 - Autonomía: quienes te usan, sobre todo los analistas, no dominan las plataformas y un supervisor revisa lo que se publica. Por eso actúa: elige objetivo, plataformas, presupuesto y destino con criterio a partir de lo que el cliente ya hace y de lo que piden, prepara la propuesta completa y al final lista en pocas líneas «Lo que asumí» (presupuesto recomendado y por qué, enlace de destino, conjunto elegido, fechas). Pregunta solo lo imprescindible y de una vez, nunca una pregunta por turno. Si algo no es posible en una plataforma (por ejemplo, crear en TikTok o LinkedIn, que hoy son de lectura), dilo en una línea y sigue con el resto.
 
 Nunca menciones los nombres internos de tus herramientas (como proponer_cambio o buscar_campanas): habla de "dejar una propuesta" o "consultar las campañas".
@@ -748,10 +786,46 @@ async function ejecutarHerramienta(
         enviada_a_revision: true,
         mensaje_para_la_persona: solicitud.mensaje,
         plataformas: solicitud.plataformas,
-        nota: "Quedó en revisión. Al aprobarse se crea pausada en cada plataforma; mientras tanto no existe nada en las cuentas.",
+        nota: "Quedó en revisión. Al aprobarse se crea y queda corriendo en cada plataforma; mientras tanto no existe nada en las cuentas.",
       };
     } catch (error) {
       return { enviada_a_revision: false, problema: error instanceof ErrorDeSolicitud ? error.message : "No se pudo enviar a revisión." };
+    }
+  }
+  if (nombre === "subir_contenido") {
+    const clienteId = typeof entrada.cliente_id === "string" && entrada.cliente_id ? entrada.cliente_id : ctx.clienteId;
+    if (!clienteId) return { error: "Elige un cliente en pantalla o dime de cuál es." };
+    const imagenes = Array.isArray(entrada.imagenes)
+      ? entrada.imagenes
+          .filter((i): i is Record<string, unknown> => typeof i === "object" && i !== null)
+          .map((i) => ({
+            url: String(i.url ?? ""),
+            titulo: typeof i.titulo === "string" ? i.titulo : undefined,
+            descripcion: typeof i.descripcion === "string" ? i.descripcion : undefined,
+            enlace: typeof i.enlace === "string" ? i.enlace : undefined,
+          }))
+      : [];
+    try {
+      const r = await solicitarContenido(ctx.actor, {
+        clienteId,
+        campana: typeof entrada.campana === "string" ? entrada.campana : undefined,
+        conjunto: typeof entrada.conjunto === "string" ? entrada.conjunto : undefined,
+        formato: entrada.formato === "carrusel" ? "carrusel" : "imagenes",
+        imagenes,
+        mensaje: typeof entrada.mensaje === "string" ? entrada.mensaje : undefined,
+        enlace: typeof entrada.enlace === "string" ? entrada.enlace : undefined,
+        cta: typeof entrada.cta === "string" ? entrada.cta : undefined,
+      });
+      return {
+        enviada_a_revision: r.solicitud !== null,
+        mensaje: r.mensaje,
+        supuestos: r.supuestos,
+        avisos: r.avisos,
+        conjuntos_posibles: r.conjuntosPosibles,
+        mensaje_para_la_persona: r.solicitud?.mensaje ?? null,
+      };
+    } catch (error) {
+      return { error: error instanceof ErrorDeSolicitud ? error.message : "No se pudo preparar el contenido." };
     }
   }
   if (nombre === "reglas_de_meta") {
@@ -1215,7 +1289,7 @@ async function ejecutarHerramienta(
           motivos: bloqueantes.map((p) => p.mensaje),
         };
       }
-      if (prep.plan.pasos.length === 0) {
+      if (!hayAlgoQueAplicar(prep.plan)) {
         return { error: prep.plan.problemas[0]?.mensaje ?? "No hay ningún cambio que aplicar." };
       }
       const e = prep.antes.entidad;
@@ -1678,8 +1752,34 @@ export async function correrAsistente(
             tool_use_id: bloque.id,
             content: JSON.stringify(salidaHerramienta).slice(0, 24_000),
           });
+          // Auditoría: qué usó el bot, con qué datos y cómo le fue.
+          const salida = (salidaHerramienta ?? {}) as Record<string, unknown>;
+          const conError = typeof salida.error === "string";
+          await registrarAuditoria({
+            categoria: "asistente",
+            accion: "herramienta",
+            actorEmail: ctx.actor.email,
+            portfolioId: ctx.clienteId ?? null,
+            titulo: `El bot usó «${bloque.name}»${conError ? ` y no pudo: ${recortar(String(salida.error), 120)}` : ""}`,
+            resultado: conError ? "error" : "ok",
+            detalle: {
+              herramienta: bloque.name,
+              entrada: resumenDeEntrada((bloque.input ?? {}) as Record<string, unknown>),
+              resultado: conError ? salida.error : typeof salida.mensaje === "string" ? recortar(salida.mensaje, 300) : undefined,
+              enviadaARevision: salida.enviada_a_revision ?? undefined,
+            },
+          });
         } catch (error) {
           console.error("[asistente] herramienta falló", bloque.name, error);
+          await registrarAuditoria({
+            categoria: "asistente",
+            accion: "herramienta",
+            actorEmail: ctx.actor.email,
+            portfolioId: ctx.clienteId ?? null,
+            titulo: `El bot usó «${bloque.name}» y falló`,
+            resultado: "error",
+            detalle: { herramienta: bloque.name, entrada: resumenDeEntrada((bloque.input ?? {}) as Record<string, unknown>) },
+          });
           resultados.push({
             type: "tool_result",
             tool_use_id: bloque.id,

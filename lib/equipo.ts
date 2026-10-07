@@ -2,8 +2,10 @@ import { env } from "cloudflare:workers";
 
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
 import { getRawDb } from "@/db";
+import { registrarAuditoria } from "@/lib/auditoria";
 import {
   can,
+  esCargoProtegido,
   isRole,
   normalizeRole,
   puedeModificarMiembros,
@@ -57,6 +59,8 @@ export type TeamMember = {
   isActive: boolean;
   portfolioIds: string[];
   foundingAdmin: boolean;
+  /** Cargo en la agencia (Director Digital, Digital Lead…). Informativo: lo que decide los permisos es el rol. */
+  cargo: string | null;
   invitedBy: string | null;
   lastSeenAt: number | null;
 };
@@ -69,6 +73,7 @@ type UserRow = {
   is_active: number;
   invited_by: string | null;
   last_seen_at: number | null;
+  cargo?: string | null;
 };
 
 /**
@@ -186,7 +191,7 @@ export async function listTeam(actor: Actor): Promise<TeamMember[]> {
   const [users, links] = await Promise.all([
     db
       .prepare(
-        `SELECT id, email, display_name, role, is_active, invited_by, last_seen_at
+        `SELECT id, email, display_name, role, is_active, invited_by, last_seen_at, cargo
          FROM users ORDER BY email COLLATE NOCASE`,
       )
       .all<UserRow>(),
@@ -210,7 +215,8 @@ export async function listTeam(actor: Actor): Promise<TeamMember[]> {
     role: normalizeRole(row.role),
     isActive: Boolean(row.is_active),
     portfolioIds: byUser.get(row.id) ?? [],
-    foundingAdmin: isFoundingAdmin(row.email),
+    foundingAdmin: isFoundingAdmin(row.email) || esCargoProtegido(row.cargo),
+    cargo: row.cargo ?? null,
     invitedBy: row.invited_by,
     lastSeenAt: row.last_seen_at ? Number(row.last_seen_at) : null,
   }));
@@ -257,6 +263,16 @@ export async function inviteMember(
     .run();
 
   await replacePortfolios(id, input.portfolioIds, actor.email);
+  await registrarAuditoria({
+    categoria: "equipo",
+    accion: "agregado",
+    actorEmail: actor.email,
+    entidadTipo: "persona",
+    entidadId: id,
+    entidadNombre: email,
+    titulo: `${actor.email} agregó a ${email} como ${ROLE_LABELS[input.role]}`,
+    detalle: { rol: input.role, clientes: input.portfolioIds },
+  });
 }
 
 export async function updateMember(
@@ -273,10 +289,13 @@ export async function updateMember(
   }
   const db = getRawDb();
   const row = await db
-    .prepare("SELECT id, email FROM users WHERE id = ? LIMIT 1")
+    .prepare("SELECT id, email, cargo FROM users WHERE id = ? LIMIT 1")
     .bind(input.userId)
-    .first<{ id: string; email: string }>();
+    .first<{ id: string; email: string; cargo: string | null }>();
   if (!row) throw new EquipoError("Esa persona no existe", 404);
+  if (esCargoProtegido(row.cargo)) {
+    throw new EquipoError("Los jefes no se modifican desde la app", 403);
+  }
 
   // Un administrador fundador no se puede degradar ni desactivar desde acá:
   // sería la forma más fácil de dejar el sistema sin quién lo administre.
@@ -305,6 +324,21 @@ export async function updateMember(
   if (input.portfolioIds !== undefined) {
     await replacePortfolios(row.id, input.portfolioIds, actor.email);
   }
+  const cambios = [
+    input.role !== undefined ? `rol: ${input.role}` : null,
+    input.isActive !== undefined ? (input.isActive ? "activada" : "desactivada") : null,
+    input.portfolioIds !== undefined ? `${input.portfolioIds.length} clientes asignados` : null,
+  ].filter(Boolean);
+  await registrarAuditoria({
+    categoria: "equipo",
+    accion: "modificado",
+    actorEmail: actor.email,
+    entidadTipo: "persona",
+    entidadId: row.id,
+    entidadNombre: row.email,
+    titulo: `${actor.email} modificó a ${row.email}: ${cambios.join(", ") || "sin cambios"}`,
+    detalle: { rol: input.role ?? null, activa: input.isActive ?? null, clientes: input.portfolioIds ?? null },
+  });
 }
 
 async function replacePortfolios(

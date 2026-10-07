@@ -19,6 +19,7 @@ import type { AdSummary } from "@/lib/performance-store";
 import type { SugerenciaVista } from "@/lib/sugerencias-store";
 import { cn } from "@/lib/utils";
 import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
+import { ImpulsarView } from "./impulsar-view";
 
 type Datos = { pendientes: SugerenciaVista[]; puedeResolver: boolean };
 
@@ -30,8 +31,33 @@ const SEVERIDAD: Record<SugerenciaVista["severity"], { etiqueta: string; clase: 
 };
 
 const MOTIVOS = ["No aplica a este cliente", "Ya lo resolví por otro lado", "No estoy de acuerdo"];
+/** Para estas recomendaciones el motivo importa: con «Ya no estará activa», «De temporada» o «Pausada a propósito» no se vuelve a recomendar. */
+const MOTIVOS_DE_CAMPANA = ["Ya no estará activa", "Es una campaña de temporada", "Está pausada a propósito", "No estoy de acuerdo"];
+const motivosDe = (x: SugerenciaVista): string[] => (x.rule === "campana_apagada" || x.rule === "contenido_desactualizado" ? MOTIVOS_DE_CAMPANA : MOTIVOS);
 /** Cuánto hay que arrastrar la tarjeta para que cuente como una decisión. */
 const UMBRAL_ARRASTRE = 110;
+
+/** Qué clase de decisión es, para filtrar la cola. */
+function tipoDe(s: SugerenciaVista): string {
+  if (s.accion?.tipo === "contenido") return "Contenido";
+  if (s.accion?.tipo === "presupuesto") return "Presupuesto";
+  if (s.accion?.tipo === "pausar") return "Pausar";
+  return s.rule.startsWith("medicion_") ? "Medición" : "Revisar";
+}
+
+/** «Hace 5 min», «Hace 2 h», «Hace 3 días». */
+function hace(ms: number): string {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (min < 60) return `Hace ${min} min`;
+  if (min < 60 * 24) return `Hace ${Math.round(min / 60)} h`;
+  return `Hace ${Math.round(min / 1440)} días`;
+}
+
+/** «Vence en 3 días», «Vence hoy». */
+function vence(ms: number): string {
+  const dias = Math.ceil((ms - Date.now()) / 86_400_000);
+  return dias <= 0 ? "Vence hoy" : dias === 1 ? "Vence mañana" : `Vence en ${dias} días`;
+}
 
 const idempotencia = () => `SUG-${crypto.randomUUID()}`;
 
@@ -53,7 +79,10 @@ async function pedir(cuerpo: unknown): Promise<{ ok: boolean; cuerpo: Record<str
 export function BotonDeSugerencias({
   clienteId,
   rango,
+  modo = "boton",
 }: {
+  /** `pagina`: las tarjetas ocupan la pantalla (Decisiones); `boton`: un botón que las abre en un diálogo. */
+  modo?: "boton" | "pagina";
   /** Cliente que se mira en el Dashboard; sin cliente, las de toda la cartera visible. */
   clienteId: string | null;
   rango: string;
@@ -67,6 +96,13 @@ export function BotonDeSugerencias({
   const [editor, setEditor] = useState<EntidadParaDetalle | null>(null);
   const [adsDelEditor, setAdsDelEditor] = useState<AdSummary[]>([]);
   const [resueltas, setResueltas] = useState(0);
+  const [subiendo, setSubiendo] = useState<SugerenciaVista | null>(null);
+  const [seleccionId, setSeleccionId] = useState<string | null>(null);
+  const [reactivando, setReactivando] = useState<SugerenciaVista | null>(null);
+  const [filtroCliente, setFiltroCliente] = useState("");
+  const [filtroPlataforma, setFiltroPlataforma] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("");
+  const [busqueda, setBusqueda] = useState("");
   const [dx, setDx] = useState(0);
   const [arrastrando, setArrastrando] = useState(false);
   const arrastre = useRef<{ x: number; id: number } | null>(null);
@@ -98,7 +134,15 @@ export function BotonDeSugerencias({
   }, [clienteId, leer]);
 
   const pendientes = datos?.pendientes ?? [];
-  const actual = pendientes[0] ?? null;
+  // En pantalla completa hay cola con filtros y se elige cuál ver; en el diálogo, siempre la primera.
+  const filtradas = pendientes.filter(
+    (x) =>
+      (!filtroCliente || x.clienteId === filtroCliente) &&
+      (!filtroPlataforma || x.platform === filtroPlataforma) &&
+      (!filtroTipo || tipoDe(x) === filtroTipo) &&
+      (!busqueda.trim() || `${x.title} ${x.entityName ?? ""} ${x.clienteNombre}`.toLowerCase().includes(busqueda.trim().toLowerCase())),
+  );
+  const actual = modo === "pagina" ? (filtradas.find((x) => x.id === seleccionId) ?? filtradas[0] ?? null) : (pendientes[0] ?? null);
   const puede = Boolean(datos?.puedeResolver);
   const total = pendientes.length;
 
@@ -162,6 +206,16 @@ export function BotonDeSugerencias({
   /** ✓ */
   async function aprobar(s: SugerenciaVista) {
     if (!puede || trabajando) return;
+    if (s.accion?.tipo === "contenido") {
+      setDx(0);
+      setSubiendo(s);
+      return;
+    }
+    if (s.accion?.tipo === "reactivar") {
+      setDx(0);
+      setReactivando(s);
+      return;
+    }
     if (s.accion?.tipo === "pausar") {
       setDx(0);
       setPausando(s);
@@ -208,6 +262,69 @@ export function BotonDeSugerencias({
     }
   }
 
+  async function reactivarCampana(s: SugerenciaVista) {
+    if (!s.provider || !s.accountId || !s.entityId) return;
+    setTrabajando(true);
+    try {
+      const respuesta = await fetch("/api/anuncios/estado", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: s.provider, nivel: "campana", accountId: s.accountId, campaignId: s.entityId, activar: true }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok || cuerpo?.ok === false) throw new Error(cuerpo?.error ?? "No se pudo reactivar la campaña");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo reactivar la campaña");
+      setTrabajando(false);
+      return;
+    }
+    setTrabajando(false);
+    if (await resolver(s, "approve")) {
+      toast.success("Campaña reactivada");
+      quitar(s);
+    }
+  }
+
+  /** Quien no aprueba cambios propone reactivar: queda pendiente hasta que lo apruebe un Lead o superior. */
+  async function proponerReactivar(s: SugerenciaVista) {
+    if (!s.provider || !s.accountId || !s.entityId || trabajando) return;
+    setTrabajando(true);
+    try {
+      const respuesta = await fetch("/api/entidades/editar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: s.provider, accountId: s.accountId, nivel: "campana", id: s.entityId, cambios: { activar: true }, modo: "solicitar" }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudo enviar la propuesta");
+      toast.success("Propuesta enviada: nada se reactivó todavía. Debe aprobarla un Lead o superior.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo enviar la propuesta");
+    } finally {
+      setTrabajando(false);
+    }
+  }
+
+  /** Quien no aprueba cambios propone la pausa: queda pendiente y no se pausa nada hasta que la apruebe un Lead o superior. */
+  async function proponerPausa(s: SugerenciaVista) {
+    if (!s.provider || !s.accountId || !s.entityId || trabajando) return;
+    setTrabajando(true);
+    try {
+      const respuesta = await fetch("/api/entidades/editar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: s.provider, accountId: s.accountId, nivel: "campana", id: s.entityId, cambios: { pausar: true }, modo: "solicitar" }),
+      });
+      const cuerpo = await respuesta.json().catch(() => ({}));
+      if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudo enviar la propuesta");
+      toast.success("Propuesta enviada: nada se pausó todavía. Debe aprobarla un Lead o superior.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo enviar la propuesta");
+    } finally {
+      setTrabajando(false);
+    }
+  }
+
   /** ⏱ */
   async function posponer(s: SugerenciaVista) {
     if (!puede || trabajando) return;
@@ -232,7 +349,7 @@ export function BotonDeSugerencias({
 
   // Teclado: ← descartar, → aprobar, ↓ posponer.
   useEffect(() => {
-    if (!abierto || !actual || !puede || pausando || editor) return;
+    if ((!abierto && modo !== "pagina") || !actual || !puede || pausando || editor || subiendo) return;
     const onKey = (e: KeyboardEvent) => {
       if (eligiendoMotivo) return;
       if (e.key === "ArrowLeft") setEligiendoMotivo(true);
@@ -242,7 +359,7 @@ export function BotonDeSugerencias({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- las acciones leen `actual` y el estado vigente en cada tecla
-  }, [abierto, actual, puede, pausando, editor, eligiendoMotivo, trabajando]);
+  }, [abierto, modo, actual, puede, pausando, editor, subiendo, eligiendoMotivo, trabajando]);
 
   function alBajar(e: React.PointerEvent<HTMLDivElement>) {
     if (!puede || trabajando || eligiendoMotivo) return;
@@ -267,36 +384,8 @@ export function BotonDeSugerencias({
 
   const sev = actual ? SEVERIDAD[actual.severity] : null;
 
-  return (
+  const cuerpo = (
     <>
-      <button
-        type="button"
-        onClick={() => setAbierto(true)}
-        className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-brand/18"
-      >
-        <Lightbulb className="size-4 text-brand" />
-        Sugerencias pendientes
-        <span
-          className={cn(
-            "grid min-w-5 place-items-center rounded-full px-1.5 text-[0.7rem] font-bold",
-            total > 0 ? "bg-brand text-primary-foreground" : "bg-foreground/10 text-foreground/50",
-          )}
-        >
-          {datos ? total : "…"}
-        </span>
-      </button>
-
-      <Dialog open={abierto} onOpenChange={setAbierto}>
-        <DialogContent className="max-h-[92vh] overflow-hidden sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Sugerencias pendientes</DialogTitle>
-            <DialogDescription>
-              {puede
-                ? "Arrastra la tarjeta o usa los botones: ✕ descartar, ⏱ posponer, ✓ aprobar."
-                : "Solo un administrador o supervisor puede resolverlas; tú puedes revisarlas."}
-            </DialogDescription>
-          </DialogHeader>
-
           {error && <p className="rounded-xl border border-danger/25 bg-danger/8 p-3 text-sm text-danger">{error}</p>}
 
           {!actual && datos && !error && (
@@ -359,6 +448,19 @@ export function BotonDeSugerencias({
                     <span className="font-semibold">Qué hacer: </span>
                     {actual.proposedAction}
                   </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-xl border border-foreground/10 p-3">
+                      <p className="text-[0.65rem] text-foreground/50">Impacto estimado</p>
+                      <p className="mt-0.5 text-xs font-semibold leading-5 text-foreground">{actual.impact}</p>
+                    </div>
+                    <div className="rounded-xl border border-foreground/10 p-3">
+                      <p className="text-[0.65rem] text-foreground/50">Confianza</p>
+                      <p className="mt-0.5 text-xs font-semibold text-foreground">{actual.confidence}</p>
+                      <p className="mt-0.5 text-[0.65rem] text-foreground/45">
+                        {hace(actual.generadaEn)} · {vence(actual.venceEn)}
+                      </p>
+                    </div>
+                  </div>
                   {actual.enlaces.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {actual.enlaces.map((e) => (
@@ -385,7 +487,39 @@ export function BotonDeSugerencias({
                       {actual.delta && actual.delta !== "—" && <span className="text-foreground/45">({actual.delta})</span>}
                     </div>
                   )}
-                  {actual.entityId && puede && (
+                  {actual.accion?.tipo === "reactivar" && !puede && actual.entityId && (
+                    <button
+                      type="button"
+                      disabled={trabajando}
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => void proponerReactivar(actual)}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    >
+                      Proponer reactivar esta campaña
+                    </button>
+                  )}
+                  {actual.accion?.tipo === "pausar" && !puede && actual.entityId && (
+                    <button
+                      type="button"
+                      disabled={trabajando}
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => void proponerPausa(actual)}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-40"
+                    >
+                      Proponer pausar esta campaña
+                    </button>
+                  )}
+                  {actual.accion?.tipo === "contenido" && actual.clienteId && (
+                    <button
+                      type="button"
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => setSubiendo(actual)}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
+                    >
+                      Subir contenido a esta campaña
+                    </button>
+                  )}
+                  {actual.entityId && actual.accion?.tipo !== "contenido" && actual.accion?.tipo !== "reactivar" && (
                     <button
                       type="button"
                       onClick={() => void abrirEnEditor(actual, false)}
@@ -400,8 +534,11 @@ export function BotonDeSugerencias({
               {eligiendoMotivo ? (
                 <div className="space-y-2 rounded-xl border border-foreground/10 p-3">
                   <p className="text-xs font-semibold text-foreground/70">¿Por qué la descartas?</p>
+                  {(actual.rule === "campana_apagada" || actual.rule === "contenido_desactualizado") && (
+                    <p className="text-[0.68rem] leading-4 text-foreground/50">Con «Ya no estará activa», «Es una campaña de temporada» o «Está pausada a propósito» no se vuelve a recomendar.</p>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    {MOTIVOS.map((m) => (
+                    {motivosDe(actual).map((m) => (
                       <button
                         key={m}
                         type="button"
@@ -469,8 +606,157 @@ export function BotonDeSugerencias({
               )}
             </div>
           )}
+    </>
+  );
+
+  return (
+    <>
+      {modo !== "pagina" && (
+        <>
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-sm font-bold text-foreground transition-colors hover:bg-brand/18"
+      >
+        <Lightbulb className="size-4 text-brand" />
+        Sugerencias pendientes
+        <span
+          className={cn(
+            "grid min-w-5 place-items-center rounded-full px-1.5 text-[0.7rem] font-bold",
+            total > 0 ? "bg-brand text-primary-foreground" : "bg-foreground/10 text-foreground/50",
+          )}
+        >
+          {datos ? total : "…"}
+        </span>
+      </button>
+
+      <Dialog open={abierto} onOpenChange={setAbierto}>
+        <DialogContent className="max-h-[92vh] overflow-hidden sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sugerencias pendientes</DialogTitle>
+            <DialogDescription>
+              {puede
+                ? "Arrastra la tarjeta o usa los botones: ✕ descartar, ⏱ posponer, ✓ aprobar."
+                : "Solo un administrador o supervisor puede resolverlas; tú puedes revisarlas."}
+            </DialogDescription>
+          </DialogHeader>
+
+          {cuerpo}
         </DialogContent>
       </Dialog>
+        </>
+      )}
+
+      {modo === "pagina" && (
+        <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
+          <div>
+            <p className="font-micro text-[0.65rem] text-muted-foreground">OPERACIÓN</p>
+            <h2 className="neo-section-title">
+              {pendientes.length} {pendientes.length === 1 ? "decisión requiere" : "decisiones requieren"} {puede ? "firma" : "aprobación"}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              <span className="text-danger">{pendientes.filter((x) => x.severity === "critical").length} crítica</span>
+              {" · "}
+              {pendientes.filter((x) => x.severity === "high").length} altas · ordenadas por severidad y antigüedad
+              {puede
+                ? ". Lo que apruebes aquí se ejecuta de verdad; lo que toca presupuesto se ajusta en el editor antes de aplicarlo."
+                : ". Tu rol propone: nada cambia hasta que lo apruebe quien corresponde."}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border p-3">
+            <input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Filtros de cola: buscar…"
+              className="h-10 min-w-48 flex-1 rounded-full border border-border bg-background px-4 text-sm"
+            />
+            {([
+              ["Todos los clientes", filtroCliente, setFiltroCliente, [...new Map(pendientes.map((x) => [x.clienteId, x.clienteNombre])).entries()]],
+              ["Toda plataforma", filtroPlataforma, setFiltroPlataforma, [...new Set(pendientes.map((x) => x.platform))].map((x) => [x, x] as [string, string])],
+              ["Todo tipo", filtroTipo, setFiltroTipo, [...new Set(pendientes.map(tipoDe))].map((x) => [x, x] as [string, string])],
+            ] as Array<[string, string, (v: string) => void, Array<[string, string]>]>).map(([etiqueta, valor, poner, opciones]) => (
+              <select
+                key={etiqueta}
+                value={valor}
+                onChange={(e) => {
+                  poner(e.target.value);
+                  setSeleccionId(null);
+                }}
+                className="h-10 rounded-full border border-border bg-background px-3 text-sm"
+              >
+                <option value="">{etiqueta}</option>
+                {opciones.map(([id, nombre]) => (
+                  <option key={id} value={id}>
+                    {nombre}
+                  </option>
+                ))}
+              </select>
+            ))}
+          </div>
+
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+              {filtradas.length === 0 && datos && <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Cola despejada: no quedan decisiones con los filtros actuales.</p>}
+              {filtradas.map((x) => (
+                <button
+                  key={x.id}
+                  type="button"
+                  onClick={() => setSeleccionId(x.id)}
+                  className={cn(
+                    "block w-full rounded-xl border p-3 text-left transition-colors",
+                    actual?.id === x.id ? "border-brand bg-brand/10" : "border-border hover:border-brand/40",
+                  )}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[0.6rem] font-bold", SEVERIDAD[x.severity].clase)}>{SEVERIDAD[x.severity].etiqueta}</span>
+                    <span className="text-[0.65rem] text-foreground/55">{tipoDe(x)}</span>
+                  </div>
+                  <p className="mt-1.5 text-sm font-semibold leading-snug text-foreground">{x.title}</p>
+                  <p className="mt-0.5 truncate text-xs text-foreground/55">
+                    {x.clienteNombre} · {x.platform}
+                  </p>
+                </button>
+              ))}
+            </div>
+            <div className="min-w-0">{cuerpo}</div>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={subiendo !== null} onOpenChange={(a) => !a && setSubiendo(null)}>
+        <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Subir contenido a «{subiendo?.entityName}»</DialogTitle>
+            <DialogDescription>Elige el conjunto y la publicación, el anuncio o la imagen. Lo nuevo pasa por aprobación y, al aprobarse, queda corriendo.</DialogDescription>
+          </DialogHeader>
+          {subiendo?.clienteId && <ImpulsarView clienteId={subiendo.clienteId} puedeAprobar={puede} campanaInicial={subiendo.entityId ?? undefined} />}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={reactivando !== null} onOpenChange={(o) => !o && setReactivando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Reactivar esta campaña?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se reactivará “{reactivando?.entityName}” en {reactivando?.platform}. Vuelve a entregar y gastar de verdad en la cuenta del cliente; se revierte pausándola de nuevo.
+              Si ya no debía estar activa, cancela y descártala con el motivo «Ya no estará activa».
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const x = reactivando;
+                setReactivando(null);
+                if (x) void reactivarCampana(x);
+              }}
+            >
+              Reactivar campaña
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={pausando !== null} onOpenChange={(o) => !o && setPausando(null)}>
         <AlertDialogContent>

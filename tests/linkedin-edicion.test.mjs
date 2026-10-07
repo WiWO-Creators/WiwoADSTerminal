@@ -41,10 +41,10 @@ test("LinkedIn conjunto: renombrar es solo un renombre y no pausa", () => {
   assert.equal(p.pausaAlAplicar, false);
 });
 
-test("LinkedIn conjunto: presupuesto diario sube (pausa) y baja (no pausa)", () => {
+test("LinkedIn conjunto: presupuesto diario sube y baja sin pausar", () => {
   const sube = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { presupuesto: { tipo: "daily", monto: 100000 } }, CLP);
   assert.deepEqual(sube.pasos[0].params, { campaign_id: "895500533", budget_type: "daily", amount: 100000 });
-  assert.equal(sube.pausaAlAplicar, true);
+  assert.equal(sube.pausaAlAplicar, false);
   const baja = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { presupuesto: { tipo: "daily", monto: 50000 } }, CLP);
   assert.equal(baja.pausaAlAplicar, false);
 });

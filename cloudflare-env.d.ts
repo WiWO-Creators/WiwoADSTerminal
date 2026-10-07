@@ -63,6 +63,16 @@ declare module "cloudflare:workers" {
     CRON_SECRET?: string;
     /** Token del usuario del sistema «WiwoAds» de Meta (API directa). */
     META_SYSTEM_USER_TOKEN?: string;
+    /** App de LinkedIn «WiwoAds» (API directa, opcional: LinkedIn también se lee por Windsor). */
+    LINKEDIN_CLIENT_ID?: string;
+    LINKEDIN_CLIENT_SECRET?: string;
+    /** Alias de LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET, por costumbre con META_APP_*. */
+    LINKEDIN_APP_ID?: string;
+    LINKEDIN_APP_SECRET?: string;
+    /** Versión de la API REST de LinkedIn (cabecera `Linkedin-Version`, formato AAAAMM). */
+    LINKEDIN_API_VERSION?: string;
+    /** «true» permite ESCRIBIR en cuentas publicitarias de clientes de LinkedIn. Sin ella, solo la cuenta de prueba. */
+    LINKEDIN_ESCRITURA_CLIENTES?: string;
     ANTHROPIC_API_KEY?: string;
     SESSION_SECRET?: string;
     WIWO_RUNTIME?: string;

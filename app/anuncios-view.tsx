@@ -1,5 +1,6 @@
 "use client";
 
+import { ElegirDondeCrear } from "./crear-en";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
@@ -570,7 +571,7 @@ export function AnunciosView({
   portfolioIdFijo?: string;
   /** "+ Crear campaña" para el cliente elegido. Sin esto, el botón no aparece. */
   onCrearCampana?: (portfolioId: string) => void;
-  /** «Impulsar»: publicación o anuncio existente en un conjunto, sin salir de Cliente. */
+  /** «Boostear anuncio»: publicación o anuncio existente en un conjunto, sin salir de Cliente. */
   onAbrirImpulsar?: () => void;
   /** "+ Añadir conjunto" sobre una campaña real, con su id nativo. */
   onAgregarConjunto?: (attachTo: AttachToCampana) => void;
@@ -588,6 +589,8 @@ export function AnunciosView({
   onDatosCambiaron?: () => void;
 }) {
   const [nivel, setNivel] = useState<Nivel>("campana");
+  /** «Crear conjunto» / «Crear anuncio» desde la barra: primero se elige dónde va. */
+  const [crearEn, setCrearEn] = useState<"conjunto" | "anuncio" | null>(null);
   const [enVuelo, setEnVuelo] = useState<Set<string>>(new Set());
   // Ids (campaña o anuncio) marcados "no la sigas mostrando como pendiente"
   // — ver `descartarPendiente` en lib/publicaciones-pendientes.ts. Reflejo
@@ -1275,7 +1278,7 @@ export function AnunciosView({
     return (
       <button
         type="button"
-        title="Impulsar este anuncio: crea uno nuevo que reutiliza su misma publicación"
+        title="Boostear este anuncio: crea uno nuevo que reutiliza su misma publicación"
         onClick={(e) => {
           e.stopPropagation();
           onImpulsar(portfolioIdFijo ?? portfolioId, {
@@ -1412,14 +1415,29 @@ export function AnunciosView({
           />
         </div>
 
-        {onCrearCampana && portfolioId !== "all" && (
+        {/* El botón sigue a la pestaña: campañas → crear campaña, conjuntos → crear conjunto, anuncios → crear anuncio. */}
+        {portfolioId !== "all" && (nivel === "campana" ? Boolean(onCrearCampana) : nivel === "conjunto" ? Boolean(onAgregarConjunto) : Boolean(onAgregarAnuncio)) && (
           <button
             type="button"
-            onClick={() => onCrearCampana(portfolioId)}
+            onClick={() => {
+              if (nivel === "campana") onCrearCampana?.(portfolioId);
+              else setCrearEn(nivel === "conjunto" ? "conjunto" : "anuncio");
+            }}
             className="shrink-0 rounded-full bg-primary px-4 py-2 text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/85"
           >
-            + Crear campaña
+            {nivel === "campana" ? "+ Crear campaña" : nivel === "conjunto" ? "+ Crear conjunto" : "+ Crear anuncio"}
           </button>
+        )}
+        {portfolioId !== "all" && (
+          <ElegirDondeCrear
+            nivel={crearEn}
+            clienteId={portfolioId}
+            onCerrar={() => setCrearEn(null)}
+            onElegir={(d) => {
+              if (d.adsetId) onAgregarAnuncio?.(d as unknown as AttachToConjunto);
+              else onAgregarConjunto?.(d as unknown as AttachToCampana);
+            }}
+          />
         )}
         {onAbrirImpulsar && portfolioId !== "all" && (
           <button
@@ -1427,7 +1445,7 @@ export function AnunciosView({
             onClick={onAbrirImpulsar}
             className="shrink-0 rounded-full border border-brand/40 bg-brand/10 px-4 py-2 text-xs font-bold text-foreground transition-colors hover:bg-brand/20"
           >
-            Impulsar
+            Boostear anuncio
           </button>
         )}
 

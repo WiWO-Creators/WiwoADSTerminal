@@ -510,8 +510,8 @@ export function armarCreacionDisplay(
         {
           create: {
             adGroup: `customers/${cliente}/adGroups/${grupo}`,
-            // Regla del sistema: lo nuevo nace pausado.
-            status: "PAUSED",
+            // Decisión del equipo: lo aprobado queda corriendo.
+            status: "ENABLED",
             ad: {
               finalUrls: [a.urlFinal.trim()],
               responsiveDisplayAd: {
@@ -827,8 +827,8 @@ export function armarMutacionPmax(
         resourceName: rc("campaigns", -2),
         name: d.nombre.trim(),
         advertisingChannelType: "PERFORMANCE_MAX",
-        // Regla del sistema: lo nuevo nace pausado.
-        status: "PAUSED",
+        // Decisión del equipo: lo aprobado queda corriendo.
+        status: "ENABLED",
         campaignBudget: rc("campaignBudgets", -1),
         maximizeConversions: {},
         containsEuPoliticalAdvertising: "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
@@ -887,7 +887,7 @@ export function armarMutacionPmax(
         campaign: rc("campaigns", -2),
         name: `${d.nombre.trim()} · grupo de recursos`,
         finalUrls: [d.urlFinal.trim()],
-        status: "PAUSED",
+        status: "ENABLED",
       },
     },
   });
@@ -1133,7 +1133,7 @@ export function armarMutacionBusqueda(
         resourceName: camp,
         name: d.nombre.trim(),
         advertisingChannelType: "SEARCH",
-        status: "PAUSED", // regla del sistema: la campaña nace pausada
+        status: "ENABLED", // decisión del equipo: lo aprobado queda corriendo
         campaignBudget: rc("campaignBudgets", -1),
         ...puja,
         networkSettings: { targetGoogleSearch: true, targetSearchNetwork: d.redes.socios, targetContentNetwork: d.redes.display, targetPartnerSearchNetwork: false },
@@ -1188,7 +1188,7 @@ export function armarMutacionBusqueda(
         resourceName: grupo,
         campaign: camp,
         name: d.grupo.nombre.trim() || `${d.nombre.trim()} · grupo 1`,
-        status: d.activarHijos ? "ENABLED" : "PAUSED",
+        status: "ENABLED",
         type: "SEARCH_STANDARD",
         // La rotación de anuncios ya no se fija en la campaña (Google lo dejó obsoleto): va en el grupo de anuncios.
         adRotationMode: d.rotacion === "indefinida" ? "ROTATE_FOREVER" : "OPTIMIZE",
@@ -1201,7 +1201,7 @@ export function armarMutacionBusqueda(
     adGroupAdOperation: {
       create: {
         adGroup: grupo,
-        status: d.activarHijos ? "ENABLED" : "PAUSED",
+        status: "ENABLED",
         ad: {
           finalUrls: [d.anuncio.urlFinal.trim()],
           responsiveSearchAd: {
@@ -1292,4 +1292,29 @@ export async function listarRecursosDeGoogle(cred: CredencialesGoogle): Promise<
     pageSize: 1000,
   });
   return (r.results ?? []).map((x) => x.name ?? "").filter(Boolean).sort();
+}
+
+/**
+ * Cuándo se creó el último anuncio de cada campaña de Google, a partir del historial de cambios (Google lo guarda 30 días).
+ * Una campaña que no aparece no recibió anuncios nuevos en esos 30 días. Solo lectura.
+ */
+export async function ultimoAnuncioGooglePorCampana(cred: CredencialesGoogle, customerId: string, ahora = new Date()): Promise<Map<string, number>> {
+  const formato = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+  const desde = new Date(ahora.getTime() - 29 * 86_400_000);
+  const filas = await consultarGaql(
+    cred,
+    customerId,
+    `SELECT change_event.change_date_time, change_event.campaign FROM change_event
+     WHERE change_event.change_date_time >= '${formato(desde)}' AND change_event.change_date_time <= '${formato(ahora)}'
+       AND change_event.change_resource_type = 'AD_GROUP_AD' AND change_event.resource_change_operation = 'CREATE'
+     ORDER BY change_event.change_date_time DESC LIMIT 10000`,
+  );
+  const salida = new Map<string, number>();
+  for (const f of filas) {
+    const ev = (f.changeEvent ?? {}) as { changeDateTime?: string; campaign?: string };
+    const id = /campaigns\/(\d+)/.exec(ev.campaign ?? "")?.[1];
+    const t = ev.changeDateTime ? Date.parse(ev.changeDateTime.replace(" ", "T") + "Z") : NaN;
+    if (id && Number.isFinite(t) && t > (salida.get(id) ?? 0)) salida.set(id, t);
+  }
+  return salida;
 }

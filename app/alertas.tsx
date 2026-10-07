@@ -88,6 +88,30 @@ export function BotonDeAlertas({
     void cargar();
   }, [cargar]);
 
+  /** Quien no aprueba cambios propone la pausa: queda pendiente y no se pausa nada hasta que la apruebe un Lead o superior. */
+  async function proponerPausa(alerta: Alerta) {
+    if (!alerta.accion || !alerta.plataforma) return;
+    setEstados((actual) => ({ ...actual, [alerta.id]: "aplicando" }));
+    try {
+      const response = await fetch("/api/entidades/editar", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: alerta.plataforma, accountId: alerta.accion.cuentaId, nivel: "campana", id: alerta.accion.campanaId, cambios: { pausar: true }, modo: "solicitar" }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "No se pudo enviar la propuesta");
+      setEstados((actual) => ({ ...actual, [alerta.id]: "aplicada" }));
+      toast.success("Propuesta enviada: nada se pausó todavía. Debe aprobarla un Lead o superior.");
+    } catch (issue) {
+      setEstados((actual) => {
+        const siguiente = { ...actual };
+        delete siguiente[alerta.id];
+        return siguiente;
+      });
+      toast.error(issue instanceof Error ? issue.message : "No se pudo enviar la propuesta");
+    }
+  }
+
   async function pausar(alerta: Alerta) {
     if (!alerta.accion) return;
     setEstados((actual) => ({ ...actual, [alerta.id]: "aplicando" }));
@@ -129,7 +153,7 @@ export function BotonDeAlertas({
       const body = (await response.json().catch(() => ({}))) as { error?: string; solicitud?: { estado: string; enlaces: Array<{ url: string }> } };
       if (!response.ok) throw new Error(body.error ?? "No se pudo completar");
       setSolicitudes((actual) => actual.filter((x) => x.id !== s.id));
-      toast.success(accion === "aprobar" ? (body.solicitud?.estado === "fallida" ? "Se aprobó, pero la plataforma rechazó un paso" : "Aprobada y creada, pausada") : "Rechazada");
+      toast.success(accion === "aprobar" ? (body.solicitud?.estado === "fallida" ? "Se aprobó, pero la plataforma rechazó un paso" : "Aprobada y creada") : "Rechazada");
       onCambioAplicado();
     } catch (issue) {
       toast.error(issue instanceof Error ? issue.message : "No se pudo completar");
@@ -274,6 +298,16 @@ export function BotonDeAlertas({
                           </a>
                         ))}
                       </div>
+                    )}
+                    {alerta.accion && !puedeAprobar && alerta.plataforma && (
+                      <button
+                        type="button"
+                        onClick={() => void proponerPausa(alerta)}
+                        disabled={estado === "aplicando" || estado === "aplicada"}
+                        className="mt-2.5 flex items-center gap-2 rounded-full bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-60"
+                      >
+                        {estado === "aplicada" ? "Propuesta enviada" : "Proponer pausar"}
+                      </button>
                     )}
                     {alerta.accion && puedeAprobar && (
                       <button

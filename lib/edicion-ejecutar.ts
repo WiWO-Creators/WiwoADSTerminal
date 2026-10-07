@@ -10,6 +10,25 @@ import type { PasoEdicion } from "@/lib/edicion-plan";
 import type { NivelEntidad, Platform } from "@/lib/plataformas";
 import { executeWindsorAction } from "@/lib/windsor";
 
+/** Acción de Windsor que ACTIVA cada nivel (Google y Meta). LinkedIn no tiene una receta verificada. */
+function activacion(
+  provider: Platform,
+  nivel: NivelEntidad,
+  ids: { campaignId: string | null; conjuntoId: string | null; id: string },
+): { action: string; params: Record<string, unknown> } | null {
+  if (provider === "google") {
+    if (nivel === "campana") return { action: "enable_campaign", params: { campaign_id: ids.id } };
+    if (nivel === "conjunto") return { action: "enable_ad_group", params: { ad_group_id: ids.id } };
+    return ids.conjuntoId ? { action: "enable_ad", params: { ad_group_id: ids.conjuntoId, ad_id: ids.id } } : null;
+  }
+  if (provider === "meta") {
+    if (nivel === "campana") return { action: "enable_campaign", params: { campaign_id: ids.id } };
+    if (nivel === "conjunto") return { action: "enable_adset", params: { adset_id: ids.id } };
+    return { action: "enable_ad", params: { ad_id: ids.id } };
+  }
+  return null;
+}
+
 /**
  * Acción de Windsor que pausa cada nivel, con los parámetros que pide. Google
  * pausa un anuncio con su grupo y su id; Meta, solo con el id.
@@ -62,6 +81,7 @@ export async function ejecutarPasosDeEdicion({
   ids,
   pasos,
   pausarAlFinal,
+  activarAlFinal = false,
   credencialesGoogle,
 }: {
   provider: Platform;
@@ -70,6 +90,8 @@ export async function ejecutarPasosDeEdicion({
   ids: { campaignId: string | null; conjuntoId: string | null; id: string };
   pasos: PasoEdicion[];
   pausarAlFinal: boolean;
+  /** Volver a activar la entidad tras aplicar los pasos. */
+  activarAlFinal?: boolean;
   credencialesGoogle: CredencialesGoogle | null;
 }): Promise<ResultadoEdicion> {
   const realizados: PasoEjecutado[] = [];
@@ -138,5 +160,21 @@ export async function ejecutarPasosDeEdicion({
       });
     }
   }
+  if (activarAlFinal) {
+    const receta = activacion(provider, nivel, ids);
+    if (!receta) return { ok: false, pasos: realizados, pausa: null };
+    const r = await executeWindsorAction(provider, accountId, receta.action, receta.params);
+    realizados.push({
+      platform: provider,
+      action: receta.action,
+      label: "Activar",
+      params: receta.params,
+      ok: r.ok,
+      error: r.ok ? null : (r.error ?? null),
+      raw: r.raw,
+    });
+    if (!r.ok) return { ok: false, pasos: realizados, pausa: null };
+  }
+
   return { ok: true, pasos: realizados, pausa: resultadoPausa };
 }

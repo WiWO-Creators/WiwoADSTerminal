@@ -19,6 +19,7 @@ export const users = sqliteTable(
     createdAt: integer("created_at").notNull(),
     lastSeenAt: integer("last_seen_at").notNull(),
     invitedBy: text("invited_by"),
+    cargo: text("cargo"),
     invitedAt: integer("invited_at"),
   },
   (table) => [uniqueIndex("idx_users_email").on(table.email)],

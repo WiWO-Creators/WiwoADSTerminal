@@ -89,10 +89,10 @@ test("con las dos plataformas, cada una conserva su propia cadena", () => {
   assert.equal(porPlataforma("meta").length, 3);
 });
 
-test("regla de seguridad: la campaña nueva nace siempre pausada", () => {
+test("decisión del equipo: nada nace pausado, la campaña nueva queda corriendo (la revisión es antes, en la aprobación)", () => {
   const r = plan(borrador({ activarConjuntoYAnuncio: true }));
   for (const s of ejecutables(r).filter((x) => x.action === "create_campaign")) {
-    assert.equal(s.params.status, "paused", `${s.platform} debe nacer pausada`);
+    assert.equal(s.params.status, s.platform === "google" ? "enabled" : "active", `${s.platform} debe nacer activa`);
   }
 });
 
@@ -150,7 +150,7 @@ test("adjuntar a una campaña de Google existente no crea otra campaña", () => 
   assert.ok(acciones.includes("create_ad_group"));
 });
 
-test("regla de seguridad: lo que se adjunta a algo existente nace pausado", () => {
+test("lo que se adjunta a algo existente también nace activo", () => {
   const draft = borrador({
     platforms: ["google"],
     activarConjuntoYAnuncio: true,
@@ -162,7 +162,7 @@ test("regla de seguridad: lo que se adjunta a algo existente nace pausado", () =
     },
   });
   const grupo = ejecutables(plan(draft)).find((s) => s.action === "create_ad_group");
-  assert.equal(grupo.params.status, "paused");
+  assert.equal(grupo.params.status, "enabled");
 });
 
 test("un conjunto existente sin campaña existente no llega a ningún paso", () => {
@@ -220,7 +220,7 @@ test("impulso en campaña nueva: campaña de interacción, conjunto ON_POST y bo
   assert.equal(conj.params.destination_type, "ON_POST");
   assert.equal(conj.params.optimization_goal, "POST_ENGAGEMENT");
   assert.equal(boost.params.post_id, POST_ID);
-  assert.equal(camp.params.status, "paused");
+  assert.equal(camp.params.status, "active");
 });
 
 test("impulso dentro de una campaña compatible: crea solo el conjunto de impulso y el boost", () => {
@@ -232,8 +232,8 @@ test("impulso dentro de una campaña compatible: crea solo el conjunto de impuls
   assert.equal(conj.params.destination_type, "ON_POST");
   assert.equal("daily_budget" in conj.params, false, "el presupuesto ya lo lleva la campaña");
   assert.equal("lifetime_budget" in conj.params, false);
-  assert.equal(conj.params.status, "paused", "lo adjuntado a algo existente nace pausado");
-  assert.equal(boost.params.status, "paused");
+  assert.equal(conj.params.status, "active", "lo adjuntado a algo existente nace activo");
+  assert.equal(boost.params.status, "active");
 });
 
 test("impulso directo en un conjunto compatible: solo boost_post, con el id real del conjunto", () => {
@@ -328,7 +328,7 @@ test("Google en Red de Display arma un paso nativo con imagen (sin anuncio de b�
   );
   const paso = ejecutables(r).find((s) => s.action === "ads:create_display_ad");
   assert.equal(paso.via, "nativa");
-  assert.equal(paso.params.status, "paused");
+  assert.equal(paso.params.status, "enabled");
   assert.equal(paso.params.square_image_url, "https://ejemplo.com/cuadrada.png");
 });
 
@@ -402,7 +402,7 @@ test("Google Performance Max arma un único paso nativo, sin anuncio de búsqued
   assert.deepEqual(ejecutables(r).map((s) => s.action), ["ads:create_pmax"]);
   const paso = ejecutables(r)[0];
   assert.equal(paso.via, "nativa");
-  assert.equal(paso.params.status, "paused");
+  assert.equal(paso.params.status, "enabled");
   assert.deepEqual(paso.params.locations, ["2152"]);
   assert.equal(paso.params.daily_budget_micros % 1_000_000, 0);
 });

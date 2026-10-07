@@ -21,14 +21,31 @@ type SolicitudVista = {
   sinLeer: boolean;
   mensaje: string;
   piezas: number;
+  /** Cambio sobre algo que ya existe: lo que cambia, antes y después. */
+  cambios: Array<{ campo: string; etiqueta: string; antes: string; despues: string }> | null;
+  tocaPresupuesto: boolean;
 };
+
+/** El antes y el después de un cambio propuesto: lo que quien revisa necesita ver para decidir. */
+function Cambios({ s }: { s: SolicitudVista }) {
+  if (!s.cambios || s.cambios.length === 0) return null;
+  return (
+    <ul className="mt-2 space-y-1 rounded-xl border border-border p-3 text-xs">
+      {s.cambios.map((c) => (
+        <li key={c.campo}>
+          <span className="font-semibold text-foreground">{c.etiqueta}:</span> <span className="text-foreground/60 line-through">{c.antes}</span> → <span className="font-semibold text-foreground">{c.despues}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 type Datos = { porRevisar: SolicitudVista[]; mias: SolicitudVista[]; revisores: string[] };
 
 const ETIQUETA: Record<SolicitudVista["estado"], string> = {
   pendiente: "En revisión",
   rechazada: "Rechazada",
   cancelada: "Retirada",
-  publicada: "Aprobada · pausada",
+  publicada: "Aprobada",
   activa: "Activa",
   fallida: "Falló al crear",
 };
@@ -120,7 +137,7 @@ export function SolicitudesView() {
       <div>
         <h2 className="neo-section-title">Solicitudes</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
-          Lo que el equipo quiere publicar pasa primero por un supervisor. Al aprobarlo se crea pausado en la plataforma y queda un enlace para revisarlo.
+          Lo que el equipo quiere publicar o cambiar pasa primero por quien corresponde. Al aprobarlo se aplica en la plataforma y queda corriendo; hay un enlace para revisarlo.
         </p>
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -132,13 +149,14 @@ export function SolicitudesView() {
           {datos.porRevisar.map((s) => (
             <Surface key={s.id} className="p-4">
               <p className="text-sm font-semibold text-foreground">
-                {s.creador.nombre} quiere subir {s.titulo}
-                {s.destino ? ` a ${s.destino}` : ""}.
+                {s.cambios ? `${s.creador.nombre} quiere hacer ${s.titulo}.` : `${s.creador.nombre} quiere subir ${s.titulo}${s.destino ? ` a ${s.destino}` : ""}.`}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 {s.clienteNombre} · {s.piezas > 1 ? `${s.piezas} piezas · ` : ""}
+                {s.tocaPresupuesto ? "Cambio de presupuesto · " : ""}
                 {fecha(s.creada)}
               </p>
+              <Cambios s={s} />
               {rechazando === s.id ? (
                 <div className="mt-3 space-y-2">
                   <textarea
@@ -188,6 +206,7 @@ export function SolicitudesView() {
                 {s.sinLeer && <span className="size-2 rounded-full bg-brand" aria-label="Novedad" />}
               </div>
               <p className="mt-1.5 text-xs leading-5 text-foreground/70">{s.mensaje}</p>
+              <Cambios s={s} />
               <p className="mt-1 text-[0.68rem] text-muted-foreground">{fecha(s.creada)}</p>
               <Enlaces enlaces={s.enlaces} />
               {s.estado === "pendiente" && (

@@ -97,7 +97,7 @@ export function EjecucionesView() {
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
           Cada fila es una ejecución real del Creador de campañas contra
-          Google o Meta. Todo nace pausado en la plataforma; esto solo registra
+          Google o Meta. Lo aprobado queda corriendo en la plataforma; esto solo registra
           qué se mandó, quién lo mandó y qué respondió cada paso.
         </p>
       </div>

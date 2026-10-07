@@ -618,3 +618,29 @@ Todo lo creado para probar lleva el prefijo `PRUEBA-WIWOADS`. `lib/meta-nativo.t
 - **Reglas**: nueva acción «bajar el presupuesto X %» (campaña o conjunto; no sube ni aplica a anuncios). La creación está probada; el disparo contra una plataforma real no.
 - **Borrado seguro de pruebas**: audiencias, campañas de Google y campañas de Meta solo se borran si su nombre lleva `PRUEBA-WIWOADS`.
 - **Pendiente**: Display y Performance Max siguen con su flujo anterior; Meta no tiene aún su formulario propio separado (ya tiene la estructura de Meta); intereses/idiomas de Meta al crear por idioma; recursos de Google al editar (agregar/quitar enlaces de sitio); programación de anuncios al editar.
+
+## Decisiones, cambios con aprobación y política sin pausa (2026-10-06/07)
+- **Nada nace pausado** (decisión del equipo): lo aprobado queda corriendo. Cambió `buildPlan` (campañas, conjuntos y anuncios en `enabled`/`active`), la creación nativa de Google (Búsqueda, Display, Performance Max), `crearAnuncioDesdeInstagram` (activo por defecto; las pruebas piden `estado: "PAUSED"`) y `planEdicion` (`pausaAlAplicar = false`: solo se pausa lo que se pide con `pausar`). Red de seguridad: si un paso falla a mitad, la campaña incompleta se marca y se pausa. La revisión ocurre ANTES, en la aprobación.
+- **Cambios con aprobación**: un Creator propone una edición (`/api/entidades/editar` con `modo: "solicitar"`, incluida la pausa); queda como solicitud con su antes y después. Aprobar vuelve a leer la plataforma y aplica el plan de ese momento. Los cambios de presupuesto solo los ve y aprueba quien tiene `aprobar_presupuesto` (administradores). Rechazar deja todo como estaba. Probado contra Meta (Colbún, prefijo PRUEBA).
+- **Decisiones** es la pantalla de entrada: cola con filtros y detalle; lo que se aprueba se ejecuta. Nueva tarjeta «No has actualizado el contenido de [campaña]» (Meta: fecha del último anuncio por Graph; Google: historial de cambios de 30 días, cota «más de 30 días»).
+- **Reglas dentro de Meta**: lectura de las reglas nativas (solo lectura), copia de una regla para varios anuncios y regla nueva de tope de gasto (`/api/reglas/meta`); Meta las evalúa sola. Las reglas de Google (acciones en bloque) no tienen API: solo registro manual.
+- **Meta nativo en la lectura**: campañas y conjuntos que Windsor no entrega (pausados o recién creados) se suman leyendo Meta directo (`leerEstructuraMeta`), para poder editarlos.
+- **Diagnóstico de permisos** (solo administradores): qué llave de Meta ve cada cuenta y página y con qué permisos. **Inversión** como ventana propia.
+- **Equipo** (migraciones 0039–0042): cargos y roles; Super Admin/Director/Director creativo protegidos; Digital Creators y Leads dados de alta; jdiaz@ como Director.
+
+## Recomendaciones con sentido (2026-10-07)
+- **Época de la campaña** (`lib/vigencia-campana-pura.ts`): si el nombre trae un mes que terminó hace más de un mes («Leads | junio» en octubre), no se le recomienda renovar contenido. Un mes futuro sin año se asume campaña por venir.
+- **Contenido repetido**: se sugiere cambiarlo desde los **20 días** sin anuncios nuevos, máximo 5 tarjetas por cliente (las más viejas primero).
+- **«"X" dejó de correr»** (`campana_apagada`): gastó el mes pasado, hoy está apagada y sin gasto en 14 días. Se pregunta si debía seguir; «Reactivar» la enciende (Lead o superior) o se propone (Creator).
+- **Descartar con motivo**: «Ya no estará activa», «Es una campaña de temporada» o «Está pausada a propósito» silencian la recomendación para siempre; cualquier otro descarte, 30 días.
+- **Activar** también es un cambio proponible (`CambiosEdicion.activar`), igual que pausar.
+
+## Auditoría unificada (2026-10-07)
+- **Una sola bitácora** (`auditoria`, migración 0043; `lib/auditoria.ts`, `lib/auditoria-pura.ts`): se registra lo que se le pide al bot (cada pregunta y cada herramienta que usa, con sus datos sin secretos), las solicitudes (pedidas, aprobadas, rechazadas, retiradas, activas), las decisiones (aprobadas, descartadas con su motivo, pospuestas), los cambios aplicados con su **antes y después** (presupuesto, títulos, contenido, estado, segmentación, puja, fechas), las creaciones (campañas, impulsos, contenido nuevo), las reglas (creadas, activadas, borradas, disparadas) y los cambios del equipo.
+- **Importante** = tocar presupuesto, rechazos, fallos, cambios del equipo y descartar una decisión. Se marca y se cuenta arriba.
+- **Pantalla Auditoría** (`app/auditoria-view.tsx`): resumen, pestañas por categoría, filtros por tipo de cambio, cliente, persona, periodo y texto, «solo importantes», detalle desplegable y refresco cada 30 s. «Detalle técnico» conserva la vista de ejecuciones con cada paso crudo.
+- **Quién ve qué**: lo del bot y el equipo, solo supervisores y administradores; el resto, por cliente a su alcance; cada persona siempre ve lo suyo. La auditoría solo se escribe: la app no edita ni borra eventos.
+
+## Cada ventana para algo específico (2026-10-07)
+- **Decisiones** (entrada): lo que se puede hacer ahora, con impacto, confianza y vencimiento. **Sala de control**: lo que necesita atención primero (decisiones, solicitudes, cuentas con datos) y acceso a cada ventana; sin cifras de inversión. **Salud de medición**: ventana propia (antes pegada a Cliente). **Inversión**: única ventana con presupuesto del mes, distribución del gasto y gasto por cliente (se quitó de Dashboard C-Level; el presupuesto «en línea» del Constructor y del Simulador es contextual y se queda). **Dashboard C-Level**: solo resultados y estado de campañas y fuentes. **Auditoría**, **Reglas**, **Diagnóstico** y **Cuentas** en Gestión.
+- La barra de la tabla de Cliente sigue la pestaña: «+ Crear campaña», «+ Crear conjunto» o «+ Crear anuncio» (los dos últimos piden primero la campaña y, para un anuncio, el conjunto). «Impulsar» pasó a «Boostear anuncio».

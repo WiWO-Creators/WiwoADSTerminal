@@ -316,10 +316,10 @@ export async function ejecutarPasosDelPlan(
   }
 
   // Un paso hijo (conjunto, grupo o anuncio) falló después de que la campaña
-  // de esa misma plataforma sí se creó: queda huérfana, pausada (nunca gasta
-  // sola) pero indistinguible de una campaña real a simple vista. Windsor no
-  // puede borrarla — solo renombrarla o pausarla, y ya nace pausada — así que
-  // se marca en su nombre real, en la plataforma, no solo en este reporte.
+  // de esa misma plataforma sí se creó: queda huérfana e indistinguible de una
+  // campaña real a simple vista. Como ahora nace activa (decisión del equipo), un paso posterior
+  // fallido (por ejemplo la geolocalización) podría dejarla corriendo mal configurada: se pausa y
+  // se marca en su nombre real, en la plataforma, no solo en este reporte. Windsor no puede borrarla.
   let campanaIncompleta: ResultadoEjecucion["campanaIncompleta"] = null;
   if (!todoBien && pasoFallido && pasoFallido.action !== "create_campaign") {
     const huerfana = campanaPorPlataforma[pasoFallido.platform as WindsorProvider];
@@ -345,6 +345,17 @@ export async function ejecutarPasosDelPlan(
           raw: renombre.raw,
         });
       }
+      // Red de seguridad: una campaña a medio armar no debe seguir corriendo.
+      const parar = await executeWindsorAction(pasoFallido.platform as WindsorProvider, huerfana.accountId, "pause_campaign", { campaign_id: huerfana.id });
+      realizados.push({
+        platform: pasoFallido.platform,
+        action: "pause_campaign",
+        label: "Pausar la campaña incompleta, para que no corra a medio armar",
+        params: { campaign_id: huerfana.id },
+        ok: parar.ok,
+        error: parar.error,
+        raw: parar.raw,
+      });
       campanaIncompleta = {
         platform: pasoFallido.platform,
         campaignId: huerfana.id,

@@ -27,6 +27,8 @@ type Simulacion = {
     diff: CambioVisible[];
     problemas: Problema[];
     pausaAlAplicar: boolean;
+    pausaPedida?: boolean;
+    activacionPedida?: boolean;
   };
   validacionGoogle: { ok: boolean; mensaje: string | null } | null;
 };
@@ -176,6 +178,8 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   const cambio = (k: string) => (ahora[k] ?? "") !== (antes[k] ?? "");
   const c: CambiosEdicion = {};
   if (cambio("nombre")) c.nombre = ahora.nombre;
+  if (ahora.estadoPedido === "pausar") c.pausar = true;
+  if (ahora.estadoPedido === "activar") c.activar = true;
 
   if (cambio("presupuestoMonto") || cambio("presupuestoTipo")) {
     const monto = num(ahora.presupuestoMonto ?? "");
@@ -267,7 +271,7 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   return c;
 }
 
-async function llamar(p: Props, cambios: CambiosEdicion, modo: "simular" | "aplicar") {
+async function llamar(p: Props, cambios: CambiosEdicion, modo: "simular" | "aplicar" | "solicitar") {
   const respuesta = await fetch("/api/entidades/editar", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -292,7 +296,8 @@ export function EditarEntidad(props: Props) {
   const [simulacion, setSimulacion] = useState<Simulacion | null>(null);
   const [aplicado, setAplicado] = useState<Aplicado | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [trabajando, setTrabajando] = useState<"simular" | "aplicar" | null>(null);
+  const [trabajando, setTrabajando] = useState<"simular" | "aplicar" | "solicitar" | null>(null);
+  const [enviado, setEnviado] = useState<string | null>(null);
 
   const cambios = useMemo(() => armarCambios(props, valores, antes), [props, valores, antes]);
   const hayCambios = Object.keys(cambios).length > 0;
@@ -344,17 +349,39 @@ export function EditarEntidad(props: Props) {
     }
   }
 
+  async function solicitar() {
+    setTrabajando("solicitar");
+    setError(null);
+    try {
+      const { ok, cuerpo } = await llamar(props, cambios, "solicitar");
+      if (!ok) throw new Error(cuerpo?.error ?? "No se pudo enviar el cambio a revisión");
+      setEnviado(cuerpo?.solicitud?.mensaje ?? "Tu cambio quedó pendiente de aprobación. Nada se modificó todavía.");
+      setSimulacion(null);
+      toast.success("Cambio enviado a revisión");
+      onSucio?.(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo enviar el cambio a revisión");
+    } finally {
+      setTrabajando(null);
+    }
+  }
+
   useImperativeHandle(ref, () => ({ simular: () => void simular() }));
 
   // Meta no deja cambiar el contenido de un anuncio que usa una publicación existente (nombre y UTM sí).
   const contenidoBloqueado =
     provider === "meta" && nivel === "anuncio" && props.anuncio?.edicionDeContenido.editable === false;
   const bloqueantes = simulacion?.plan.problemas.filter((p) => p.bloqueante) ?? [];
+  const puedeAplicar0 =
+    simulacion !== null &&
+    bloqueantes.length === 0 &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
+    simulacion.validacionGoogle?.ok !== false;
   const puedeAplicar =
     puedeAprobar &&
     simulacion !== null &&
     bloqueantes.length === 0 &&
-    simulacion.plan.pasos.length > 0 &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
 
   return (
@@ -366,6 +393,18 @@ export function EditarEntidad(props: Props) {
             se puede pausar o activar.
           </p>
         ) : (
+          <>
+          <Campo etiqueta="Estado" ayuda="Pausar detiene la entrega; activar la reanuda. Si no eliges nada, el estado no cambia.">
+            <select
+              className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+              value={valores.estadoPedido ?? ""}
+              onChange={(e) => poner("estadoPedido")(e.target.value)}
+            >
+              <option value="">Sin cambio</option>
+              <option value="pausar">Pausar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}</option>
+              {provider !== "linkedin" && <option value="activar">Activar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}</option>}
+            </select>
+          </Campo>
           <Campo
             etiqueta="Nombre"
             ayuda={provider === "linkedin" && nivel === "campana" ? "LinkedIn no permite renombrar un grupo de campañas desde Windsor." : undefined}
@@ -376,6 +415,7 @@ export function EditarEntidad(props: Props) {
               onChange={(e) => poner("nombre")(e.target.value)}
             />
           </Campo>
+          </>
         )}
 
         {!(provider === "linkedin" && nivel === "anuncio") &&
@@ -808,16 +848,22 @@ export function EditarEntidad(props: Props) {
           )}
           {simulacion.plan.pausaAlAplicar && (
             <p className="text-xs text-foreground/55">
-              Al aplicarlo, esto se pausa para que alguien lo revise antes de que siga corriendo con lo nuevo.
-              Cambiar solo el nombre no pausa nada.
+              Al aplicarlo, esto queda pausado: no entregará hasta que lo actives de nuevo en la plataforma.
             </p>
           )}
           {puedeAprobar ? (
             <Button type="button" disabled={!puedeAplicar || trabajando !== null} onClick={aplicar}>
               {trabajando === "aplicar" ? <OrbeDeBoton className="mx-3" /> : "Aplicar en la plataforma"}
             </Button>
+          ) : enviado ? (
+            <p className="rounded-xl border border-foreground/10 p-3 text-sm text-foreground">{enviado}</p>
           ) : (
-            <p className="text-xs text-foreground/55">Tu rol puede armar el cambio pero no aplicarlo. Pídele a un administrador que lo apruebe.</p>
+            <div className="space-y-2">
+              <p className="text-xs text-foreground/55">Tu rol arma el cambio pero no lo aplica: se envía a revisión y no se modifica nada hasta que lo aprueben. Si lo rechazan, todo queda como estaba.</p>
+              <Button type="button" disabled={!puedeAplicar0 || trabajando !== null} onClick={solicitar}>
+                {trabajando === "solicitar" ? <OrbeDeBoton className="mx-3" /> : "Enviar a revisión"}
+              </Button>
+            </div>
           )}
         </div>
       )}

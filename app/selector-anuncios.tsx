@@ -96,8 +96,8 @@ export function SelectorDeAnuncios({
           <DialogTitle>Reutilizar un anuncio de campaña</DialogTitle>
           <DialogDescription>
             Anuncios que ya corren en campañas de {nombreCuenta}. El nuevo anuncio reutiliza la misma publicación, así que
-            conserva sus reacciones, comentarios y compartidos. Para impulsar una publicación normal de Facebook o Instagram
-            (que no está en ninguna campaña), usa «Impulsar publicación de la red».
+            conserva sus reacciones, comentarios y compartidos. Para boostear una publicación normal de Facebook o Instagram
+            (que no está en ninguna campaña), usa «Boostear publicación de la red».
           </DialogDescription>
         </DialogHeader>
 
@@ -153,7 +153,7 @@ export function SelectorDeAnuncios({
                   </span>
                   {a.texto && <span className="line-clamp-2 text-xs leading-5 text-foreground/65">{a.texto}</span>}
                   <span className="mt-auto inline-flex items-center gap-1 pt-1.5 text-xs font-bold text-brand">
-                    <Flame className="size-3.5" /> Impulsar este anuncio
+                    <Flame className="size-3.5" /> Boostear este anuncio
                   </span>
                 </span>
               </button>

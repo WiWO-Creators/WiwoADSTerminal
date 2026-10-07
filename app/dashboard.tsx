@@ -21,6 +21,10 @@ import {
   Search,
   Sun,
   type LucideIcon,
+  Lightbulb,
+  HeartPulse,
+  Stethoscope,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -93,10 +97,14 @@ const Cargando = () => (
 const cargarVista = <T,>(importar: () => Promise<React.ComponentType<T>>) =>
   dynamic(async () => ({ default: await importar() }) as { default: React.ComponentType<T> }, { ssr: false, loading: Cargando });
 const ConstructorView = cargarVista(() => import("./constructor-view").then((m) => m.ConstructorView));
+const MedicionView = cargarVista(() => import("./medicion-view").then((m) => m.MedicionView));
+const InversionView = cargarVista(() => import("./inversion-view").then((m) => m.InversionView));
+const DiagnosticoView = cargarVista(() => import("./diagnostico-view").then((m) => m.DiagnosticoView));
+const DecisionesView = cargarVista(() => import("./sugerencias-tinder").then((m) => m.BotonDeSugerencias));
 const ImpulsarView = cargarVista(() => import("./impulsar-view").then((m) => m.ImpulsarView));
 const ReglasView = cargarVista(() => import("./reglas-view").then((m) => m.ReglasView));
 const SolicitudesView = cargarVista(() => import("./solicitudes-view").then((m) => m.SolicitudesView));
-const EjecucionesView = cargarVista(() => import("./ejecuciones-view").then((m) => m.EjecucionesView));
+const AuditoriaView = cargarVista(() => import("./auditoria-view").then((m) => m.AuditoriaView));
 const SimuladorView = cargarVista(() => import("./simulador-view").then((m) => m.SimuladorView));
 const EquipoView = cargarVista(() => import("./equipo-view").then((m) => m.EquipoView));
 const IntegrationsView = cargarVista(() => import("./integrations-view").then((m) => m.IntegrationsView));
@@ -121,12 +129,34 @@ type ItemDeMenu = {
 };
 
 const navItems: ItemDeMenu[] = [
-  { key: "control", label: "Inicio", icono: Home },
+  {
+    // La primera ventana al entrar: lo que se puede resolver ahora, en tarjetas.
+    key: "decisiones",
+    label: "Decisiones",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: Lightbulb,
+    resumen: "Cambios que se pueden hacer ahora: pausar, ajustar presupuesto o subir contenido nuevo.",
+  },
+  { key: "control", label: "Sala de control", icono: Home },
+  {
+    key: "medicion",
+    label: "Salud de medición",
+    roles: ["admin", "supervisor"],
+    icono: HeartPulse,
+    resumen: "¿Se mide bien lo que se paga? GA4, Tag Manager, eventos clave y conversiones.",
+  },
+  {
+    key: "inversion",
+    label: "Inversión",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: Wallet,
+    resumen: "Cuánto se gastó, contra qué presupuesto y adónde se fue.",
+  },
   {
     key: "health",
     label: "Dashboard C-Level",
     icono: LineChart,
-    resumen: "La lectura ejecutiva: inversión, resultados y estado del dato.",
+    resumen: "Resultados por objetivo y estado de las campañas y de las fuentes de datos.",
   },
   {
     // Antes "Anuncios" era una entrada aparte; ahora la ficha del cliente
@@ -145,7 +175,7 @@ const navItems: ItemDeMenu[] = [
     label: "Creador de campañas",
     roles: ["admin", "supervisor", "analyst"],
     icono: Megaphone,
-    resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado. Los analistas la envían a revisión.",
+    resumen: "Arma y publica campañas en Google y Meta. Los analistas las envían a aprobación; al aprobarse quedan corriendo.",
   },
   {
     key: "solicitudes",
@@ -171,7 +201,7 @@ const navItemsGestion: ItemDeMenu[] = [
     label: "Auditoría",
     roles: ["admin", "supervisor", "analyst"],
     icono: History,
-    resumen: "Qué se publicó, quién lo mandó y qué respondió cada paso.",
+    resumen: "Todo queda registrado: pedidos al bot, solicitudes, decisiones y cada cambio con su antes y después.",
   },
   {
     key: "reglas",
@@ -179,6 +209,13 @@ const navItemsGestion: ItemDeMenu[] = [
     roles: ["admin", "supervisor"],
     icono: ShieldAlert,
     resumen: "Reglas como las de Meta y Google: por ejemplo pausar un anuncio al llegar a cierto gasto.",
+  },
+  {
+    key: "diagnostico",
+    label: "Diagnóstico",
+    roles: ["admin"],
+    icono: Stethoscope,
+    resumen: "Qué llave de Meta ve cada cuenta y página, y qué permiso falta.",
   },
   {
     key: "integrations",
@@ -325,7 +362,7 @@ function builderConstructorAttachTo(
 export default function WiwoDashboard({
   signOutPath,
   initialSnapshot,
-  initialView = "control",
+  initialView = "decisiones",
 }: {
   signOutPath: string;
   initialSnapshot: {
@@ -445,7 +482,9 @@ export default function WiwoDashboard({
     // y se abra otra. Arranca en `false` a propósito (ver la nota del tema,
     // arriba): así la mayoría de las cargas —donde ya se eligió antes— no
     // parpadean con la puerta encima.
+    // Decisiones es la pantalla de entrada y muestra los pendientes de TODOS los clientes: no hace falta elegir uno.
     if (
+      initialView !== "decisiones" &&
       clientesDeclarados.length > 0 &&
       window.sessionStorage.getItem(PUERTA_CLIENTE_STORAGE_KEY) !== "1"
     ) {
@@ -803,6 +842,7 @@ export default function WiwoDashboard({
             un control importante (un botón, la última fila de una tabla)
             justo detrás del orbe flotante al hacer scroll hasta el final. */}
         <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
+          {view === "decisiones" && <DecisionesView modo="pagina" clienteId={clienteSeleccionado} rango={performance.rango.id} />}
           {view === "control" && (
             <ControlRoomView
               nombre={initialSnapshot.user.displayName.trim().split(/\s+/)[0] || "equipo"}
@@ -826,13 +866,6 @@ export default function WiwoDashboard({
               puedeVerResumen={
                 initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
               }
-              puedeVerAlertas={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
-              }
-              puedeEditarFicha={
-                initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor"
-              }
-              puedeVerSugerencias={initialSnapshot.user.role !== "client"}
             />
           )}
           {view === "clients" && (
@@ -918,13 +951,20 @@ export default function WiwoDashboard({
           )}
           {view === "solicitudes" && <SolicitudesView />}
           {view === "reglas" && <ReglasView clienteId={clienteSeleccionado} />}
+          {view === "medicion" && (initialSnapshot.user.role === "admin" || initialSnapshot.user.role === "supervisor") && (
+            <MedicionView clienteId={clienteSeleccionado} performance={performance} puedeEditar onElegirCliente={setClienteSeleccionado} />
+          )}
+          {view === "inversion" && (
+            <InversionView clienteId={clienteSeleccionado} performance={performance} periodo={performance.rango.label} onElegirCliente={setClienteSeleccionado} />
+          )}
+          {view === "diagnostico" && initialSnapshot.user.role === "admin" && <DiagnosticoView clienteId={clienteSeleccionado} />}
           <Dialog open={impulsarAbierto} onOpenChange={setImpulsarAbierto}>
             <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
-              <DialogTitle className="sr-only">Impulsar</DialogTitle>
+              <DialogTitle className="sr-only">Boostear anuncio</DialogTitle>
               {impulsarAbierto && <ImpulsarView clienteId={clienteSeleccionado} puedeAprobar={initialSnapshot.user.role !== "analyst"} />}
             </DialogContent>
           </Dialog>
-          {view === "historial" && <EjecucionesView />}
+          {view === "historial" && <AuditoriaView />}
           {view === "team" && (
             <EquipoView
               portfolios={performance.portfolios.map((item) => ({

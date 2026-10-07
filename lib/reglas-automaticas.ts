@@ -10,6 +10,7 @@
  * minutos) o al pulsar «Evaluar ahora»; y la lectura de gasto viene de Windsor, que puede ir minutos atrasada.
  */
 import { getRawDb } from "@/db";
+import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { ACCION, valoresDeParametros } from "@/lib/acciones-estado";
 import { nombreDeEdicion, pasoDeEdicion } from "@/lib/edicion-registro";
@@ -116,7 +117,20 @@ export async function crearRegla(actor: Actor, e: EntradaDeRegla): Promise<Regla
     )
     .bind(id, e.clienteId, e.plataforma, e.cuenta, e.nivel, e.entidadId, e.entidad.slice(0, 200), e.campaignId ?? null, e.adsetId ?? null, e.metrica, e.operador, e.umbral, e.periodo, e.accion, e.moneda ?? null, e.accionValor ?? null, actor.email, Date.now())
     .run();
-  return aRegla((await filaDe(id))!);
+  const creada = aRegla((await filaDe(id))!);
+  await registrarAuditoria({
+    categoria: "regla",
+    accion: "creada",
+    actorEmail: actor.email,
+    portfolioId: e.clienteId,
+    plataforma: e.plataforma,
+    entidadTipo: e.nivel,
+    entidadId: e.entidadId,
+    entidadNombre: e.entidad,
+    titulo: `${actor.email.split("@")[0]} creó una regla sobre «${e.entidad}»: ${creada.texto}`,
+    detalle: { reglaId: id, texto: creada.texto },
+  });
+  return creada;
 }
 
 async function filaDe(id: string): Promise<Fila | null> {
@@ -133,12 +147,32 @@ export async function cambiarRegla(actor: Actor, id: string, cambio: { activa?: 
   const f = await filaDe(id);
   if (!puede(actor) || !f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeRegla("No encontré esa regla.", 404);
   const db = getRawDb();
+  const auditar = (accion: string, verbo: string) =>
+    registrarAuditoria({
+      categoria: "regla",
+      accion,
+      actorEmail: actor.email,
+      portfolioId: f.portfolio_id,
+      plataforma: f.provider,
+      entidadTipo: f.nivel,
+      entidadId: f.entity_id,
+      entidadNombre: f.entity_name,
+      titulo: `${actor.email.split("@")[0]} ${verbo} la regla sobre «${f.entity_name}»: ${aRegla(f).texto}`,
+      detalle: { reglaId: f.id },
+    });
   if (cambio.borrar) {
     await db.prepare("DELETE FROM reglas_automaticas WHERE id = ?").bind(id).run();
+    await auditar("borrada", "borró");
     return;
   }
-  if (typeof cambio.activa === "boolean") await db.prepare("UPDATE reglas_automaticas SET activa = ? WHERE id = ?").bind(cambio.activa ? 1 : 0, id).run();
-  if (cambio.rearmar) await db.prepare("UPDATE reglas_automaticas SET disparada_clave = NULL WHERE id = ?").bind(id).run();
+  if (typeof cambio.activa === "boolean") {
+    await db.prepare("UPDATE reglas_automaticas SET activa = ? WHERE id = ?").bind(cambio.activa ? 1 : 0, id).run();
+    await auditar(cambio.activa ? "activada" : "desactivada", cambio.activa ? "activó" : "desactivó");
+  }
+  if (cambio.rearmar) {
+    await db.prepare("UPDATE reglas_automaticas SET disparada_clave = NULL WHERE id = ?").bind(id).run();
+    await auditar("rearmada", "rearmó");
+  }
 }
 
 const filasDeEntidad = (r: Fila, ads: AdSummary[]): AdSummary[] =>
@@ -245,6 +279,19 @@ export async function evaluarReglas(actor: Actor, ahora = new Date()): Promise<R
       }
       await getRawDb().prepare("UPDATE reglas_automaticas SET disparada_clave = ?, disparada_at = ?, ultimo_valor = ?, ultimo_resultado = ? WHERE id = ?").bind(clave, ahora.getTime(), valor, resultado, r.id).run();
       salida.disparadas.push({ regla: aRegla(r).texto, entidad: r.entity_name, valor, resultado });
+      await registrarAuditoria({
+        categoria: "regla",
+        accion: "disparada",
+        actorEmail: actor.email,
+        portfolioId: r.portfolio_id,
+        plataforma: r.provider,
+        entidadTipo: r.nivel,
+        entidadId: r.entity_id,
+        entidadNombre: r.entity_name,
+        titulo: `Se cumplió la regla sobre «${r.entity_name}»: ${aRegla(r).texto} → ${resultado}`,
+        etiquetas: r.accion === "bajar_presupuesto" ? ["presupuesto"] : r.accion === "pausar" ? ["estado"] : [],
+        detalle: { reglaId: r.id, valor, accion: r.accion, resultado },
+      });
     }
   }
   return salida;

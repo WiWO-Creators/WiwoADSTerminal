@@ -60,6 +60,7 @@ type Member = {
   isActive: boolean;
   portfolioIds: string[];
   foundingAdmin: boolean;
+  cargo?: string | null;
   invitedBy: string | null;
   lastSeenAt: number | null;
 };
@@ -297,8 +298,9 @@ export function EquipoView({
                         {member.email}
                       </span>
                       <span className="mt-1 block text-xs text-foreground/45">
+                        {member.cargo ? `${member.cargo} · ` : ""}
                         {member.foundingAdmin
-                          ? "Administrador fundador"
+                          ? "Protegido: no se modifica desde la app"
                           : member.invitedBy
                             ? `Agregado por ${member.invitedBy}`
                             : "—"}

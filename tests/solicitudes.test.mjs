@@ -18,7 +18,7 @@ test("solo una solicitud pendiente se aprueba, rechaza o retira; solo una public
 test("el analista recibe los mensajes pedidos, con los nombres de los supervisores", () => {
   const base = { creadorNombre: "Ana", revisorNombre: "Luis", notaDeRevision: null, titulo: "un anuncio", error: null };
   assert.match(mensajeParaElCreador({ ...base, estado: "pendiente" }, ["Luis", "Marta"]), /enviada a revisión.*Luis, Marta/);
-  assert.match(mensajeParaElCreador({ ...base, estado: "publicada" }, []), /pausada.*cuando esté activa/);
+  assert.match(mensajeParaElCreador({ ...base, estado: "publicada" }, []), /ya quedó creada.*cuando esté activa/);
   assert.match(mensajeParaElCreador({ ...base, estado: "activa" }, []), /funcionando/);
   assert.match(mensajeParaElCreador({ ...base, estado: "rechazada", notaDeRevision: "falta el copy" }, []), /Luis la rechazó: falta el copy/);
 });
@@ -49,4 +49,41 @@ test("quien creó la solicitud la ve; quien revisa solo si el cliente está a su
   assert.equal(puedeVerSolicitud({ ...o, email: "b@x" }), false);
   assert.equal(puedeVerSolicitud({ ...o, email: "b@x", esRevisor: true, clienteEnAlcance: true }), true);
   assert.equal(puedeVerSolicitud({ ...o, email: "b@x", esRevisor: true, clienteEnAlcance: false }), false);
+});
+
+const { tocaPresupuesto } = await import("../lib/edicion-plan.ts");
+const { roleCan } = await import("../lib/permisos.ts");
+
+test("un cambio toca presupuesto si cambia el presupuesto o el tope de gasto; el nombre no", () => {
+  assert.equal(tocaPresupuesto({ presupuesto: { tipo: "daily", monto: 500 } }), true);
+  assert.equal(tocaPresupuesto({ limiteGasto: 1000 }), true);
+  assert.equal(tocaPresupuesto({ nombre: "Otro nombre", puja: 2 }), false);
+});
+
+test("solo los administradores aprueban cambios de presupuesto; los supervisores aprueban el resto", () => {
+  assert.equal(roleCan("admin", "aprobar_presupuesto"), true);
+  assert.equal(roleCan("supervisor", "aprobar_presupuesto"), false);
+  assert.equal(roleCan("analyst", "aprobar_presupuesto"), false);
+  assert.equal(roleCan("supervisor", "aprobar_cambios"), true);
+  assert.equal(roleCan("analyst", "aprobar_cambios"), false);
+});
+
+
+test("un cambio rechazado dice que todo quedó como estaba; uno pendiente, que nada se modificó", () => {
+  const base = { creadorNombre: "Álvaro", revisorNombre: "Franz", notaDeRevision: null, titulo: "x", error: null, esEdicion: true };
+  assert.match(mensajeParaElCreador({ ...base, estado: "rechazada" }, []), /todo quedó tal como estaba/);
+  assert.match(mensajeParaElCreador({ ...base, estado: "pendiente" }, ["Franz"]), /nada se modificó todavía.*Franz/);
+  assert.match(mensajeParaElCreador({ ...base, estado: "publicada" }, []), /ya se aplicó/);
+});
+
+const { esCargoProtegido } = await import("../lib/permisos.ts");
+
+test("los jefes (Director y Director creativo) están protegidos; Director Digital y Digital Lead no", () => {
+  assert.equal(esCargoProtegido("Super Admin"), true);
+  assert.equal(esCargoProtegido("Director"), true);
+  assert.equal(esCargoProtegido("Paid Media"), false);
+  assert.equal(esCargoProtegido("director creativo"), true);
+  assert.equal(esCargoProtegido("Director Digital"), false);
+  assert.equal(esCargoProtegido("Digital Lead"), false);
+  assert.equal(esCargoProtegido(null), false);
 });

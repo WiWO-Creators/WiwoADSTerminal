@@ -1,6 +1,7 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
+import { registrarAuditoria } from "@/lib/auditoria";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { nombreDeEdicion, pasoDeEdicion } from "@/lib/edicion-registro";
 import { can, enAlcance } from "@/lib/permisos";
@@ -103,6 +104,21 @@ export async function POST(request: Request) {
     [pasoDeEdicion(provider, action, params, resultado, body.accountId)],
     resultado.ok,
   );
+
+  await registrarAuditoria({
+    categoria: "cambio",
+    accion: resultado.ok ? "aplicado" : "fallido",
+    actorEmail: session.actor.email,
+    portfolioId: portafolio.id,
+    portfolioNombre: portafolio.name,
+    plataforma: provider,
+    entidadTipo: nivel,
+    entidadId: String(Object.values(params)[Object.values(params).length - 1] ?? ""),
+    titulo: `${session.actor.email.split("@")[0]} ${body.activar ? "activó" : "pausó"} ${nivel === "campana" ? "una campaña" : nivel === "conjunto" ? "un conjunto" : "un anuncio"} (${nombreDeEdicion(action, params)})${resultado.ok ? "" : " (falló)"}`,
+    resultado: resultado.ok ? "ok" : "error",
+    etiquetas: ["estado"],
+    detalle: { accion: action, parametros: params, error: resultado.ok ? null : resultado.error },
+  });
 
   if (!resultado.ok) {
     return Response.json(

@@ -24,7 +24,16 @@ import {
   type AccionSugerida,
   type ClienteParaSugerir,
   type Sugerencia,
+  sugerenciasDeContenido,
+  type EntradaDeContenido,
+  sugerenciasDeCampanaApagada,
+  type EntradaDeCampanaApagada,
 } from "@/lib/sugerencias";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { recortar } from "@/lib/auditoria-pura";
+import { ultimoAnuncioGooglePorCampana } from "@/lib/google-ads-nativo";
+import { accesoNativoGoogle } from "@/lib/integration-store";
+import { metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
 
 export class ErrorDeSugerencias extends Error {
   status: number;
@@ -112,6 +121,8 @@ function accionDe(json: string | null): AccionSugerida | null {
   try {
     const dato = JSON.parse(json) as AccionSugerida;
     if (dato.tipo === "pausar" || dato.tipo === "revisar") return dato;
+    if (dato.tipo === "contenido" && Number.isFinite(dato.dias)) return dato;
+    if (dato.tipo === "reactivar") return dato;
     if (dato.tipo === "presupuesto" && Number.isFinite(dato.monto)) return dato;
   } catch {
     // Una acción ilegible se trata como "sin acción": se muestra, no se ejecuta.
@@ -279,7 +290,85 @@ export async function evaluarSugerencias(
     }
   }
 
+  // Contenido: campañas de Meta activas cuyo último anuncio es viejo. Una lectura por cuenta; si falla, no se sugiere nada.
+  const entradasDeContenido: EntradaDeContenido[] = [];
+  if (metaNativoConfigurado()) {
+    const porCuenta = new Map<string, Awaited<ReturnType<typeof ultimoAnuncioPorCampana>> | null>();
+    for (const c of clientes) {
+      for (const camp of actual.campaigns) {
+        if (camp.provider !== "meta" || !camp.campaignId || !camp.conActividad || !c.cuentas.has(camp.accountKey)) continue;
+        if (!["ACTIVE", "ENABLED"].includes((camp.status ?? "").toUpperCase())) continue;
+        if (!porCuenta.has(camp.accountId)) {
+          porCuenta.set(camp.accountId, await ultimoAnuncioPorCampana(camp.accountId).catch(() => null));
+        }
+        const fechas = porCuenta.get(camp.accountId);
+        entradasDeContenido.push({
+          cliente: { id: c.id, nombre: c.nombre },
+          provider: "meta",
+          accountId: camp.accountId,
+          campanaId: camp.campaignId,
+          campanaNombre: camp.name,
+          ultimoAnuncio: fechas?.get(camp.campaignId) ?? null,
+        });
+      }
+    }
+  }
+
+  // Google: el historial de cambios dice cuándo se creó el último anuncio (30 días); sin eventos, hay una cota de «más de 30 días».
+  const porCuentaGoogle = new Map<string, Map<string, number> | null>();
+  for (const c of clientes) {
+    for (const camp of actual.campaigns) {
+      if (camp.provider !== "google" || !camp.campaignId || !camp.conActividad || !c.cuentas.has(camp.accountKey)) continue;
+      if (!["ACTIVE", "ENABLED"].includes((camp.status ?? "").toUpperCase())) continue;
+      if (!porCuentaGoogle.has(camp.accountId)) {
+        const cred = await accesoNativoGoogle(actor, camp.accountId).catch(() => null);
+        porCuentaGoogle.set(camp.accountId, cred ? await ultimoAnuncioGooglePorCampana(cred, camp.accountId, ahora).catch(() => null) : null);
+      }
+      const fechas = porCuentaGoogle.get(camp.accountId);
+      if (!fechas) continue;
+      const ultimo = fechas.get(camp.campaignId);
+      entradasDeContenido.push({
+        cliente: { id: c.id, nombre: c.nombre },
+        provider: "google",
+        accountId: camp.accountId,
+        campanaId: camp.campaignId,
+        campanaNombre: camp.name,
+        ultimoAnuncio: ultimo ?? ahora.getTime() - 30 * 86_400_000,
+        soloCota: ultimo === undefined,
+      });
+    }
+  }
+
+  // Campañas que gastaron el mes pasado y hoy no están activas ni tienen gasto: se pregunta si debían seguir.
+  const entradasApagadas: EntradaDeCampanaApagada[] = [];
+  const mesPrevio = await getPerformanceSnapshot(actor, ahora, { incluirCampanas: true, incluirAnuncios: false, rango: "mes_anterior" }).catch(() => null);
+  if (mesPrevio) {
+    const conGastoReciente = new Set(actual.campaigns.filter((c) => c.conActividad).map((c) => `${c.accountKey}|${c.campaignId}`));
+    const mesAnterior = new Intl.DateTimeFormat("es-CL", { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - 1, 1)));
+    for (const c of clientes) {
+      for (const camp of mesPrevio.campaigns) {
+        if (!isActivePlatform(camp.provider) || !camp.campaignId || !c.cuentas.has(camp.accountKey) || camp.spendMicros <= 0) continue;
+        if (conGastoReciente.has(`${camp.accountKey}|${camp.campaignId}`)) continue;
+        // Sin estado conocido no se afirma que esté apagada.
+        const estado = (camp.status ?? "").toUpperCase();
+        if (estado === "" || estado === "ACTIVE" || estado === "ENABLED") continue;
+        entradasApagadas.push({
+          cliente: { id: c.id, nombre: c.nombre },
+          provider: camp.provider,
+          accountId: camp.accountId,
+          campanaId: camp.campaignId,
+          campanaNombre: camp.name,
+          gastoMesAnteriorMicros: camp.spendMicros,
+          moneda: camp.currency,
+          mesAnterior,
+        });
+      }
+    }
+  }
+
   const candidatas = [
+    ...sugerenciasDeCampanaApagada(entradasApagadas, ahora),
+    ...sugerenciasDeContenido(entradasDeContenido, ahora),
     ...generarSugerencias(
     clientes,
     // Solo plataformas donde el cambio se puede aplicar: LinkedIn se lee, pero no se escribe.
@@ -303,6 +392,7 @@ export async function evaluarSugerencias(
     ) {
       continue;
     }
+    if (await silenciada(s, ahora.getTime())) continue;
     aInsertar.push(s);
   }
 
@@ -361,6 +451,25 @@ export async function evaluarSugerencias(
     ahora.getTime(),
   );
   return { generadas, evaluados: clientes.length };
+}
+
+/** Motivos que silencian una recomendación para siempre: la campaña ya no estará activa, es de temporada o está pausada a propósito. */
+export const MOTIVOS_QUE_SILENCIAN = ["Ya no estará activa", "Es una campaña de temporada", "Está pausada a propósito"];
+const SILENCIO_POR_DESCARTE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** ¿Alguien ya descartó esta misma recomendación para esta campaña? Con un motivo definitivo no vuelve; con otro, no vuelve por 30 días. */
+async function silenciada(s: Sugerencia, ahora: number): Promise<boolean> {
+  if (!s.entityId || !s.provider) return false;
+  const marcas = MOTIVOS_QUE_SILENCIAN.map(() => "?").join(", ");
+  const fila = await getRawDb()
+    .prepare(
+      `SELECT id FROM decisions
+       WHERE rule = ? AND provider = ? AND entity_id = ? AND status = 'discarded'
+         AND (discard_reason IN (${marcas}) OR resolved_at >= ?) LIMIT 1`,
+    )
+    .bind(s.rule, s.provider, s.entityId, ...MOTIVOS_QUE_SILENCIAN, ahora - SILENCIO_POR_DESCARTE_MS)
+    .first<{ id: string }>();
+  return fila !== null;
 }
 
 /** ¿Ya se aprobó un ajuste de presupuesto de esta campaña hace menos de 48 horas? */
@@ -463,9 +572,9 @@ export async function resolverSugerencia(
     throw new ErrorDeSugerencias("Acción no reconocida", 400);
   }
   const fila = await getRawDb()
-    .prepare("SELECT portfolio_id, client FROM decisions WHERE id = ? LIMIT 1")
+    .prepare("SELECT portfolio_id, client, title, rule, entity_id, entity_name, platform FROM decisions WHERE id = ? LIMIT 1")
     .bind(accion.id)
-    .first<{ portfolio_id: string | null; client: string }>();
+    .first<{ portfolio_id: string | null; client: string; title: string; rule: string; entity_id: string | null; entity_name: string | null; platform: string }>();
   if (!fila) throw new ErrorDeSugerencias("Sugerencia no encontrada", 404);
   if (fila.portfolio_id) {
     if (!enAlcance(actor, fila.portfolio_id)) throw new ErrorDeSugerencias("Ese cliente no está en tu alcance", 403);
@@ -474,4 +583,18 @@ export async function resolverSugerencia(
     throw new ErrorDeSugerencias("Ese cliente no está en tu alcance", 403);
   }
   await resolverDecision(actor, accion);
+  const verbo = accion.type === "approve" ? "aprobó" : accion.type === "discard" ? "descartó" : "pospuso";
+  await registrarAuditoria({
+    categoria: "decision",
+    accion: accion.type === "approve" ? "aprobada" : accion.type === "discard" ? "descartada" : "pospuesta",
+    actorEmail: actor.email,
+    portfolioId: fila.portfolio_id,
+    portfolioNombre: fila.client,
+    plataforma: fila.platform,
+    entidadTipo: fila.entity_id ? "campana" : null,
+    entidadId: fila.entity_id,
+    entidadNombre: fila.entity_name,
+    titulo: `${verbo} la recomendación: ${recortar(fila.title, 140)}`,
+    detalle: { regla: fila.rule, motivo: accion.reason ?? null, recomendacion: fila.title },
+  });
 }

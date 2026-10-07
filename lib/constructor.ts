@@ -966,16 +966,8 @@ export type CampaignDraft = {
    */
   existingAdset: { adsetId: string; adsetName: string } | null;
   /**
-   * Solo tiene efecto cuando se crea una campaña 100% nueva (`existingCampaign`
-   * es `null`): el conjunto y el anuncio nacen activos en vez de pausados,
-   * para no tener que activarlos a mano después de activar la campaña. Seguro
-   * porque la campaña en sí SIEMPRE nace pausada (ver `buildPlan`) — nada
-   * entrega mientras esa pausa siga puesta, sin importar el estado del hijo.
-   *
-   * Al adjuntar a una campaña o conjunto que YA existe (y que puede estar
-   * corriendo de verdad), esto no aplica nunca: ahí el conjunto/anuncio nuevo
-   * sigue naciendo pausado sin excepción — no hay una campaña recién creada
-   * y pausada que sirva de freno.
+   * Obsoleto: desde 2026-10-06 nada nace pausado (la campaña, el conjunto y el anuncio quedan activos al publicarse,
+   * porque ya pasaron por las aprobaciones). Se conserva en el borrador por compatibilidad y se ignora.
    */
   activarConjuntoYAnuncio: boolean;
 };
@@ -1543,7 +1535,7 @@ export function validateDraft(
  *
  * Se devuelven los parámetros exactos de cada acción de Windsor, para que la
  * persona que aprueba vea lo que va a pasar y no una descripción aproximada.
- * Todo nace pausado.
+ * Todo nace activo (decisión del equipo, 2026-10-06): la revisión es la aprobación previa, no una pausa posterior.
  */
 export function buildPlan(
   draft: CampaignDraft,
@@ -1594,12 +1586,9 @@ export function buildPlan(
   const enCampanaExistente =
     draft.existingCampaign?.platform === "google" ? draft.existingCampaign : null;
   const enConjuntoExistente = enCampanaExistente ? draft.existingAdset : null;
-  // Solo aplica cuando la campaña es 100% nueva: la campaña recién creada es
-  // la que queda pausada como freno (ver el paso create_campaign más abajo,
-  // siempre "paused"). Adjuntar a algo que ya existe (y que puede estar
-  // corriendo) nunca activa el hijo de entrada.
-  const statusHijoGoogle: "enabled" | "paused" =
-    !enCampanaExistente && draft.activarConjuntoYAnuncio ? "enabled" : "paused";
+  // Decisión del equipo (2026-10-06): nada nace pausado. Lo que llega acá ya pasó por las aprobaciones que corresponden
+  // (un Creator lo propone y un Lead o superior lo aprueba), así que al publicarse queda corriendo.
+  const statusHijoGoogle: "enabled" | "paused" = "enabled";
   const etiquetaEstadoGoogle = statusHijoGoogle === "enabled" ? "activo" : "pausado";
 
   if (draft.platforms.includes("google") && draft.googleChannel === "pmax") {
@@ -1611,7 +1600,7 @@ export function buildPlan(
       platform: "google",
       action: "ads:create_pmax",
       via: "nativa",
-      label: cuentaPmax ? `Crear campaña de Performance Max en ${cuentaPmax.name} (pausada)` : "Crear campaña de Performance Max (pausada)",
+      label: cuentaPmax ? `Crear campaña de Performance Max en ${cuentaPmax.name}` : "Crear campaña de Performance Max",
       params: {
         name: nombreCompuesto(objective.sigla, "google", draft.name),
         daily_budget_micros: Math.max(1, Math.round(presupuestoDe("google") / dias)) * 1_000_000,
@@ -1628,7 +1617,7 @@ export function buildPlan(
           .map((p) => GOOGLE_GEO_TARGET_IDS[p]),
         excluded_locations: draft.excludedCountries.filter((p) => GOOGLE_GEO_TARGET_IDS[p]).map((p) => GOOGLE_GEO_TARGET_IDS[p]),
         ...(draft.budgetMode === "total" && draft.endDate ? { end_date: draft.endDate } : {}),
-        status: "paused",
+        status: "enabled",
       },
     });
     if (googleSinConversiones) {
@@ -1698,7 +1687,7 @@ export function buildPlan(
       platform: "google",
       action: "ads:create_search_campaign",
       via: "nativa",
-      label: cuentaBusqueda ? `Crear campaña de Búsqueda en ${cuentaBusqueda.name} (pausada)` : "Crear campaña de Búsqueda (pausada)",
+      label: cuentaBusqueda ? `Crear campaña de Búsqueda en ${cuentaBusqueda.name}` : "Crear campaña de Búsqueda",
       params: { datos },
     });
     if (cfg.puja === "auto" && googleSinConversiones) {
@@ -1723,8 +1712,8 @@ export function buildPlan(
         platform: "google",
         action: "create_campaign",
         label: cuenta
-          ? `Crear campaña en ${cuenta.name} (pausada)`
-          : "Crear campaña (pausada)",
+          ? `Crear campaña en ${cuenta.name}`
+          : "Crear campaña",
         params: {
           // Siglas propias, no el nombre a secas: [OBJETIVO] [PLATAFORMA]
           // identifica de un vistazo qué es esto y de quién es, incluso en
@@ -1744,7 +1733,7 @@ export function buildPlan(
             ) * 1_000_000,
           channel_type: draft.googleChannel,
           bidding_strategy: estrategiaGoogle,
-          status: "paused",
+          status: "enabled",
         },
       });
     }
@@ -1782,7 +1771,7 @@ export function buildPlan(
           landscape_image_url: draft.mediaUrl.trim(),
           square_image_url: draft.displaySquareUrl.trim(),
           ...(draft.displayLogoUrl.trim() ? { logo_url: draft.displayLogoUrl.trim() } : {}),
-          status: "paused",
+          status: "enabled",
         },
       });
     } else steps.push({
@@ -1970,8 +1959,7 @@ export function buildPlan(
   // Mismo criterio que statusHijoGoogle: solo activo de entrada cuando la
   // campaña de Meta es 100% nueva en este plan — la campaña pausada es el
   // freno, nunca el conjunto o el anuncio adjuntados a algo que ya existe.
-  const statusHijoMeta: "active" | "paused" =
-    !enCampanaMetaExistente && draft.activarConjuntoYAnuncio ? "active" : "paused";
+  const statusHijoMeta: "active" | "paused" = "active";
   const etiquetaEstadoMeta = statusHijoMeta === "active" ? "activo" : "pausado";
 
   if (draft.platforms.includes("meta")) {
@@ -1990,8 +1978,8 @@ export function buildPlan(
         platform: "meta",
         action: "create_campaign",
         label: cuenta
-          ? `Crear campaña en ${cuenta.name} (pausada)`
-          : "Crear campaña (pausada)",
+          ? `Crear campaña en ${cuenta.name}`
+          : "Crear campaña",
         params: {
           // Impulsar una publicación crea una campaña de INTERACCIÓN (lo exige Meta): la sigla del nombre debe decir
           // lo mismo, porque los reportes clasifican el objetivo por la sigla. Antes quedaba «[LDS]» sobre una de interacción.
@@ -2020,7 +2008,7 @@ export function buildPlan(
               // exigen declarar esto explícito: que el gasto NO se comparte
               // entre conjuntos, porque cada uno trae el suyo propio.
               { is_adset_budget_sharing_enabled: false }),
-          status: "paused",
+          status: "active",
         },
       });
     }

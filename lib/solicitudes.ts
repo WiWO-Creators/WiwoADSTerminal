@@ -13,12 +13,20 @@ import type { CampaignDraft } from "@/lib/constructor";
 import { armarPlanDeBorrador, ejecutarPlanArmado, ErrorDeConstructor } from "@/lib/constructor-servicio";
 import type { PasoEjecutado } from "@/lib/constructor-ejecutar";
 import { fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
-import { copiarReglaMetaParaAnuncio, crearAnuncioDesdeInstagram } from "@/lib/meta-nativo";
+import { creativoDeCarrusel, creativoDeImagen, tituloDeContenido, validarContenido, type DatosDeContenido } from "@/lib/anuncios-formato-pura";
+import { copiarReglaMetaParaAnuncio, crearAnuncioConCreativo, crearAnuncioDesdeInstagram } from "@/lib/meta-nativo";
 import { crearRegla } from "@/lib/reglas-automaticas";
 import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafolios-store";
 import { enlaceDeCampana, type Enlace } from "@/lib/enlaces";
 import { idDeResultado } from "@/lib/ids-de-resultado";
 import { accesoNativoGoogle } from "@/lib/integration-store";
+import { registrarAuditoria } from "@/lib/auditoria";
+import { etiquetasDeCambios, resumenDeCambios, type ResultadoDeAuditoria } from "@/lib/auditoria-pura";
+import { ejecutarPasosDeEdicion } from "@/lib/edicion-ejecutar";
+import { hayAlgoQueAplicar, tocaPresupuesto, type CambioVisible, type CambiosEdicion } from "@/lib/edicion-plan";
+import { prepararEdicion } from "@/lib/edicion-servicio";
+import { registrarEjecucion } from "@/lib/constructor-ejecutar";
+import type { NivelEntidad, Platform } from "@/lib/plataformas";
 import { can, enAlcance, puedeArmarCampanas, type Actor } from "@/lib/permisos";
 import {
   ESTADOS_QUE_AVISAN,
@@ -70,6 +78,10 @@ export type Solicitud = {
   mensaje: string;
   /** Cuántos anuncios o piezas incluye. */
   piezas: number;
+  /** Es un cambio sobre algo que ya existe: lo que cambia, antes y después. */
+  cambios: CambioVisible[] | null;
+  /** El cambio toca presupuesto: lo aprueba un Director Digital o superior. */
+  tocaPresupuesto: boolean;
 };
 
 const supervisoresDe = async (): Promise<string[]> => {
@@ -84,10 +96,30 @@ export async function nombresDeRevisores(): Promise<string[]> {
   return supervisoresDe().catch(() => []);
 }
 
+/** Quién puede aprobar un cambio de presupuesto: solo administradores (Directores Digitales y jefes). */
+async function nombresDeAdministradores(): Promise<string[]> {
+  const { results } = await getRawDb()
+    .prepare("SELECT display_name FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY display_name")
+    .all<{ display_name: string }>()
+    .catch(() => ({ results: [] as Array<{ display_name: string }> }));
+  return (results ?? []).map((r) => r.display_name).filter(Boolean);
+}
+
+/** Los datos de un cambio propuesto, si la solicitud es de ese tipo. */
+function edicionDe(f: Fila): EdicionPropuesta | null {
+  try {
+    const d = (JSON.parse(f.drafts_json) as Array<Partial<EdicionPropuesta>>)[0];
+    return d && d.__edicion === true ? (d as EdicionPropuesta) : null;
+  } catch {
+    return null;
+  }
+}
+
 const puedeRevisar = (actor: Actor) => actor.isActive && can(actor, "aprobar_cambios");
 const puedeCrear = (actor: Actor) => actor.isActive && puedeArmarCampanas(actor);
 
-function aSolicitud(f: Fila, supervisores: string[]): Solicitud {
+function aSolicitud(f: Fila, supervisores: string[], administradores: string[] = []): Solicitud {
+  const edicion = edicionDe(f);
   const estado = esEstadoDeSolicitud(f.estado) ? f.estado : "pendiente";
   const drafts = JSON.parse(f.drafts_json) as unknown[];
   const base = {
@@ -97,6 +129,7 @@ function aSolicitud(f: Fila, supervisores: string[]): Solicitud {
     notaDeRevision: f.nota_revision,
     titulo: f.titulo,
     error: f.error_texto,
+    esEdicion: edicion !== null,
   };
   return {
     id: f.id,
@@ -116,8 +149,10 @@ function aSolicitud(f: Fila, supervisores: string[]): Solicitud {
     publicada: f.publicada_at,
     activa: f.activa_at,
     sinLeer: f.avisada === 0 && ESTADOS_QUE_AVISAN.has(estado),
-    mensaje: mensajeParaElCreador(base, supervisores),
+    mensaje: mensajeParaElCreador(base, edicion?.tocaPresupuesto ? administradores : supervisores),
     piezas: Array.isArray(drafts) ? drafts.length : 1,
+    cambios: edicion?.diff ?? null,
+    tocaPresupuesto: edicion?.tocaPresupuesto ?? false,
   };
 }
 
@@ -138,6 +173,107 @@ export type ImpulsoDeInstagram = {
   /** Regla propia que se crea sobre el anuncio al publicarse (copia la condición de una regla de Meta, que no se toca). */
   regla?: { nombre: string; reglaMetaId?: string; metrica: string; operador: string; umbral: number; periodo: string; accion: string; moneda: string | null };
 };
+
+/** Un cambio propuesto sobre una campaña, conjunto o anuncio que ya existe. Nada se aplica hasta que alguien con permiso lo apruebe. */
+export type EdicionPropuesta = {
+  __edicion: true;
+  portfolioId: string;
+  provider: string;
+  accountId: string;
+  nivel: NivelEntidad;
+  id: string;
+  entidad: string;
+  cambios: CambiosEdicion;
+  /** Lo que cambiaría, antes y después, tal como se vio al proponerlo. */
+  diff: CambioVisible[];
+  tocaPresupuesto: boolean;
+};
+
+const ETIQUETA_NIVEL: Record<string, string> = { campana: "la campaña", conjunto: "el conjunto", anuncio: "el anuncio" };
+
+/**
+ * Guarda un cambio sobre algo que ya existe, sin aplicarlo. Quien lo aprueba lo ve con su antes y después; al aprobar
+ * se vuelve a leer la plataforma y se aplica el plan de entonces. Si lo rechazan, todo queda como estaba.
+ */
+export async function crearSolicitudDeEdicion(
+  actor: Actor,
+  e: { provider: string; accountId: string; nivel: NivelEntidad; id: string; cambios: CambiosEdicion },
+): Promise<Solicitud> {
+  if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar cambios a revisión.", 403);
+  const prep = await prepararEdicion({ actor, provider: e.provider as Platform, accountId: e.accountId, nivel: e.nivel, id: e.id, cambios: e.cambios });
+  const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
+  if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.mensaje}`, 422);
+  if (!hayAlgoQueAplicar(prep.plan)) throw new ErrorDeSolicitud("No hay ningún cambio que enviar.", 422);
+  const cliente = (await listPortfolios()).find((p) => p.id === prep.portfolioId);
+  if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
+  const nombre = prep.antes.entidad.nombre ?? e.id;
+  const propuesta: EdicionPropuesta = {
+    __edicion: true,
+    portfolioId: prep.portfolioId,
+    provider: e.provider,
+    accountId: e.accountId,
+    nivel: e.nivel,
+    id: e.id,
+    entidad: nombre,
+    cambios: e.cambios,
+    diff: prep.plan.diff,
+    tocaPresupuesto: tocaPresupuesto(e.cambios),
+  };
+  const id = crypto.randomUUID();
+  await getRawDb()
+    .prepare(
+      `INSERT INTO solicitudes (id, portfolio_id, portfolio_name, plataformas, titulo, destino, drafts_json, estado,
+         creador_email, creador_nombre, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)`,
+    )
+    .bind(id, cliente.id, cliente.name, e.provider, `un cambio en ${ETIQUETA_NIVEL[e.nivel] ?? "la entidad"} «${nombre}»`, nombre, JSON.stringify([propuesta]), actor.email, nombreDe(actor), Date.now())
+    .run();
+  return auditada(actor, "creada", (await obtener(actor, id))!);
+}
+
+/** Contenido nuevo (imágenes sueltas o un carrusel) para un conjunto existente de Meta. Se crea al aprobarse y queda corriendo. */
+export type ContenidoNuevo = {
+  __contenido: true;
+  portfolioId: string;
+  accountId: string;
+  campaignId: string;
+  campaignName: string;
+  adsetId: string;
+  adsetName: string;
+  nombre: string;
+  datos: DatosDeContenido;
+};
+
+/** Crea una solicitud de contenido nuevo (imágenes o carrusel) dentro de conjuntos existentes de Meta. */
+export async function crearSolicitudDeContenido(actor: Actor, piezas: ContenidoNuevo[]): Promise<Solicitud> {
+  if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar contenido a revisión.", 403);
+  if (piezas.length === 0 || piezas.length > 10) throw new ErrorDeSolicitud("Una solicitud lleva entre 1 y 10 piezas de contenido.");
+  const primero = piezas[0];
+  if (piezas.some((p) => p.portfolioId !== primero.portfolioId)) throw new ErrorDeSolicitud("Todo debe ser del mismo cliente.");
+  if (!enAlcance(actor, primero.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
+  const cliente = (await listPortfolios()).find((p) => p.id === primero.portfolioId);
+  if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
+  const indice = await accountIndex();
+  for (const p of piezas) {
+    const duenio = indice.get(normalizeAccountId(p.accountId));
+    if (!duenio || duenio.id !== p.portfolioId) throw new ErrorDeSolicitud("Esa cuenta no pertenece a este cliente.", 403);
+    if (!p.adsetId) throw new ErrorDeSolicitud("Falta el conjunto de destino.");
+    const errores = validarContenido(p.datos);
+    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores[0]}`, 422);
+    if (!(cliente.accountPages[p.accountId] ?? cliente.pageId)) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
+  }
+  const id = crypto.randomUUID();
+  const titulo = piezas.length === 1 ? tituloDeContenido(piezas[0].datos) : `${piezas.length} piezas de contenido nuevo`;
+  await getRawDb()
+    .prepare(
+      `INSERT INTO solicitudes (id, portfolio_id, portfolio_name, plataformas, titulo, destino, drafts_json, estado,
+         creador_email, creador_nombre, created_at)
+       VALUES (?, ?, ?, 'meta', ?, ?, ?, 'pendiente', ?, ?, ?)`,
+    )
+    .bind(id, cliente.id, cliente.name, titulo, `${primero.adsetName} · ${primero.campaignName}`, JSON.stringify(piezas), actor.email, nombreDe(actor), Date.now())
+    .run();
+  return auditada(actor, "creada", (await obtener(actor, id))!);
+}
 
 /** Crea una solicitud solo de publicaciones de Instagram (se crean pausadas al aprobarse). */
 export async function crearSolicitudDeInstagram(actor: Actor, impulsos: ImpulsoDeInstagram[]): Promise<Solicitud> {
@@ -165,7 +301,7 @@ export async function crearSolicitudDeInstagram(actor: Actor, impulsos: ImpulsoD
     )
     .bind(id, cliente.id, cliente.name, titulo, `${primero.adsetName} · ${primero.campaignName}`, JSON.stringify(impulsos), actor.email, nombreDe(actor), Date.now())
     .run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "creada", (await obtener(actor, id))!);
 }
 
 /** Crea una solicitud con uno o varios borradores. Todos deben poder publicarse (sin problemas bloqueantes). */
@@ -206,7 +342,7 @@ export async function crearSolicitud(actor: Actor, borradores: Array<Partial<Cam
     )
     .bind(id, clienteId, armados[0].clienteNombre, plataformas, titulo, destino, JSON.stringify(armados.map((a) => a.draft)), actor.email, nombreDe(actor), Date.now())
     .run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "creada", (await obtener(actor, id))!);
 }
 
 const nombreDe = (actor: Actor): string => {
@@ -214,30 +350,83 @@ const nombreDe = (actor: Actor): string => {
   return antes.replace(/[._-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 };
 
+/** Deja constancia en la auditoría de cada paso de una solicitud (creada, aprobada, rechazada, retirada, activa) y devuelve la solicitud. */
+async function auditada(
+  actor: Actor,
+  accion: "creada" | "aprobada" | "rechazada" | "retirada" | "activa",
+  s: Solicitud,
+  extra: { nota?: string } = {},
+): Promise<Solicitud> {
+  const quien = nombreDe(actor);
+  const destino = s.destino ? ` en ${s.destino}` : "";
+  const que = s.cambios ? `${s.titulo}: ${resumenDeCambios(s.cambios)}` : `${s.titulo}${destino}`;
+  const frase: Record<typeof accion, string> = {
+    creada: `${quien} pidió ${que}`,
+    aprobada: s.estado === "fallida" ? `${quien} aprobó ${s.titulo}${destino}, pero la plataforma falló` : `${quien} aprobó ${que}`,
+    rechazada: `${quien} rechazó ${que}`,
+    retirada: `${quien} retiró ${s.titulo}${destino}`,
+    activa: `${quien} marcó como activa ${s.titulo}${destino}`,
+  };
+  const resultado: ResultadoDeAuditoria = accion === "rechazada" ? "rechazado" : accion === "creada" ? "pendiente" : s.estado === "fallida" ? "error" : "ok";
+  await registrarAuditoria({
+    categoria: "solicitud",
+    accion,
+    actorEmail: actor.email,
+    actorNombre: quien,
+    portfolioId: s.clienteId,
+    portfolioNombre: s.clienteNombre,
+    plataforma: s.plataformas.join(","),
+    entidadTipo: "solicitud",
+    entidadId: s.id,
+    entidadNombre: s.titulo,
+    titulo: frase[accion],
+    resultado,
+    etiquetas: s.cambios ? etiquetasDeCambios(s.cambios) : s.tocaPresupuesto ? ["presupuesto"] : [],
+    detalle: {
+      estado: s.estado,
+      pidio: s.creador.nombre,
+      reviso: s.revisor?.nombre ?? null,
+      nota: extra.nota?.trim() || s.notaDeRevision || null,
+      error: s.error,
+      destino: s.destino || null,
+      cambios: s.cambios,
+      enlaces: s.enlaces,
+    },
+  });
+  return s;
+}
+
 async function filaDe(id: string): Promise<Fila | null> {
   return (await getRawDb().prepare("SELECT * FROM solicitudes WHERE id = ? LIMIT 1").bind(id).first<Fila>()) ?? null;
 }
 
+/** Quién revisa esta solicitud: un cambio de presupuesto lo revisa solo quien puede aprobar presupuesto. */
+function puedeRevisarEsta(actor: Actor, f: Fila): boolean {
+  if (!puedeRevisar(actor) || !enAlcance(actor, f.portfolio_id)) return false;
+  return !edicionDe(f)?.tocaPresupuesto || can(actor, "aprobar_presupuesto");
+}
+
 function puedeVer(actor: Actor, f: Fila): boolean {
-  return f.creador_email === actor.email || (puedeRevisar(actor) && enAlcance(actor, f.portfolio_id));
+  return f.creador_email === actor.email || puedeRevisarEsta(actor, f);
 }
 
 export async function obtener(actor: Actor, id: string): Promise<Solicitud | null> {
   const f = await filaDe(id);
   if (!f || !puedeVer(actor, f)) return null;
-  return aSolicitud(f, await nombresDeRevisores());
+  return aSolicitud(f, await nombresDeRevisores(), await nombresDeAdministradores());
 }
 
 /** Las solicitudes que ve esta persona: las suyas y, si revisa, las pendientes de los clientes a su alcance. */
 export async function listarSolicitudes(actor: Actor): Promise<{ porRevisar: Solicitud[]; mias: Solicitud[]; revisores: string[] }> {
   const revisores = await nombresDeRevisores();
+  const administradores = await nombresDeAdministradores();
   const { results } = await getRawDb()
     .prepare("SELECT * FROM solicitudes ORDER BY created_at DESC LIMIT 300")
     .all<Fila>();
   const filas = (results ?? []).filter((f) => puedeVer(actor, f));
-  const todas = filas.map((f) => aSolicitud(f, revisores));
+  const todas = filas.map((f) => aSolicitud(f, revisores, administradores));
   return {
-    porRevisar: puedeRevisar(actor) ? todas.filter((s) => s.estado === "pendiente") : [],
+    porRevisar: puedeRevisar(actor) ? todas.filter((s) => s.estado === "pendiente" && (!s.tocaPresupuesto || can(actor, "aprobar_presupuesto"))) : [],
     mias: todas.filter((s) => s.creador.email === actor.email),
     revisores,
   };
@@ -273,6 +462,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
   if (!puedeRevisar(actor)) throw new ErrorDeSolicitud("Solo un supervisor o administrador puede aprobar.", 403);
   const f = await filaDe(id);
   if (!f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
+  if (!puedeRevisarEsta(actor, f)) throw new ErrorDeSolicitud("Los cambios de presupuesto los aprueba un Director Digital o superior.", 403);
   if (!puedeTransicionar("aprobar", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Esa solicitud ya no está pendiente.", 409);
 
   // Se toma antes de publicar: dos supervisores aprobando a la vez no deben publicar dos veces.
@@ -289,7 +479,95 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
   let fallo: string | null = null;
 
   for (const d of drafts) {
-    // Impulso de una publicación de Instagram: se crea con la API directa de Meta, siempre pausado.
+    // Contenido nuevo (imágenes o carrusel): se crea con la API directa de Meta.
+    if ((d as { __contenido?: boolean }).__contenido) {
+      const c = d as unknown as ContenidoNuevo;
+      try {
+        const cliente = (await listPortfolios()).find((p) => p.id === c.portfolioId);
+        const paginaId = cliente?.accountPages[c.accountId] ?? cliente?.pageId;
+        if (!paginaId) throw new Error("Este cliente no tiene una Página de Facebook asociada.");
+        const destinos = { paginaId, instagramUserId: cliente?.instagramId };
+        const creativos =
+          c.datos.formato === "carrusel"
+            ? [{ nombre: c.nombre, creativo: creativoDeCarrusel(c.datos, destinos, c.nombre) }]
+            : c.datos.imagenes.map((im, i) => {
+                const nombre = `${c.nombre} ${c.datos.imagenes.length > 1 ? i + 1 : ""}`.trim();
+                return { nombre, creativo: creativoDeImagen(c.datos, im, destinos, nombre) };
+              });
+        for (const pieza of creativos) {
+          const r = await crearAnuncioConCreativo(c.accountId, { nombre: pieza.nombre, conjuntoId: c.adsetId, creativo: pieza.creativo });
+          anuncios.push({ provider: "meta", accountId: c.accountId, id: r.anuncioId });
+          pasosTotales.push({ platform: "meta", action: "ads:create_content", label: pieza.nombre, ok: true, error: null, raw: r } as PasoEjecutado);
+        }
+        await registrarAuditoria({
+          categoria: "creacion",
+          accion: "publicada",
+          actorEmail: actor.email,
+          actorNombre: nombreDe(actor),
+          portfolioId: c.portfolioId,
+          plataforma: "meta",
+          entidadTipo: "anuncio",
+          entidadNombre: c.nombre,
+          titulo: `Contenido aprobado por ${nombreDe(actor)}: ${tituloDeContenido(c.datos)} en «${c.adsetName}»`,
+          detalle: { solicitudId: id, formato: c.datos.formato, imagenes: c.datos.imagenes.length, destino: c.datos.enlace, mensaje: c.datos.mensaje },
+        });
+        const url = `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}`;
+        if (!enlaces.some((e) => e.url === url)) enlaces.push({ etiqueta: "Revisar la campaña en Meta", url });
+      } catch (error) {
+        fallo = error instanceof Error ? error.message : "No se pudo crear el contenido.";
+        break;
+      }
+      continue;
+    }
+    // Cambio propuesto sobre algo existente: se vuelve a leer la plataforma y se aplica el plan de ahora.
+    if ((d as { __edicion?: boolean }).__edicion) {
+      const ed = d as unknown as EdicionPropuesta;
+      try {
+        const prep = await prepararEdicion({ actor, provider: ed.provider as Platform, accountId: ed.accountId, nivel: ed.nivel, id: ed.id, cambios: ed.cambios });
+        const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
+        if (bloqueante) throw new Error(bloqueante.mensaje);
+        if (!hayAlgoQueAplicar(prep.plan)) throw new Error("Ya no hay nada que cambiar: la entidad cambió desde que se propuso.");
+        const campaignId = "campaignId" in prep.antes.entidad ? prep.antes.entidad.campaignId : null;
+        const r = await ejecutarPasosDeEdicion({
+          provider: ed.provider as Platform,
+          accountId: ed.accountId,
+          nivel: ed.nivel,
+          ids: { campaignId, conjuntoId: prep.antes.nivel === "anuncio" ? prep.antes.entidad.conjuntoId : null, id: ed.id },
+          pasos: prep.plan.pasos,
+          pausarAlFinal: prep.plan.pausaAlAplicar,
+          activarAlFinal: prep.plan.activacionPedida === true,
+          credencialesGoogle: prep.credencialesGoogle,
+        });
+        await registrarEjecucion({ portfolioId: ed.portfolioId, name: `Cambio aprobado · ${ed.nivel} ${ed.id}`, platforms: [ed.provider as Platform] }, actor.email, r.pasos, r.ok);
+        await registrarAuditoria({
+          categoria: "cambio",
+          accion: r.ok ? "aplicado" : "fallido",
+          actorEmail: actor.email,
+          actorNombre: nombreDe(actor),
+          portfolioId: ed.portfolioId,
+          plataforma: ed.provider,
+          entidadTipo: ed.nivel,
+          entidadId: ed.id,
+          entidadNombre: ed.entidad,
+          titulo: `Cambio aprobado por ${nombreDe(actor)} sobre «${ed.entidad}»: ${resumenDeCambios(prep.plan.diff)}${r.ok ? "" : " (falló)"}`,
+          resultado: r.ok ? "ok" : "error",
+          etiquetas: etiquetasDeCambios(prep.plan.diff),
+          detalle: { cambios: prep.plan.diff, pasos: r.pasos.map((p) => ({ accion: p.action, ok: p.ok, error: p.error })), solicitudId: id },
+        });
+        pasosTotales.push(...(r.pasos as PasoEjecutado[]));
+        const enlace = enlaceDeCampana(ed.provider as Platform, ed.accountId, campaignId ?? (ed.nivel === "campana" ? ed.id : null));
+        if (enlace && !enlaces.some((x) => x.url === enlace.url)) enlaces.push(enlace);
+        if (!r.ok) {
+          fallo = r.pasos.find((p) => !p.ok)?.error ?? "Un paso falló.";
+          break;
+        }
+      } catch (error) {
+        fallo = error instanceof Error ? error.message : "No se pudo aplicar el cambio.";
+        break;
+      }
+      continue;
+    }
+    // Impulso de una publicación de Instagram: se crea con la API directa de Meta.
     if ((d as { __instagram?: boolean }).__instagram) {
       const ig = d as unknown as ImpulsoDeInstagram;
       try {
@@ -304,6 +582,19 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           paginaId: cliente?.accountPages[ig.accountId] ?? cliente?.pageId,
         });
         anuncios.push({ provider: "meta", accountId: ig.accountId, id: r.anuncioId });
+        await registrarAuditoria({
+          categoria: "creacion",
+          accion: "publicada",
+          actorEmail: actor.email,
+          actorNombre: nombreDe(actor),
+          portfolioId: ig.portfolioId,
+          plataforma: "meta",
+          entidadTipo: "anuncio",
+          entidadId: r.anuncioId,
+          entidadNombre: ig.nombre,
+          titulo: `Impulso aprobado por ${nombreDe(actor)}: «${ig.nombre}» en «${ig.adsetName}»`,
+          detalle: { solicitudId: id, conjuntoId: ig.adsetId, mediaId: ig.mediaId, anuncioId: r.anuncioId, regla: ig.regla?.nombre ?? null },
+        });
         // Primero, la regla DENTRO de Meta (copia de la original, que no se toca): Meta la evalúa sola. Si no se puede, la propia.
         let reglaEnMeta = false;
         if (ig.regla?.reglaMetaId) {
@@ -361,19 +652,20 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
     .prepare("UPDATE solicitudes SET estado = ?, error_texto = ?, resultado_json = ?, enlaces_json = ?, publicada_at = ?, avisada = 0 WHERE id = ?")
     .bind(fallo ? "fallida" : "publicada", fallo, JSON.stringify({ pasos: pasosTotales.map((p) => ({ platform: p.platform, action: p.action, ok: p.ok, error: p.error })), anuncios }), JSON.stringify(enlaces), Date.now(), id)
     .run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "aprobada", (await obtener(actor, id))!);
 }
 
 export async function rechazarSolicitud(actor: Actor, id: string, nota: string): Promise<Solicitud> {
   if (!puedeRevisar(actor)) throw new ErrorDeSolicitud("Solo un supervisor o administrador puede rechazar.", 403);
   const f = await filaDe(id);
   if (!f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
+  if (!puedeRevisarEsta(actor, f)) throw new ErrorDeSolicitud("Los cambios de presupuesto los revisa un Director Digital o superior.", 403);
   if (!puedeTransicionar("rechazar", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Esa solicitud ya no está pendiente.", 409);
   await getRawDb()
     .prepare("UPDATE solicitudes SET estado = 'rechazada', revisor_email = ?, revisor_nombre = ?, nota_revision = ?, resuelta_at = ?, avisada = 0 WHERE id = ? AND estado = 'pendiente'")
     .bind(actor.email, nombreDe(actor), nota.trim().slice(0, 500) || null, Date.now(), id)
     .run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "rechazada", (await obtener(actor, id))!, { nota });
 }
 
 export async function cancelarSolicitud(actor: Actor, id: string): Promise<Solicitud> {
@@ -381,7 +673,7 @@ export async function cancelarSolicitud(actor: Actor, id: string): Promise<Solic
   if (!f || f.creador_email !== actor.email) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
   if (!puedeTransicionar("cancelar", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Ya no se puede retirar: alguien la revisó.", 409);
   await getRawDb().prepare("UPDATE solicitudes SET estado = 'cancelada', resuelta_at = ?, avisada = 1 WHERE id = ? AND estado = 'pendiente'").bind(Date.now(), id).run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "retirada", (await obtener(actor, id))!);
 }
 
 /** Marca como vistas las novedades de quien creó las solicitudes. */
@@ -396,7 +688,7 @@ export async function marcarActiva(actor: Actor, id: string): Promise<Solicitud>
   if (!f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
   if (!puedeTransicionar("marcar_activa", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Esa solicitud no está esperando activarse.", 409);
   await getRawDb().prepare("UPDATE solicitudes SET estado = 'activa', activa_at = ?, avisada = 0 WHERE id = ?").bind(Date.now(), id).run();
-  return (await obtener(actor, id))!;
+  return auditada(actor, "activa", (await obtener(actor, id))!);
 }
 
 /**

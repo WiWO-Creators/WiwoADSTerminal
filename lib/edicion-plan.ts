@@ -29,6 +29,10 @@ import type { Platform, ViaEscritura } from "./plataformas";
 /** Lo que la persona quiere cambiar. Un campo ausente no se toca. */
 export type CambiosEdicion = {
   nombre?: string;
+  /** true: pausar la entidad. Un Creator lo propone y lo aprueba un Lead o superior. */
+  pausar?: boolean;
+  /** true: volver a activar la entidad (por ejemplo, una campaña que quedó apagada). */
+  activar?: boolean;
   presupuesto?: { tipo: "daily" | "lifetime"; monto: number };
   /** Meta: puja del conjunto. Google: CPC máximo del grupo. En la moneda de la cuenta. */
   puja?: number;
@@ -105,6 +109,11 @@ export type CambiosEdicion = {
   sufijoUrl?: string;
 };
 
+/** ¿El cambio toca dinero (presupuesto o tope de gasto)? Esos cambios, si los propone un Creator, los aprueba un Director Digital o superior. */
+export function tocaPresupuesto(c: CambiosEdicion): boolean {
+  return c.presupuesto !== undefined || c.limiteGasto !== undefined;
+}
+
 export type AntesDeEdicion =
   | { nivel: "campana"; entidad: DetalleCampana }
   | { nivel: "conjunto"; entidad: DetalleConjunto; campana: DetalleCampana | null }
@@ -142,7 +151,16 @@ export type PlanEdicion = {
    * alguien lo revise antes de que siga corriendo con lo nuevo.
    */
   pausaAlAplicar: boolean;
+  /** Se pidió pausar: es un cambio aunque no haya pasos de edición. */
+  pausaPedida?: boolean;
+  /** Se pidió activar: es un cambio aunque no haya pasos de edición. */
+  activacionPedida?: boolean;
 };
+
+/** ¿Hay algo que aplicar? Pasos de edición o una pausa pedida. */
+export function hayAlgoQueAplicar(plan: PlanEdicion): boolean {
+  return plan.pasos.length > 0 || plan.pausaPedida === true || plan.activacionPedida === true;
+}
 
 /* -------------------------------------------------------------------------- */
 
@@ -206,13 +224,38 @@ export function planEdicion(
     );
   }
 
-  // Todo lo que no sea un renombre puro pausa la entidad. Bajar un presupuesto tampoco la pausa
-  // (regla del equipo): lo que preocupa es gastar más sin revisión, no menos.
-  plan.pausaAlAplicar = plan.pasos.some((p) => !p.sinPausa && !(p.campos.length === 1 && p.campos[0] === "nombre"));
+  // Decisión del equipo (2026-10-06): un cambio aprobado queda aplicado y corriendo; la pausa es solo la que se pide
+  // expresamente (`pausar`). La revisión ocurre ANTES, en la aprobación, no después con la entidad detenida.
+  plan.pausaAlAplicar = false;
+
+  if (cambios.pausar === true) {
+    const estado = String((antes.entidad as { estado?: string | null }).estado ?? "").toUpperCase();
+    if (["PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "ARCHIVED", "REMOVED"].includes(estado)) {
+      problema("pausar", "Ya está pausado: no hay nada que pausar.");
+    } else {
+      plan.pausaPedida = true;
+      plan.pausaAlAplicar = true;
+      plan.diff.push({ campo: "estado", etiqueta: "Estado", antes: estado === "" ? "—" : "Activo", despues: "Pausado" });
+    }
+  }
+
+  if (cambios.activar === true) {
+    const estado = String((antes.entidad as { estado?: string | null }).estado ?? "").toUpperCase();
+    if (cambios.pausar === true) {
+      problema("activar", "No se puede pausar y activar a la vez.");
+    } else if (provider === "linkedin") {
+      problema("activar", "LinkedIn no permite reactivar desde WiWO.ADS.");
+    } else if (estado === "ACTIVE" || estado === "ENABLED") {
+      problema("activar", "Ya está activo: no hay nada que activar.");
+    } else {
+      plan.activacionPedida = true;
+      plan.diff.push({ campo: "estado", etiqueta: "Estado", antes: estado === "" ? "—" : "Pausado", despues: "Activo" });
+    }
+  }
 
   const pedidos = Object.entries(cambios).filter(([, v]) => v !== undefined);
   if (pedidos.length === 0) problema("cambios", "No hay ningún cambio que aplicar.");
-  else if (plan.pasos.length === 0 && plan.problemas.length === 0) {
+  else if (!hayAlgoQueAplicar(plan) && plan.problemas.length === 0) {
     problema("cambios", "Lo que pediste ya es lo que tiene hoy: no hay nada que cambiar.");
   }
   return plan;

@@ -1,3 +1,4 @@
+import { registrarAuditoria } from "@/lib/auditoria";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
@@ -49,8 +50,9 @@ const CAMPOS_DE_ID_ANUNCIO: Record<string, string[]> = {
  *  - **Confirmación explícita.** Sin el campo `confirmacion: "CREAR"` no
  *    arranca, así que una petición perdida no puede crear una campaña.
  *  - **Solo quien aprueba cambios.** Capacidad `aprobar_cambios`.
- *  - **Todo nace pausado.** Lo pone `buildPlan` y Windsor lo respeta: nada
- *    empieza a gastar por esta vía.
+ *  - **Nace corriendo.** Decisión del equipo (2026-10-06): lo que llega aquí ya
+ *    pasó por las aprobaciones que corresponden. Si un paso falla a mitad, la
+ *    campaña incompleta se marca y se pausa (ver `ejecutarPlan`).
  *  - **Se detiene en el primer error** y devuelve qué alcanzó a crear, para
  *    que nadie tenga que adivinar en qué estado quedó la cuenta.
  */
@@ -160,6 +162,18 @@ export async function POST(request: Request) {
   );
 
   await registrarEjecucion(draft, session.actor.email, realizados, todoBien);
+  await registrarAuditoria({
+    categoria: "creacion",
+    accion: todoBien ? "publicada" : "fallida",
+    actorEmail: session.actor.email,
+    portfolioId: draft.portfolioId,
+    plataforma: draft.platforms.join(","),
+    entidadTipo: "campana",
+    entidadNombre: draft.name,
+    titulo: `${session.actor.email.split("@")[0]} ${todoBien ? "creó" : "intentó crear"} la campaña «${draft.name}» en ${draft.platforms.join(" y ")}${todoBien ? "" : " (falló)"}`,
+    resultado: todoBien ? "ok" : "error",
+    detalle: { pasos: realizados.map((p) => ({ accion: p.action, etiqueta: p.label, ok: p.ok, error: p.error })), campanaIncompleta: campanaIncompleta ?? null },
+  });
 
   // Lo recién creado no tiene ni una impresión, así que solo el catálogo lo
   // conoce — y ese se reconstruía como mucho una vez al día, por eso la
@@ -209,7 +223,7 @@ export async function POST(request: Request) {
   // está todo bien". Antes, en ese caso, los tres filtros de abajo exigían
   // `catalogoActualizado` para contar algo como "sin confirmar", así que con
   // el catálogo caído quedaban todos vacíos en silencio y el aviso final
-  // decía "Creado y pausado" como si se hubiera verificado de verdad. Ahora
+  // decía "Creado" como si se hubiera verificado de verdad. Ahora
   // "no se pudo verificar" cuenta igual que "se verificó y no está": en
   // ambos casos hay que decirlo, no callarlo.
   const campanasSinConfirmar = realizados
@@ -293,7 +307,7 @@ export async function POST(request: Request) {
           .map((c) => `${c.platform === "google" ? "Google" : "Meta"} ${c.nivel} (id ${c.id})`)
           .join(", ")}.`;
   } else {
-    aviso = "Creado y pausado. Revísalo en la plataforma y actívalo ahí cuando quieras que empiece a entregar.";
+    aviso = "Creado y funcionando. Revísalo en la plataforma.";
   }
 
   return Response.json(

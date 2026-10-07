@@ -37,6 +37,8 @@ const NIVELES: Array<{ id: NivelDeRegla; label: string }> = [
 ];
 
 /** Reglas como las de Meta y Google: «si el gasto de hoy llega a 10 USD, pausar». Solo administrador y supervisor. */
+import { ReglasEnMeta } from "./reglas-en-meta";
+
 type Nativa = { id: string; nombre: string; estado: string; nivel: string | null; entidadesCubiertas: number | null; descripcion: string };
 type NativasDeCuenta = { clienteId: string; cliente: string; cuenta: string; reglas: Nativa[]; error: string | null };
 
@@ -316,6 +318,8 @@ export function ReglasView({ clienteId }: { clienteId: string | null }) {
           </Surface>
         ))}
       </section>
+
+      <ReglasEnMeta clienteId={clienteId} />
 
       <ReglasDeLasPlataformas clienteId={clienteId} />
     </div>

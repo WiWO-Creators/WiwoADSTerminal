@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, Images, Rocket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ContenidoNuevo } from "./contenido-nuevo";
 import { SelectorDePublicaciones, type Publicacion } from "./selector-publicaciones";
 import { Surface } from "./ui";
 
@@ -20,16 +21,16 @@ type Enviada = { id: string; estado: string; mensaje: string; enlaces: Array<{ e
 const campoClase = "h-11 w-full rounded-xl border border-border bg-background px-3 text-sm";
 
 /**
- * Impulsar desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
- * existente. Lo elegido pasa por la misma revisión que todo (queda pausado); quien aprueba cambios lo publica al instante.
+ * Boostear un anuncio desde cualquier pantalla (también el celular): cliente → campaña → conjunto → publicación o anuncio ya
+ * existente. Lo elegido pasa por la misma aprobación que todo; quien aprueba cambios lo publica al instante y queda corriendo.
  */
-export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | null; puedeAprobar: boolean }) {
+export function ImpulsarView({ clienteId, puedeAprobar, campanaInicial }: { clienteId: string | null; puedeAprobar: boolean; campanaInicial?: string }) {
   const [cliente, setCliente] = useState<Cliente | null>(null);
   const [cuenta, setCuenta] = useState("");
   const [arbol, setArbol] = useState<{ campanas: Campana[]; conjuntos: Conjunto[] } | null>(null);
   const [campanaId, setCampanaId] = useState("");
   const [conjuntoId, setConjuntoId] = useState("");
-  const [modo, setModo] = useState<"publicacion" | "anuncio" | "nuevo">("publicacion");
+  const [modo, setModo] = useState<"publicacion" | "anuncio" | "nuevo" | "imagenes" | "carrusel">("publicacion");
   const [nuevo, setNuevo] = useState<Nuevo>(NUEVO_VACIO);
   const [subiendo, setSubiendo] = useState(false);
   const [anuncios, setAnuncios] = useState<AnuncioExistente[] | null>(null);
@@ -72,13 +73,17 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
       .then(async (r) => {
         const j = (await r.json()) as { campanas?: Campana[]; conjuntos?: Conjunto[]; error?: string };
         if (!r.ok) throw new Error(j.error ?? "No se pudieron leer las campañas");
-        if (vivo) setArbol({ campanas: j.campanas ?? [], conjuntos: j.conjuntos ?? [] });
+        if (vivo) {
+          setArbol({ campanas: j.campanas ?? [], conjuntos: j.conjuntos ?? [] });
+          // Si se llegó desde una tarjeta de «subir contenido», la campaña ya viene elegida.
+          if (campanaInicial && (j.campanas ?? []).some((c: { id: string }) => c.id === campanaInicial)) setCampanaId(campanaInicial);
+        }
       })
       .catch((e: unknown) => vivo && setError(e instanceof Error ? e.message : "No se pudieron leer las campañas"));
     return () => {
       vivo = false;
     };
-  }, [cliente, cuenta]);
+  }, [cliente, cuenta, campanaInicial]);
 
   // Anuncios existentes (para «impulsar uno que ya existe»), solo si se pide.
   useEffect(() => {
@@ -142,7 +147,7 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
         existingCampaign: { platform: "meta", accountId: cuenta, campaignId: campana.id, campaignName: campana.nombre ?? "" },
         existingAdset: { adsetId: conjunto.id, adsetName: conjunto.nombre ?? "" },
       };
-      // Instagram: se crea al instante, pausado, con la API directa de Meta (solo quien aprueba cambios).
+      // Instagram: se crea al instante, activo, con la API directa de Meta (solo quien aprueba cambios).
       const deInstagram = modo === "nuevo" ? [] : elegidas.filter((e) => e.ig);
       if (deInstagram.length > 0 && !puedeAprobar) {
         // Analista: las publicaciones de Instagram van a revisión de un supervisor.
@@ -224,9 +229,9 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
   return (
     <div className="mx-auto w-full max-w-[640px] space-y-4 p-4 md:p-6">
       <div>
-        <h2 className="neo-section-title">Impulsar</h2>
+        <h2 className="neo-section-title">Boostear anuncio</h2>
         <p className="mt-3 text-sm leading-6 text-foreground/58">
-          Elige la campaña y el conjunto, y luego una publicación o un anuncio que ya exista. Todo se crea pausado.
+          Elige la campaña y el conjunto, y luego una publicación o un anuncio que ya exista. Al aprobarse queda corriendo.
           {puedeAprobar ? "" : " Un supervisor lo aprueba antes de publicarse."}
         </p>
       </div>
@@ -237,7 +242,7 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
           {creadosIg.map((c) => (
             <p key={c.nombre} className="text-sm">
               {c.error ? <span className="text-danger">{c.nombre}: {c.error}</span> : (
-                <><Check className="mr-1 inline size-4 text-ok" />{c.nombre} creado, pausado. {c.enlace && <a href={c.enlace} target="_blank" rel="noreferrer" className="font-semibold text-brand hover:underline">Revisar en Meta</a>}</>
+                <><Check className="mr-1 inline size-4 text-ok" />{c.nombre} creado y corriendo. {c.enlace && <a href={c.enlace} target="_blank" rel="noreferrer" className="font-semibold text-brand hover:underline">Revisar en Meta</a>}</>
               )}
             </p>
           ))}
@@ -256,11 +261,11 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
           ))}
           {enviada.estado === "pendiente" && puedeAprobar && (
             <Button type="button" className="w-full font-extrabold" disabled={cargando === "aprobar"} onClick={() => void aprobarYa()}>
-              <Rocket /> {cargando === "aprobar" ? "Publicando…" : "Aprobar y publicar pausado"}
+              <Rocket /> {cargando === "aprobar" ? "Publicando…" : "Aprobar y publicar"}
             </Button>
           )}
           <Button type="button" variant="outline" className="w-full" onClick={() => setEnviada(null)}>
-            Impulsar otra
+            Boostear otro
           </Button>
         </Surface>
       ) : (
@@ -288,7 +293,7 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
                   ))}
                 </select>
                 {campana && campana.objetivo !== "OUTCOME_ENGAGEMENT" && (
-                  <span className="mt-1 block font-normal text-warn">Meta solo deja impulsar publicaciones en campañas de interacción: esta no lo es y el envío será rechazado.</span>
+                  <span className="mt-1 block font-normal text-warn">Meta solo deja boostear publicaciones de Facebook con «Boostear» en campañas de interacción. En esta se crearán como anuncios nuevos dentro del conjunto.</span>
                 )}
               </label>
               <label className="block text-xs font-semibold text-foreground/70">
@@ -305,19 +310,21 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
 
           {conjunto && cliente && (
             <div className="space-y-3 border-t border-border pt-4">
-              <div className="grid grid-cols-3 gap-2">
-                {(["publicacion", "anuncio", "nuevo"] as const).map((m) => (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {(["publicacion", "anuncio", "nuevo", "imagenes", "carrusel"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
                     onClick={() => setModo(m)}
                     className={cn("h-10 rounded-full border text-sm font-semibold", modo === m ? "border-brand bg-brand/10 text-foreground" : "border-border text-muted-foreground")}
                   >
-                    {m === "publicacion" ? "Publicación" : m === "anuncio" ? "Anuncio existente" : "Imagen o video nuevo"}
+                    {m === "publicacion" ? "Publicación" : m === "anuncio" ? "Anuncio existente" : m === "nuevo" ? "Imagen o video nuevo" : m === "imagenes" ? "Varias imágenes" : "Carrusel"}
                   </button>
                 ))}
               </div>
-              {modo === "nuevo" ? (
+              {modo === "imagenes" || modo === "carrusel" ? (
+                <ContenidoNuevo key={`${modo}-${conjunto.id}`} formato={modo} clienteId={cliente.id} website={cliente.website ?? null} cuenta={cuenta} campana={campana!} conjunto={conjunto} onEnviada={setEnviada} />
+              ) : modo === "nuevo" ? (
                 <div className="space-y-3">
                   <label className="block text-xs font-semibold text-foreground/70">
                     Imagen o video (JPG, PNG o MP4)
@@ -373,11 +380,11 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
                       </span>
                     </button>
                   ))}
-                  {anuncios && anuncios.length === 0 && <p className="text-sm text-muted-foreground">No hay anuncios con publicación para impulsar.</p>}
+                  {anuncios && anuncios.length === 0 && <p className="text-sm text-muted-foreground">No hay anuncios con publicación para boostear.</p>}
                 </div>
               )}
 
-              {modo !== "nuevo" && elegidas.length > 0 && (
+              {modo !== "nuevo" && modo !== "imagenes" && modo !== "carrusel" && elegidas.length > 0 && (
                 <ul className="space-y-1.5">
                   {elegidas.map((e) => (
                     <li key={e.postId} className="flex items-center justify-between gap-2 rounded-lg bg-secondary px-3 py-2 text-xs">
@@ -389,9 +396,11 @@ export function ImpulsarView({ clienteId, puedeAprobar }: { clienteId: string | 
                   ))}
                 </ul>
               )}
+              {modo !== "imagenes" && modo !== "carrusel" && (
               <Button type="button" className="w-full font-extrabold" disabled={(modo === "nuevo" ? !nuevoListo : elegidas.length === 0) || cargando === "enviar"} onClick={() => void enviar()}>
                 <Rocket /> {cargando === "enviar" ? "Armando…" : puedeAprobar ? modo === "nuevo" ? "Preparar anuncio nuevo" : `Preparar ${elegidas.length || ""} impulso${elegidas.length === 1 ? "" : "s"}` : "Enviar a revisión"}
               </Button>
+              )}
             </div>
           )}
         </Surface>
