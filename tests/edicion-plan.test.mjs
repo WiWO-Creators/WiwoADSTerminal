@@ -80,7 +80,7 @@ test("Meta anuncio: cambiar texto, URL y botón es UN solo update_ad_creative co
   assert.deepEqual(paso.params, { ad_id: "52528100744437", message: "Nuevo texto", link: "https://colbun.cl/concurso", call_to_action_type: "LEARN_MORE" });
   assert.deepEqual(p.diff.map((d) => d.campo).sort(), ["cta", "textoPrincipal", "urlDestino"]);
   assert.equal(p.diff.find((d) => d.campo === "urlDestino").antes, "https://forms.gle/ZwbTwSr74XpqWKvN9");
-  assert.equal(p.pausaAlAplicar, true);
+  assert.equal(p.pausaAlAplicar, false);
 });
 
 test("Meta anuncio: renombrar solo NO pausa (regla del equipo)", () => {
@@ -89,10 +89,10 @@ test("Meta anuncio: renombrar solo NO pausa (regla del equipo)", () => {
   assert.equal(p.pausaAlAplicar, false);
 });
 
-test("Meta anuncio: renombrar y cambiar contenido son dos pasos y sí pausa", () => {
+test("Meta anuncio: renombrar y cambiar contenido son dos pasos y no pausa (queda corriendo tras la aprobación)", () => {
   const p = planEdicion("meta", { nivel: "anuncio", entidad: ANUNCIO_META }, { nombre: "v2", titulo: "Participa" }, CLP);
   assert.deepEqual(p.pasos.map((s) => s.action), ["update_ad", "update_ad_creative"]);
-  assert.equal(p.pausaAlAplicar, true);
+  assert.equal(p.pausaAlAplicar, false);
 });
 
 test("Meta anuncio: URL, imagen y botón inválidos se rechazan antes de escribir", () => {
@@ -224,7 +224,7 @@ test("Google grupo: renombrar y CPC máximo son acciones de Windsor distintas", 
   const p = planEdicion("google", { nivel: "conjunto", entidad: GRUPO_GOOGLE, campana: CAMPANA_GOOGLE }, { nombre: "Nuevo", puja: 2.25 }, CLP);
   assert.deepEqual(p.pasos.map((s) => s.action), ["rename_ad_group", "set_max_cpc"]);
   assert.equal(p.pasos[1].params.amount_micros, 2_250_000);
-  assert.equal(p.pausaAlAplicar, true);
+  assert.equal(p.pausaAlAplicar, false);
 });
 
 test("Google anuncio: editar titulares y URL es UN paso nativo, en el mismo anuncio", () => {
@@ -428,7 +428,7 @@ test("agregar palabras clave: un solo push_keywords con la concordancia de cada 
   ]);
   assert.equal(p.pasos[0].params.status, "enabled");
   assert.match(p.diff[0].despues, /\+ cotizar luz, "energía residencial", \[colbún hogar\]/);
-  assert.equal(p.pausaAlAplicar, true);
+  assert.equal(p.pausaAlAplicar, false);
 });
 
 test("agregar: una que ya está (misma concordancia) se omite con aviso; con otra concordancia SÍ entra", () => {
@@ -546,11 +546,11 @@ test("Meta campaña: el límite de gasto va en la unidad menor y se lee sin conf
   assert.equal(planEdicion("meta", { nivel: "campana", entidad: sinTope }, { limiteGasto: 0 }, CLP).pasos.length, 0);
 });
 
-test("Presupuesto: subirlo pausa; bajarlo no; bajarlo junto a otro cambio sí pausa", () => {
+test("Presupuesto: ningún cambio pausa lo editado; la revisión es la aprobación previa", () => {
   const diario = CAMPANA_GOOGLE.presupuesto.diario;
   assert.ok(diario > 0);
   const sube = planEdicion("google", { nivel: "campana", entidad: CAMPANA_GOOGLE }, { presupuesto: { tipo: "daily", monto: diario * 2 } }, CLP);
-  assert.equal(sube.pausaAlAplicar, true);
+  assert.equal(sube.pausaAlAplicar, false);
   const baja = planEdicion("google", { nivel: "campana", entidad: CAMPANA_GOOGLE }, { presupuesto: { tipo: "daily", monto: diario / 2 } }, CLP);
   assert.equal(baja.pasos.length, 1);
   assert.equal(baja.pausaAlAplicar, false);

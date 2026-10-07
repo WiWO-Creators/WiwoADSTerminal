@@ -5,11 +5,12 @@
  * (`linkedinNativoConfigurado()` es falso) o si LinkedIn rechaza la llamada, quien lo use debe caer a Windsor.
  *
  * Alcance: solo cuentas ya asociadas a un cliente de WiWO.ADS. Estas funciones NO lo verifican (el token ve más
- * cuentas que esas): lo comprueba la ruta que las llame, como con `meta-nativo.ts`. No hay reintentos y no se escribe nada en
- * LinkedIn desde aquí. Nunca se registra ni se devuelve un token, un secreto ni el contenido de un lead.
+ * cuentas que esas): lo comprueba la ruta que las llame, como con `meta-nativo.ts`. No hay reintentos. Lo único que escribe
+ * es `crearEnLinkedin`, que solo usa la ruta de la cuenta de prueba y solo tras una confirmación explícita. Nunca se
+ * registra ni se devuelve un token, un secreto ni el contenido de un lead.
  *
- * Pendiente: guardar los tokens (cifrados, como `integration-store.ts`) y la ruta de autorización/callback. SIN VERIFICAR
- * contra la API real: ver la nota en `linkedin-nativo-pura.ts`.
+ * Los tokens se guardan cifrados en `lib/linkedin-conexion.ts`. SIN VERIFICAR contra la API real: ver la nota en
+ * `linkedin-nativo-pura.ts`.
  */
 import { env } from "cloudflare:workers";
 import {
@@ -20,6 +21,7 @@ import {
   cuerpoDeRenovacion,
   elementos,
   filaDeAnalytics,
+  idDeCabeceraCreada,
   mensajeDeError,
   respuestaDeLead,
   rutaDeAnalytics,
@@ -147,4 +149,31 @@ export async function metricasDiariasDeLinkedin(
 /** Respuestas de formularios de una cuenta. Devuelve datos personales: no guardarlos en logs ni en la bitácora. */
 export async function leadsDeLinkedin(cuentaId: string, accessToken: string): Promise<RespuestaDeLead[]> {
   return elementos(await leerDeLinkedin(rutaDeLeads(cuentaId), accessToken)).map(respuestaDeLead);
+}
+
+// ------------------------------------------------------------ Escritura (solo la cuenta de prueba, por ahora)
+
+/**
+ * `POST` a la API REST de LinkedIn para CREAR algo. NUNCA reintenta: un timeout es ambiguo (LinkedIn pudo crearlo) y
+ * reintentar duplicaría. Devuelve el id creado (cabecera `x-restli-id`) y, si LinkedIn no lo entrega, `null`: quien llame
+ * debe verificarlo contra LinkedIn antes de dar la operación por hecha.
+ */
+export async function crearEnLinkedin(ruta: string, cuerpo: object, accessToken: string): Promise<{ id: string | null; status: number }> {
+  const respuesta = await fetch(`${BASE}${ruta}`, {
+    method: "POST",
+    cache: "no-store",
+    signal: AbortSignal.timeout(TIEMPO_MAXIMO_MS),
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "Linkedin-Version": env.LINKEDIN_API_VERSION?.trim() || VERSION_API_POR_DEFECTO,
+      // Sin la cabecera X-Restli-Protocol-Version: crear una cuenta de prueba con ella responde «Syntax exception in path variables» (doc de LinkedIn).
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(cuerpo),
+  });
+  if (!respuesta.ok) {
+    const error = await respuesta.json().catch(() => null);
+    throw new ErrorDeLinkedin(mensajeDeError(error, respuesta.status), respuesta.status);
+  }
+  return { id: idDeCabeceraCreada(respuesta.headers.get("x-restli-id")), status: respuesta.status };
 }

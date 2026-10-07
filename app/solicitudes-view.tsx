@@ -45,7 +45,7 @@ const ETIQUETA: Record<SolicitudVista["estado"], string> = {
   pendiente: "En revisión",
   rechazada: "Rechazada",
   cancelada: "Retirada",
-  publicada: "Aprobada · pausada",
+  publicada: "Aprobada",
   activa: "Activa",
   fallida: "Falló al crear",
 };
@@ -137,7 +137,7 @@ export function SolicitudesView() {
       <div>
         <h2 className="neo-section-title">Solicitudes</h2>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-foreground/58">
-          Lo que el equipo quiere publicar pasa primero por un supervisor. Al aprobarlo se crea pausado en la plataforma y queda un enlace para revisarlo.
+          Lo que el equipo quiere publicar o cambiar pasa primero por quien corresponde. Al aprobarlo se aplica en la plataforma y queda corriendo; hay un enlace para revisarlo.
         </p>
       </div>
       {error && <p className="text-sm text-danger">{error}</p>}

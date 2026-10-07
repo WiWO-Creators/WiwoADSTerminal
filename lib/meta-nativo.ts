@@ -6,7 +6,8 @@
  * crea de verdad, verificado): por eso `simular` aquí no llama a Meta, solo comprueba los datos y devuelve lo que se crearía. Nunca se registra ni se devuelve el token.
  */
 import { env } from "cloudflare:workers";
-import { copiaDeReglaParaAnuncio, type ReglaNativaCruda } from "@/lib/reglas-meta-pura";
+import { colocacionesDeConjunto, type Colocaciones } from "@/lib/anuncios-formato-pura";
+import { copiaDeReglaParaAnuncio, especificacionDeReglaDeGasto, type ReglaNativaCruda } from "@/lib/reglas-meta-pura";
 import type { OrganicPost } from "@/lib/windsor";
 
 const VERSION = "v21.0";
@@ -190,11 +191,53 @@ export async function listarReglasMeta(accountId: string): Promise<{ moneda: str
  * Crea en Meta una regla NUEVA que es copia de otra pero vigila solo un anuncio. Meta la evalúa por su cuenta,
  * sin depender de este servidor. La regla original no se modifica.
  */
-export async function copiarReglaMetaParaAnuncio(accountId: string, reglaId: string, anuncioId: string, nombre: string): Promise<string> {
+export async function copiarReglaMetaParaAnuncio(accountId: string, reglaId: string, anuncioId: string | string[], nombre: string): Promise<string> {
   const original = await graph<ReglaNativaCruda>(reglaId, "GET", { fields: "id,name,status,evaluation_spec,execution_spec,schedule_spec" });
   const creada = await graph<{ id?: string }>(`${cuenta(accountId)}/adrules_library`, "POST", copiaDeReglaParaAnuncio(original, anuncioId, nombre));
   if (!creada.id) throw new ErrorDeMeta("Meta no devolvió la regla creada.");
   return creada.id;
+}
+
+type FilaCruda = Record<string, unknown>;
+
+async function leerTodas(ruta: string, campos: string, limite: number, paginas: number): Promise<FilaCruda[]> {
+  const salida: FilaCruda[] = [];
+  let despues: string | undefined;
+  for (let p = 0; p < paginas; p++) {
+    const j = await graph<{ data?: FilaCruda[]; paging?: { cursors?: { after?: string }; next?: string } }>(ruta, "GET", { fields: campos, limit: limite, after: despues });
+    salida.push(...(j.data ?? []));
+    despues = j.paging?.next ? j.paging.cursors?.after : undefined;
+    if (!despues) break;
+  }
+  return salida;
+}
+
+/**
+ * Campañas y conjuntos de una cuenta tal como están en Meta (todo lo que existe, también lo pausado o recién creado, que
+ * Windsor no entrega), en el formato de filas de Windsor para reutilizar el mismo traductor. Solo lectura.
+ * Presupuestos: Meta los da en la unidad menor; el total de campaña, en la unidad de la moneda (como Windsor).
+ */
+export async function leerEstructuraMeta(accountId: string, divisorMenor: number): Promise<{ campanas: FilaCruda[]; conjuntos: FilaCruda[] }> {
+  const [campanas, conjuntos] = await Promise.all([
+    leerTodas(`${cuenta(accountId)}/campaigns`, "id,name,status,effective_status,objective,daily_budget,lifetime_budget,bid_strategy,start_time,stop_time,special_ad_categories,spend_cap", 200, 4),
+    leerTodas(`${cuenta(accountId)}/adsets`, "id,name,campaign_id,status,effective_status,daily_budget,lifetime_budget,bid_strategy,bid_amount,optimization_goal,billing_event,destination_type,start_time,end_time,promoted_object,targeting", 100, 6),
+  ]);
+  const idCuenta = accountId.replace(/^act_/, "");
+  return {
+    campanas: campanas.map((c) => ({
+      campaign_id: c.id, account_id: idCuenta, campaign: c.name, campaign_configured_status: c.status, campaign_effective_status: c.effective_status,
+      campaign_objective: c.objective, campaign_daily_budget: c.daily_budget,
+      campaign_lifetime_budget: c.lifetime_budget ? Number(c.lifetime_budget) / divisorMenor : null,
+      campaign_bid_strategy: c.bid_strategy, campaign_start_time: c.start_time, campaign_stop_time: c.stop_time,
+      campaign_special_ad_categories: c.special_ad_categories, campaign_spend_cap: c.spend_cap,
+    })),
+    conjuntos: conjuntos.map((a) => ({
+      adset_id: a.id, account_id: idCuenta, adset_name: a.name, campaign_id: a.campaign_id, adset_status: a.status, adset_effective_status: a.effective_status,
+      adset_daily_budget: a.daily_budget, adset_lifetime_budget: a.lifetime_budget, adset_bid_strategy: a.bid_strategy, adset_bid_amount: a.bid_amount,
+      adsset_optimization_goal: a.optimization_goal, adset_billing_event: a.billing_event, adset_destination_type: a.destination_type,
+      adset_start_time: a.start_time, adset_end_time: a.end_time, adset_promoted_object: a.promoted_object, adset_targeting: a.targeting,
+    })),
+  };
 }
 
 /** Cuándo se creó el último anuncio de cada campaña de una cuenta (ms). Solo lectura. */
@@ -215,6 +258,22 @@ export async function ultimoAnuncioPorCampana(accountId: string): Promise<Map<st
     if (!despues) break;
   }
   return salida;
+}
+
+/** Crea en Meta una regla nueva de tope de gasto para estos anuncios (se pausan al superarlo). Meta la evalúa por su cuenta. */
+export async function crearReglaMetaDeGasto(accountId: string, o: { nombre: string; anuncioIds: string[]; gasto: number }): Promise<string> {
+  const moneda = (await graph<{ currency?: string }>(cuenta(accountId), "GET", { fields: "currency" })).currency ?? null;
+  const creada = await graph<{ id?: string }>(`${cuenta(accountId)}/adrules_library`, "POST", especificacionDeReglaDeGasto({ ...o, moneda }));
+  if (!creada.id) throw new ErrorDeMeta("Meta no devolvió la regla creada.");
+  return creada.id;
+}
+
+/** Borra una regla de Meta de PRUEBA (su nombre lleva el prefijo). Nunca toca una regla de un cliente. */
+export async function eliminarReglaMetaDePrueba(reglaId: string): Promise<void> {
+  if (!/^d+$/.test(reglaId)) throw new ErrorDeMeta("Id de regla no válido.", 400);
+  const r = await graph<{ name?: string }>(reglaId, "GET", { fields: "name" });
+  if (!(r.name ?? "").includes(PREFIJO_DE_PRUEBA)) throw new ErrorDeMeta(`No se borra: «${r.name}» no es una regla de prueba.`, 403);
+  await graph<{ success?: boolean }>(reglaId, "DELETE");
 }
 
 /** Últimas publicaciones de una cuenta de Instagram, leídas directo de Meta (rápido; Windsor puede tardar minutos). Solo lectura. */
@@ -239,13 +298,36 @@ export async function listarMediosInstagram(instagramId: string): Promise<Organi
 
 export type AnuncioDeInstagram = { creativeId: string; anuncioId: string };
 
+/** Crea un anuncio nuevo con un creativo ya armado (imagen, carrusel…) dentro de un conjunto existente. Queda activo salvo que se pida otra cosa. */
+export async function crearAnuncioConCreativo(
+  accountId: string,
+  o: { nombre: string; conjuntoId: string; creativo: Record<string, string | object>; estado?: "ACTIVE" | "PAUSED" },
+): Promise<AnuncioDeInstagram> {
+  const creativo = await graph<{ id?: string }>(`${cuenta(accountId)}/adcreatives`, "POST", o.creativo);
+  if (!creativo.id) throw new ErrorDeMeta("Meta no devolvió el creativo.");
+  const anuncio = await graph<{ id?: string }>(`${cuenta(accountId)}/ads`, "POST", {
+    name: o.nombre.slice(0, 100),
+    adset_id: o.conjuntoId,
+    creative: { creative_id: creativo.id },
+    status: o.estado ?? "ACTIVE",
+  });
+  if (!anuncio.id) throw new ErrorDeMeta("Meta no devolvió el anuncio.");
+  return { creativeId: creativo.id, anuncioId: anuncio.id };
+}
+
+/** Qué ubicaciones (feed, stories, reels) cubre un conjunto de Meta. Solo lectura. */
+export async function colocacionesDeConjuntoMeta(conjuntoId: string): Promise<Colocaciones> {
+  const j = await graph<{ targeting?: Record<string, unknown> }>(conjuntoId, "GET", { fields: "targeting" });
+  return colocacionesDeConjunto(j.targeting ?? null);
+}
+
 /**
- * Crea un anuncio PAUSADO a partir de una publicación de Instagram ya existente, dentro de un conjunto ya existente.
- * Siempre nace pausado: no hay forma de crearlo activo desde aquí.
+ * Crea un anuncio a partir de una publicación de Instagram (o de Facebook) ya existente, dentro de un conjunto ya existente.
+ * Queda activo: antes de llegar aquí ya pasó por las aprobaciones que corresponden. Las pruebas piden `estado: "PAUSED"`.
  */
 export async function crearAnuncioDesdeInstagram(
   accountId: string,
-  o: { nombre: string; conjuntoId: string; instagramUserId?: string | null; mediaId: string; paginaId?: string | null; facebook?: boolean },
+  o: { nombre: string; conjuntoId: string; instagramUserId?: string | null; mediaId: string; paginaId?: string | null; facebook?: boolean; estado?: "ACTIVE" | "PAUSED" },
 ): Promise<AnuncioDeInstagram> {
   if (!o.facebook && !o.instagramUserId) throw new ErrorDeMeta("Falta la cuenta de Instagram del cliente.", 400);
   // Un conjunto de visitas al perfil exige el botón «Visitar perfil» con el enlace al perfil; sin él Meta rechaza el anuncio.
@@ -276,7 +358,7 @@ export async function crearAnuncioDesdeInstagram(
     name: o.nombre.slice(0, 100),
     adset_id: o.conjuntoId,
     creative: { creative_id: creativo.id },
-    status: "PAUSED",
+    status: o.estado ?? "ACTIVE",
   });
   if (!anuncio.id) throw new ErrorDeMeta("Meta no devolvió el anuncio.");
   return { creativeId: creativo.id, anuncioId: anuncio.id };

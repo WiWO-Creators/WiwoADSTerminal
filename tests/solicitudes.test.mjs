@@ -18,7 +18,7 @@ test("solo una solicitud pendiente se aprueba, rechaza o retira; solo una public
 test("el analista recibe los mensajes pedidos, con los nombres de los supervisores", () => {
   const base = { creadorNombre: "Ana", revisorNombre: "Luis", notaDeRevision: null, titulo: "un anuncio", error: null };
   assert.match(mensajeParaElCreador({ ...base, estado: "pendiente" }, ["Luis", "Marta"]), /enviada a revisión.*Luis, Marta/);
-  assert.match(mensajeParaElCreador({ ...base, estado: "publicada" }, []), /pausada.*cuando esté activa/);
+  assert.match(mensajeParaElCreador({ ...base, estado: "publicada" }, []), /ya quedó creada.*cuando esté activa/);
   assert.match(mensajeParaElCreador({ ...base, estado: "activa" }, []), /funcionando/);
   assert.match(mensajeParaElCreador({ ...base, estado: "rechazada", notaDeRevision: "falta el copy" }, []), /Luis la rechazó: falta el copy/);
 });
@@ -79,7 +79,9 @@ test("un cambio rechazado dice que todo quedó como estaba; uno pendiente, que n
 const { esCargoProtegido } = await import("../lib/permisos.ts");
 
 test("los jefes (Director y Director creativo) están protegidos; Director Digital y Digital Lead no", () => {
+  assert.equal(esCargoProtegido("Super Admin"), true);
   assert.equal(esCargoProtegido("Director"), true);
+  assert.equal(esCargoProtegido("Paid Media"), false);
   assert.equal(esCargoProtegido("director creativo"), true);
   assert.equal(esCargoProtegido("Director Digital"), false);
   assert.equal(esCargoProtegido("Digital Lead"), false);

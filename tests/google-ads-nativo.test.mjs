@@ -225,7 +225,7 @@ test("validarAnuncioDisplay exige textos dentro de límite y las dos imágenes",
   assert.equal(malo.length, 4);
 });
 
-test("el anuncio de Display nace PAUSADO y apunta a los recursos subidos", () => {
+test("el anuncio de Display nace ACTIVO y apunta a los recursos subidos", () => {
   const { ruta, cuerpo } = nativo.armarCreacionDisplay("423-204-0466", "196087153410", ANUNCIO_DISPLAY, {
     paisaje: "customers/423204046 6/assets/1".replace(" ", ""),
     cuadrada: "customers/4232040466/assets/2",
@@ -233,7 +233,7 @@ test("el anuncio de Display nace PAUSADO y apunta a los recursos subidos", () =>
   });
   assert.equal(ruta, "customers/4232040466/adGroupAds:mutate");
   const op = cuerpo.operations[0].create;
-  assert.equal(op.status, "PAUSED");
+  assert.equal(op.status, "ENABLED");
   assert.equal(op.adGroup, "customers/4232040466/adGroups/196087153410");
   assert.equal(op.ad.responsiveDisplayAd.marketingImages[0].asset, "customers/4232040466/assets/1");
   assert.equal(op.ad.responsiveDisplayAd.logoImages, undefined);
@@ -297,7 +297,7 @@ test("Performance Max: validación de textos, logo y descripción corta", () => 
   assert.ok(malo.some((m) => /ubicación/.test(m)));
 });
 
-test("Performance Max: una sola mutación atómica, pausada, con nombre del negocio y logo a nivel de campaña", () => {
+test("Performance Max: una sola mutación atómica, activa, con nombre del negocio y logo a nivel de campaña", () => {
   const imgs = [
     { nombre: "h", base64: "AAAA", campo: "MARKETING_IMAGE" },
     { nombre: "s", base64: "BBBB", campo: "SQUARE_MARKETING_IMAGE" },
@@ -308,14 +308,14 @@ test("Performance Max: una sola mutación atómica, pausada, con nombre del nego
   assert.equal(cuerpo.validateOnly, true);
   const ops = cuerpo.mutateOperations;
   const campana = ops.find((o) => o.campaignOperation).campaignOperation.create;
-  assert.equal(campana.status, "PAUSED");
+  assert.equal(campana.status, "ENABLED");
   assert.equal(campana.advertisingChannelType, "PERFORMANCE_MAX");
   const deCampana = ops.filter((o) => o.campaignAssetOperation).map((o) => o.campaignAssetOperation.create.fieldType).sort();
   assert.deepEqual(deCampana, ["BUSINESS_NAME", "LOGO"]);
   const delGrupo = ops.filter((o) => o.assetGroupAssetOperation).map((o) => o.assetGroupAssetOperation.create.fieldType);
   assert.ok(!delGrupo.includes("LOGO") && !delGrupo.includes("BUSINESS_NAME"));
   assert.equal(delGrupo.filter((f) => f === "HEADLINE").length, 3);
-  assert.equal(ops.find((o) => o.assetGroupOperation).assetGroupOperation.create.status, "PAUSED");
+  assert.equal(ops.find((o) => o.assetGroupOperation).assetGroupOperation.create.status, "ENABLED");
 });
 
 const { armarMutacionBusqueda, validarBusqueda } = await import("../lib/google-ads-nativo.ts");
@@ -349,13 +349,13 @@ function datosBusqueda(over = {}) {
   };
 }
 
-test("la campaña de Búsqueda nativa nace pausada, con su estructura completa en una sola mutación", () => {
+test("la campaña de Búsqueda nativa nace activa, con su estructura completa en una sola mutación", () => {
   const { ruta, cuerpo } = armarMutacionBusqueda("123-456-7890", datosBusqueda(), { validateOnly: true, sello: 1 });
   assert.equal(ruta, "customers/1234567890/googleAds:mutate");
   assert.equal(cuerpo.validateOnly, true);
   const ops = cuerpo.mutateOperations;
   const campana = ops.find((o) => o.campaignOperation).campaignOperation.create;
-  assert.equal(campana.status, "PAUSED");
+  assert.equal(campana.status, "ENABLED");
   assert.equal(campana.advertisingChannelType, "SEARCH");
   assert.deepEqual(campana.targetSpend, { cpcBidCeilingMicros: "300000" });
   assert.equal(campana.networkSettings.targetSearchNetwork, true);

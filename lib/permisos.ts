@@ -145,7 +145,7 @@ export function rolesAsignables(actor: Actor): Role[] {
 }
 
 /** Cargos de los jefes: nadie, ni siquiera otro administrador, los modifica desde la app. */
-export const CARGOS_PROTEGIDOS = ["Director", "Director creativo"] as const;
+export const CARGOS_PROTEGIDOS = ["Super Admin", "Director", "Director creativo"] as const;
 export const esCargoProtegido = (cargo: string | null | undefined): boolean =>
   CARGOS_PROTEGIDOS.some((c) => c.toLowerCase() === (cargo ?? "").trim().toLowerCase());
 

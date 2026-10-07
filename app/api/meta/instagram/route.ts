@@ -7,8 +7,8 @@ import { can, enAlcance } from "@/lib/permisos";
 import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafolios-store";
 
 /**
- * Impulsar una publicación de Instagram: crea un anuncio PAUSADO dentro de un conjunto existente, con la API de Meta
- * directa. Solo supervisores y administradores. El anuncio nunca nace activo.
+ * Impulsar una publicación de Instagram: crea un anuncio dentro de un conjunto existente, con la API de Meta directa.
+ * Solo supervisores y administradores. Queda activo (decisión del equipo: la revisión es la aprobación previa).
  */
 export const dynamic = "force-dynamic";
 

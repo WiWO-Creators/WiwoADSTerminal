@@ -27,6 +27,8 @@ import {
   sugerenciasDeContenido,
   type EntradaDeContenido,
 } from "@/lib/sugerencias";
+import { ultimoAnuncioGooglePorCampana } from "@/lib/google-ads-nativo";
+import { accesoNativoGoogle } from "@/lib/integration-store";
 import { metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
 
 export class ErrorDeSugerencias extends Error {
@@ -304,6 +306,31 @@ export async function evaluarSugerencias(
           ultimoAnuncio: fechas?.get(camp.campaignId) ?? null,
         });
       }
+    }
+  }
+
+  // Google: el historial de cambios dice cuándo se creó el último anuncio (30 días); sin eventos, hay una cota de «más de 30 días».
+  const porCuentaGoogle = new Map<string, Map<string, number> | null>();
+  for (const c of clientes) {
+    for (const camp of actual.campaigns) {
+      if (camp.provider !== "google" || !camp.campaignId || !camp.conActividad || !c.cuentas.has(camp.accountKey)) continue;
+      if (!["ACTIVE", "ENABLED"].includes((camp.status ?? "").toUpperCase())) continue;
+      if (!porCuentaGoogle.has(camp.accountId)) {
+        const cred = await accesoNativoGoogle(actor, camp.accountId).catch(() => null);
+        porCuentaGoogle.set(camp.accountId, cred ? await ultimoAnuncioGooglePorCampana(cred, camp.accountId, ahora).catch(() => null) : null);
+      }
+      const fechas = porCuentaGoogle.get(camp.accountId);
+      if (!fechas) continue;
+      const ultimo = fechas.get(camp.campaignId);
+      entradasDeContenido.push({
+        cliente: { id: c.id, nombre: c.nombre },
+        provider: "google",
+        accountId: camp.accountId,
+        campanaId: camp.campaignId,
+        campanaNombre: camp.name,
+        ultimoAnuncio: ultimo ?? ahora.getTime() - 30 * 86_400_000,
+        soloCota: ultimo === undefined,
+      });
     }
   }
 

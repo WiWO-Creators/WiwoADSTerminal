@@ -2026,3 +2026,13 @@ async function hmacSha256Hex(secret: string, value: string): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
+
+/**
+ * Piezas internas que reutiliza la conexión de LinkedIn (`lib/linkedin-conexion.ts`) para cifrar sus tokens igual que
+ * Google y Meta, sin duplicar la llave ni el formato. No cambian nada de lo existente.
+ */
+export const cifrarSecretoDeConexion = encryptSecret;
+export const descifrarSecretoDeConexion = decryptSecret;
+export const hashDeEstadoOAuth = sha256;
+export const aleatorioParaOAuth = randomBase64Url;
+export const registrarEventoDeIntegracion = logIntegrationEvent;

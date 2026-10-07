@@ -22,6 +22,8 @@ import {
   type Row,
 } from "@/lib/detalle-entidad";
 import { versionDeEscrituras } from "@/lib/escrituras";
+import { graphJson, leerEstructuraMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
+import { unidadesMenoresMeta } from "@/lib/monedas";
 import {
   consultarGaql,
   GAQL_ANUNCIOS,
@@ -86,7 +88,7 @@ export function fetchDetalleDeCuenta(
   const clave = `${provider}:${accountId}:${opciones.dias ?? VENTANA_DETALLE_DIAS}:${opciones.credencialesGoogle ? "nativa" : "windsor"}:${versionDeEscrituras()}`;
   const guardado = memoriaDeDetalle.get(clave);
   if (guardado && Date.now() - guardado.at < MEMORIA_DETALLE_MS) return guardado.datos;
-  const datos = leerDetalleDeCuenta(provider, accountId, opciones).then(completarConRecientes);
+  const datos = leerDetalleDeCuenta(provider, accountId, opciones).then(completarConNativoMeta).then(completarConRecientes);
   memoriaDeDetalle.set(clave, { at: Date.now(), datos });
   datos.catch(() => {
     if (memoriaDeDetalle.get(clave)?.datos === datos) memoriaDeDetalle.delete(clave);
@@ -137,6 +139,33 @@ const MOTIVO_RECIEN_CREADO =
  * sabe que se creó (nombre, ids, presupuesto), marcado como no editable: así la campaña recién publicada se ve en el árbol
  * en vez de parecer que no se creó.
  */
+/**
+ * Meta: Windsor solo entrega lo que tuvo actividad. Con la conexión directa se suma lo que falta (campañas y conjuntos
+ * pausados o recién creados), para poder verlos, editarlos y proponer cambios sobre ellos. Si la lectura falla, queda lo de Windsor.
+ */
+async function completarConNativoMeta(detalle: DetalleDeCuenta): Promise<DetalleDeCuenta> {
+  if (detalle.provider !== "meta" || !metaNativoConfigurado()) return detalle;
+  try {
+    const moneda = (await graphJson<{ currency?: string }>(`act_${detalle.accountId.replace(/^act_/, "")}`, "GET", { fields: "currency" })).currency ?? null;
+    const { campanas, conjuntos } = await leerEstructuraMeta(detalle.accountId, unidadesMenoresMeta(moneda));
+    const filas = (f: Record<string, unknown>) => ({ ...f, account_currency: moneda });
+    const camp = new Set(detalle.campanas.map((c) => c.id));
+    const conj = new Set(detalle.conjuntos.map((c) => c.id));
+    const nuevasCampanas = campanas.map((f) => detalleCampanaMeta(filas(f))).filter((c): c is DetalleCampana => c !== null && !camp.has(c.id));
+    const nuevosConjuntos = conjuntos.map((f) => detalleConjuntoMeta(filas(f))).filter((c): c is DetalleConjunto => c !== null && !conj.has(c.id));
+    if (nuevasCampanas.length + nuevosConjuntos.length === 0) return detalle;
+    return {
+      ...detalle,
+      campanas: [...detalle.campanas, ...nuevasCampanas.map((c) => ({ ...c, accountId: detalle.accountId }))],
+      conjuntos: [...detalle.conjuntos, ...nuevosConjuntos.map((c) => ({ ...c, accountId: detalle.accountId }))],
+      avisos: [...detalle.avisos, "Se sumaron campañas y conjuntos que Windsor no entrega (pausados o recién creados), leídos directo de Meta."],
+    };
+  } catch (error) {
+    console.error("WiWO.ADS detalle Meta nativo", error instanceof Error ? error.message : "error");
+    return detalle;
+  }
+}
+
 async function completarConRecientes(detalle: DetalleDeCuenta): Promise<DetalleDeCuenta> {
   if (detalle.provider !== "meta" && detalle.provider !== "google") return detalle;
   try {

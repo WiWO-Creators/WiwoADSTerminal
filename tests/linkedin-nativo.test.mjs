@@ -112,3 +112,46 @@ test("mensajeDeError distingue token vencido, permisos y versión retirada", () 
   assert.match(p.mensajeDeError({ message: "x" }, 403), /producto aprobado/);
   assert.match(p.mensajeDeError(null, 426), /LINKEDIN_API_VERSION/);
 });
+
+test("el cuerpo de la cuenta de prueba es BUSINESS, test:true y con notificaciones apagadas", () => {
+  const c = p.cuerpoDeCuentaDePrueba();
+  assert.equal(c.type, "BUSINESS");
+  assert.equal(c.test, true);
+  assert.equal(c.currency, "USD");
+  assert.equal(c.name, "WiWO.ADS - Cuenta de prueba");
+  assert.equal(c.notifiedOnCampaignOptimization, false);
+  assert.equal(c.notifiedOnCreativeApproval, false);
+  assert.equal(c.notifiedOnCreativeRejection, false);
+  assert.equal(c.notifiedOnEndOfCampaign, false);
+  assert.equal("reference" in c, false); // la organización es opcional y no se manda si no se pide
+});
+
+test("la cuenta de prueba normaliza la moneda y acepta una organización numérica", () => {
+  const c = p.cuerpoDeCuentaDePrueba({ nombre: "  Mi prueba ", moneda: "clp", organizacionId: "2414183" });
+  assert.equal(c.name, "Mi prueba");
+  assert.equal(c.currency, "CLP");
+  assert.equal(c.reference, "urn:li:organization:2414183");
+});
+
+test("la cuenta de prueba rechaza nombre vacío o largo, moneda inválida y organización no numérica", () => {
+  assert.throws(() => p.cuerpoDeCuentaDePrueba({ nombre: "   " }), /entre 1 y 100/);
+  assert.throws(() => p.cuerpoDeCuentaDePrueba({ nombre: "x".repeat(101) }), /entre 1 y 100/);
+  assert.throws(() => p.cuerpoDeCuentaDePrueba({ moneda: "PESOS" }), /Moneda inválida/);
+  assert.throws(() => p.cuerpoDeCuentaDePrueba({ organizacionId: "1,2" }), /Id de organización inválido/);
+});
+
+test("idDeCabeceraCreada solo acepta ids numéricos", () => {
+  assert.equal(p.idDeCabeceraCreada("123456"), "123456");
+  assert.equal(p.idDeCabeceraCreada(" 77 "), "77");
+  assert.equal(p.idDeCabeceraCreada("urn:li:x:1"), null);
+  assert.equal(p.idDeCabeceraCreada(null), null);
+  assert.equal(p.idDeCabeceraCreada(""), null);
+});
+
+test("diasHastaVencer cuenta en días enteros, negativo si venció y null si no se sabe", () => {
+  const dia = 86_400_000;
+  assert.equal(p.diasHastaVencer(1000 + 60 * dia, 1000), 60);
+  assert.equal(p.diasHastaVencer(1000 + 9.9 * dia, 1000), 9);
+  assert.equal(p.diasHastaVencer(1000 - 2 * dia, 1000), -2);
+  assert.equal(p.diasHastaVencer(null, 1000), null);
+});

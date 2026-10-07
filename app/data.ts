@@ -19,7 +19,9 @@ export type ViewKey =
   | "simulador"
   | "solicitudes"
   | "impulsar"
-  | "reglas";
+  | "reglas"
+  | "diagnostico"
+  | "inversion";
 
 export type Severity = "critical" | "high" | "medium" | "info";
 export type HealthState = "critical" | "warning" | "healthy" | "inactive";

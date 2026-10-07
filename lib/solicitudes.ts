@@ -13,14 +13,15 @@ import type { CampaignDraft } from "@/lib/constructor";
 import { armarPlanDeBorrador, ejecutarPlanArmado, ErrorDeConstructor } from "@/lib/constructor-servicio";
 import type { PasoEjecutado } from "@/lib/constructor-ejecutar";
 import { fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
-import { copiarReglaMetaParaAnuncio, crearAnuncioDesdeInstagram } from "@/lib/meta-nativo";
+import { creativoDeCarrusel, creativoDeImagen, tituloDeContenido, validarContenido, type DatosDeContenido } from "@/lib/anuncios-formato-pura";
+import { copiarReglaMetaParaAnuncio, crearAnuncioConCreativo, crearAnuncioDesdeInstagram } from "@/lib/meta-nativo";
 import { crearRegla } from "@/lib/reglas-automaticas";
 import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafolios-store";
 import { enlaceDeCampana, type Enlace } from "@/lib/enlaces";
 import { idDeResultado } from "@/lib/ids-de-resultado";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { ejecutarPasosDeEdicion } from "@/lib/edicion-ejecutar";
-import { tocaPresupuesto, type CambioVisible, type CambiosEdicion } from "@/lib/edicion-plan";
+import { hayAlgoQueAplicar, tocaPresupuesto, type CambioVisible, type CambiosEdicion } from "@/lib/edicion-plan";
 import { prepararEdicion } from "@/lib/edicion-servicio";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import type { NivelEntidad, Platform } from "@/lib/plataformas";
@@ -200,7 +201,7 @@ export async function crearSolicitudDeEdicion(
   const prep = await prepararEdicion({ actor, provider: e.provider as Platform, accountId: e.accountId, nivel: e.nivel, id: e.id, cambios: e.cambios });
   const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
   if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.mensaje}`, 422);
-  if (prep.plan.pasos.length === 0) throw new ErrorDeSolicitud("No hay ningún cambio que enviar.", 422);
+  if (!hayAlgoQueAplicar(prep.plan)) throw new ErrorDeSolicitud("No hay ningún cambio que enviar.", 422);
   const cliente = (await listPortfolios()).find((p) => p.id === prep.portfolioId);
   if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
   const nombre = prep.antes.entidad.nombre ?? e.id;
@@ -224,6 +225,50 @@ export async function crearSolicitudDeEdicion(
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?, ?)`,
     )
     .bind(id, cliente.id, cliente.name, e.provider, `un cambio en ${ETIQUETA_NIVEL[e.nivel] ?? "la entidad"} «${nombre}»`, nombre, JSON.stringify([propuesta]), actor.email, nombreDe(actor), Date.now())
+    .run();
+  return (await obtener(actor, id))!;
+}
+
+/** Contenido nuevo (imágenes sueltas o un carrusel) para un conjunto existente de Meta. Se crea al aprobarse y queda corriendo. */
+export type ContenidoNuevo = {
+  __contenido: true;
+  portfolioId: string;
+  accountId: string;
+  campaignId: string;
+  campaignName: string;
+  adsetId: string;
+  adsetName: string;
+  nombre: string;
+  datos: DatosDeContenido;
+};
+
+/** Crea una solicitud de contenido nuevo (imágenes o carrusel) dentro de conjuntos existentes de Meta. */
+export async function crearSolicitudDeContenido(actor: Actor, piezas: ContenidoNuevo[]): Promise<Solicitud> {
+  if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar contenido a revisión.", 403);
+  if (piezas.length === 0 || piezas.length > 10) throw new ErrorDeSolicitud("Una solicitud lleva entre 1 y 10 piezas de contenido.");
+  const primero = piezas[0];
+  if (piezas.some((p) => p.portfolioId !== primero.portfolioId)) throw new ErrorDeSolicitud("Todo debe ser del mismo cliente.");
+  if (!enAlcance(actor, primero.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
+  const cliente = (await listPortfolios()).find((p) => p.id === primero.portfolioId);
+  if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
+  const indice = await accountIndex();
+  for (const p of piezas) {
+    const duenio = indice.get(normalizeAccountId(p.accountId));
+    if (!duenio || duenio.id !== p.portfolioId) throw new ErrorDeSolicitud("Esa cuenta no pertenece a este cliente.", 403);
+    if (!p.adsetId) throw new ErrorDeSolicitud("Falta el conjunto de destino.");
+    const errores = validarContenido(p.datos);
+    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores[0]}`, 422);
+    if (!(cliente.accountPages[p.accountId] ?? cliente.pageId)) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
+  }
+  const id = crypto.randomUUID();
+  const titulo = piezas.length === 1 ? tituloDeContenido(piezas[0].datos) : `${piezas.length} piezas de contenido nuevo`;
+  await getRawDb()
+    .prepare(
+      `INSERT INTO solicitudes (id, portfolio_id, portfolio_name, plataformas, titulo, destino, drafts_json, estado,
+         creador_email, creador_nombre, created_at)
+       VALUES (?, ?, ?, 'meta', ?, ?, ?, 'pendiente', ?, ?, ?)`,
+    )
+    .bind(id, cliente.id, cliente.name, titulo, `${primero.adsetName} · ${primero.campaignName}`, JSON.stringify(piezas), actor.email, nombreDe(actor), Date.now())
     .run();
   return (await obtener(actor, id))!;
 }
@@ -386,6 +431,34 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
   let fallo: string | null = null;
 
   for (const d of drafts) {
+    // Contenido nuevo (imágenes o carrusel): se crea con la API directa de Meta.
+    if ((d as { __contenido?: boolean }).__contenido) {
+      const c = d as unknown as ContenidoNuevo;
+      try {
+        const cliente = (await listPortfolios()).find((p) => p.id === c.portfolioId);
+        const paginaId = cliente?.accountPages[c.accountId] ?? cliente?.pageId;
+        if (!paginaId) throw new Error("Este cliente no tiene una Página de Facebook asociada.");
+        const destinos = { paginaId, instagramUserId: cliente?.instagramId };
+        const creativos =
+          c.datos.formato === "carrusel"
+            ? [{ nombre: c.nombre, creativo: creativoDeCarrusel(c.datos, destinos, c.nombre) }]
+            : c.datos.imagenes.map((im, i) => {
+                const nombre = `${c.nombre} ${c.datos.imagenes.length > 1 ? i + 1 : ""}`.trim();
+                return { nombre, creativo: creativoDeImagen(c.datos, im, destinos, nombre) };
+              });
+        for (const pieza of creativos) {
+          const r = await crearAnuncioConCreativo(c.accountId, { nombre: pieza.nombre, conjuntoId: c.adsetId, creativo: pieza.creativo });
+          anuncios.push({ provider: "meta", accountId: c.accountId, id: r.anuncioId });
+          pasosTotales.push({ platform: "meta", action: "ads:create_content", label: pieza.nombre, ok: true, error: null, raw: r } as PasoEjecutado);
+        }
+        const url = `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}`;
+        if (!enlaces.some((e) => e.url === url)) enlaces.push({ etiqueta: "Revisar la campaña en Meta", url });
+      } catch (error) {
+        fallo = error instanceof Error ? error.message : "No se pudo crear el contenido.";
+        break;
+      }
+      continue;
+    }
     // Cambio propuesto sobre algo existente: se vuelve a leer la plataforma y se aplica el plan de ahora.
     if ((d as { __edicion?: boolean }).__edicion) {
       const ed = d as unknown as EdicionPropuesta;
@@ -393,7 +466,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
         const prep = await prepararEdicion({ actor, provider: ed.provider as Platform, accountId: ed.accountId, nivel: ed.nivel, id: ed.id, cambios: ed.cambios });
         const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
         if (bloqueante) throw new Error(bloqueante.mensaje);
-        if (prep.plan.pasos.length === 0) throw new Error("Ya no hay nada que cambiar: la entidad cambió desde que se propuso.");
+        if (!hayAlgoQueAplicar(prep.plan)) throw new Error("Ya no hay nada que cambiar: la entidad cambió desde que se propuso.");
         const campaignId = "campaignId" in prep.antes.entidad ? prep.antes.entidad.campaignId : null;
         const r = await ejecutarPasosDeEdicion({
           provider: ed.provider as Platform,
@@ -418,7 +491,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       }
       continue;
     }
-    // Impulso de una publicación de Instagram: se crea con la API directa de Meta, siempre pausado.
+    // Impulso de una publicación de Instagram: se crea con la API directa de Meta.
     if ((d as { __instagram?: boolean }).__instagram) {
       const ig = d as unknown as ImpulsoDeInstagram;
       try {

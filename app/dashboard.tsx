@@ -22,6 +22,8 @@ import {
   Sun,
   type LucideIcon,
   Lightbulb,
+  Stethoscope,
+  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -94,6 +96,8 @@ const Cargando = () => (
 const cargarVista = <T,>(importar: () => Promise<React.ComponentType<T>>) =>
   dynamic(async () => ({ default: await importar() }) as { default: React.ComponentType<T> }, { ssr: false, loading: Cargando });
 const ConstructorView = cargarVista(() => import("./constructor-view").then((m) => m.ConstructorView));
+const InversionView = cargarVista(() => import("./inversion-view").then((m) => m.InversionView));
+const DiagnosticoView = cargarVista(() => import("./diagnostico-view").then((m) => m.DiagnosticoView));
 const DecisionesView = cargarVista(() => import("./sugerencias-tinder").then((m) => m.BotonDeSugerencias));
 const ImpulsarView = cargarVista(() => import("./impulsar-view").then((m) => m.ImpulsarView));
 const ReglasView = cargarVista(() => import("./reglas-view").then((m) => m.ReglasView));
@@ -133,6 +137,13 @@ const navItems: ItemDeMenu[] = [
   },
   { key: "control", label: "Inicio", icono: Home },
   {
+    key: "inversion",
+    label: "Inversión",
+    roles: ["admin", "supervisor", "analyst"],
+    icono: Wallet,
+    resumen: "Cuánto se gastó, contra qué presupuesto y adónde se fue.",
+  },
+  {
     key: "health",
     label: "Dashboard C-Level",
     icono: LineChart,
@@ -155,7 +166,7 @@ const navItems: ItemDeMenu[] = [
     label: "Creador de campañas",
     roles: ["admin", "supervisor", "analyst"],
     icono: Megaphone,
-    resumen: "Arma y publica campañas en Google y Meta. Todo nace pausado. Los analistas la envían a revisión.",
+    resumen: "Arma y publica campañas en Google y Meta. Los analistas las envían a aprobación; al aprobarse quedan corriendo.",
   },
   {
     key: "solicitudes",
@@ -189,6 +200,13 @@ const navItemsGestion: ItemDeMenu[] = [
     roles: ["admin", "supervisor"],
     icono: ShieldAlert,
     resumen: "Reglas como las de Meta y Google: por ejemplo pausar un anuncio al llegar a cierto gasto.",
+  },
+  {
+    key: "diagnostico",
+    label: "Diagnóstico",
+    roles: ["admin"],
+    icono: Stethoscope,
+    resumen: "Qué llave de Meta ve cada cuenta y página, y qué permiso falta.",
   },
   {
     key: "integrations",
@@ -455,7 +473,9 @@ export default function WiwoDashboard({
     // y se abra otra. Arranca en `false` a propósito (ver la nota del tema,
     // arriba): así la mayoría de las cargas —donde ya se eligió antes— no
     // parpadean con la puerta encima.
+    // Decisiones es la pantalla de entrada y muestra los pendientes de TODOS los clientes: no hace falta elegir uno.
     if (
+      initialView !== "decisiones" &&
       clientesDeclarados.length > 0 &&
       window.sessionStorage.getItem(PUERTA_CLIENTE_STORAGE_KEY) !== "1"
     ) {
@@ -929,6 +949,10 @@ export default function WiwoDashboard({
           )}
           {view === "solicitudes" && <SolicitudesView />}
           {view === "reglas" && <ReglasView clienteId={clienteSeleccionado} />}
+          {view === "inversion" && (
+            <InversionView clienteId={clienteSeleccionado} performance={performance} periodo={performance.rango.label} onElegirCliente={setClienteSeleccionado} />
+          )}
+          {view === "diagnostico" && initialSnapshot.user.role === "admin" && <DiagnosticoView clienteId={clienteSeleccionado} />}
           <Dialog open={impulsarAbierto} onOpenChange={setImpulsarAbierto}>
             <DialogContent className="max-h-[92vh] overflow-y-auto p-0 sm:max-w-2xl">
               <DialogTitle className="sr-only">Impulsar</DialogTitle>

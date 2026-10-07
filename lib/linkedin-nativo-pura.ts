@@ -238,3 +238,59 @@ export function respuestaDeLead(el: Obj): RespuestaDeLead {
     respuestas,
   };
 }
+
+// ---------------------------------------------------------------- Cuenta publicitaria de PRUEBA
+
+const MONEDA = /^[A-Z]{3}$/;
+
+export type CuerpoDeCuentaDePrueba = {
+  currency: string;
+  name: string;
+  type: "BUSINESS";
+  test: true;
+  notifiedOnCampaignOptimization: false;
+  notifiedOnCreativeApproval: false;
+  notifiedOnCreativeRejection: false;
+  notifiedOnEndOfCampaign: false;
+  reference?: string;
+};
+
+/**
+ * El cuerpo EXACTO que se enviaría a `POST /rest/adAccounts` para crear la cuenta de prueba (documentación de LinkedIn,
+ * «Working with Test Ad Accounts»). `test: true` solo se puede fijar al crear y es inmutable; hay una sola por app.
+ * `reference` (la organización) es opcional y solo se manda si se pide: una cuenta de prueba no la necesita.
+ * Las notificaciones van apagadas para no escribirle a nadie por una cuenta que nunca sirve anuncios.
+ */
+export function cuerpoDeCuentaDePrueba(datos: { nombre?: string; moneda?: string; organizacionId?: string } = {}): CuerpoDeCuentaDePrueba {
+  const name = (datos.nombre ?? "WiWO.ADS - Cuenta de prueba").trim();
+  if (name.length < 1 || name.length > 100) throw new ErrorDeLinkedin("El nombre de la cuenta de prueba debe tener entre 1 y 100 caracteres.", 400);
+  const currency = (datos.moneda ?? "USD").trim().toUpperCase();
+  if (!MONEDA.test(currency)) throw new ErrorDeLinkedin(`Moneda inválida: ${datos.moneda}`, 400);
+  const cuerpo: CuerpoDeCuentaDePrueba = {
+    currency,
+    name,
+    type: "BUSINESS",
+    test: true,
+    notifiedOnCampaignOptimization: false,
+    notifiedOnCreativeApproval: false,
+    notifiedOnCreativeRejection: false,
+    notifiedOnEndOfCampaign: false,
+  };
+  if (datos.organizacionId !== undefined) {
+    const [organizacion] = soloIds([datos.organizacionId], "organización");
+    cuerpo.reference = `urn:li:organization:${organizacion}`;
+  }
+  return cuerpo;
+}
+
+/** El id de lo recién creado: LinkedIn lo devuelve en la cabecera `x-restli-id`, no en el cuerpo. */
+export function idDeCabeceraCreada(valor: string | null | undefined): string | null {
+  const id = (valor ?? "").trim();
+  return SOLO_ID.test(id) ? id : null;
+}
+
+/** Días que le quedan a un token (redondeado hacia abajo); negativo si ya venció; `null` si no se sabe. */
+export function diasHastaVencer(expiraEn: number | null, ahora: number): number | null {
+  if (expiraEn === null || !Number.isFinite(expiraEn)) return null;
+  return Math.floor((expiraEn - ahora) / 86_400_000);
+}

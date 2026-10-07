@@ -31,30 +31,30 @@ export type ResultadoDeImpulsos = {
   mensaje: string;
 };
 
-export async function solicitarImpulsos(
-  actor: Actor,
-  entrada: { clienteId: string; links: string[]; conjunto?: string; campana?: string; regla?: string },
-): Promise<ResultadoDeImpulsos> {
-  const vacio = (mensaje: string, extra: Partial<ResultadoDeImpulsos> = {}): ResultadoDeImpulsos => ({
-    solicitudes: [],
-    descartados: [],
-    conjuntosPosibles: [],
-    supuestos: [],
-    mensaje,
-    ...extra,
-  });
-  if (!enAlcance(actor, entrada.clienteId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
-  const cliente = (await listPortfolios()).find((p) => p.id === entrada.clienteId);
-  if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
-  const links = entrada.links.map((l) => l.trim()).filter(Boolean).slice(0, 20);
-  if (links.length === 0) return vacio("No me pasaron ningún link.");
-  if (!entrada.conjunto?.trim() && !entrada.campana?.trim()) return vacio("Falta indicar la campaña o el conjunto de destino.");
+export type ConjuntoDeDestino = {
+  objetivo: string | null;
+  id: string;
+  nombre: string | null;
+  estado: string | null;
+  campaignId: string | null;
+  accountId: string;
+  campaignName: string;
+};
 
-  // 1) Destino entre todas las cuentas de Meta del cliente.
+export type DestinoResuelto = { elegido: ConjuntoDeDestino & { campaignId: string }; supuestos: string[] } | { error: string; conjuntosPosibles: string[] };
+
+/**
+ * Encuentra, por nombre, el conjunto de Meta de destino entre todas las cuentas del cliente. Con solo la campaña elige su
+ * primer conjunto activo y lo dice en `supuestos`. Si no queda claro, devuelve el motivo y entre qué hay que elegir.
+ */
+export async function resolverDestinoMeta(
+  cliente: { name: string; accountIds: string[]; accountProviders: Record<string, string | null | undefined> },
+  entrada: { conjunto?: string; campana?: string },
+): Promise<DestinoResuelto> {
+  const falla = (error: string, conjuntosPosibles: string[] = []): DestinoResuelto => ({ error, conjuntosPosibles });
   const cuentasMeta = cliente.accountIds.filter((id) => cliente.accountProviders[id] === "meta");
-  if (cuentasMeta.length === 0) return vacio("Este cliente no tiene cuentas de Meta conectadas.");
-  type Conj = { objetivo: string | null; id: string; nombre: string | null; estado: string | null; campaignId: string | null; accountId: string; campaignName: string };
-  const conjuntos: Conj[] = [];
+  if (cuentasMeta.length === 0) return falla("Este cliente no tiene cuentas de Meta conectadas.");
+  const conjuntos: ConjuntoDeDestino[] = [];
   for (const cuenta of cuentasMeta) {
     const detalle = await fetchDetalleDeCuenta("meta", cuenta, {});
     for (const c of detalle.conjuntos) {
@@ -78,19 +78,19 @@ export async function solicitarImpulsos(
     );
     const nombresDeCampana = [...new Set(porCampana.candidatos.map((c) => c.campaignName))];
     if (nombresDeCampana.length > 1) {
-      return vacio(`Hay ${nombresDeCampana.length} campañas que calzan con «${entrada.campana}»: dime cuál.`, { conjuntosPosibles: nombresDeCampana.slice(0, 10) });
+      return falla(`Hay ${nombresDeCampana.length} campañas que calzan con «${entrada.campana}»: dime cuál.`, nombresDeCampana.slice(0, 10));
     }
     candidatos = conjuntos.filter((c) => nombresDeCampana.includes(c.campaignName));
   }
-  let elegido: Conj | null = null;
+  let elegido: ConjuntoDeDestino | null = null;
   if (entrada.conjunto?.trim()) {
     const { unico, candidatos: varios } = buscarPorNombre(candidatos, entrada.conjunto);
     if (!unico) {
-      return vacio(
+      return falla(
         varios.length > 1
           ? `Hay ${varios.length} conjuntos que calzan con «${entrada.conjunto}»: dime cuál.`
           : `No encontré ningún conjunto de Meta de ${cliente.name} que se llame algo como «${entrada.conjunto}».`,
-        { conjuntosPosibles: varios.slice(0, 10).map((c) => `${c.nombre} (${c.campaignName})`) },
+        varios.slice(0, 10).map((c) => `${c.nombre} (${c.campaignName})`),
       );
     }
     elegido = unico;
@@ -98,10 +98,36 @@ export async function solicitarImpulsos(
     // Solo dieron la campaña: se usa su primer conjunto activo (o el primero que haya) y se dice cuál.
     const activos = candidatos.filter((c) => activo(c.estado));
     elegido = (activos.length > 0 ? activos : candidatos)[0] ?? null;
-    if (!elegido) return vacio(`No encontré conjuntos en la campaña «${entrada.campana}».`);
+    if (!elegido) return falla(`No encontré conjuntos en la campaña «${entrada.campana}».`);
     supuestos.push(`No indicaste el conjunto: usé «${elegido.nombre}» de «${elegido.campaignName}»${candidatos.length > 1 ? ` (la campaña tiene ${candidatos.length} conjuntos)` : ""}.`);
   }
-  if (!elegido.campaignId) return vacio("Ese conjunto no tiene una campaña asociada en la lectura; no se puede añadir ahí.");
+  if (!elegido.campaignId) return falla("Ese conjunto no tiene una campaña asociada en la lectura; no se puede añadir ahí.");
+  return { elegido: { ...elegido, campaignId: elegido.campaignId }, supuestos };
+}
+
+export async function solicitarImpulsos(
+  actor: Actor,
+  entrada: { clienteId: string; links: string[]; conjunto?: string; campana?: string; regla?: string },
+): Promise<ResultadoDeImpulsos> {
+  const vacio = (mensaje: string, extra: Partial<ResultadoDeImpulsos> = {}): ResultadoDeImpulsos => ({
+    solicitudes: [],
+    descartados: [],
+    conjuntosPosibles: [],
+    supuestos: [],
+    mensaje,
+    ...extra,
+  });
+  if (!enAlcance(actor, entrada.clienteId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
+  const cliente = (await listPortfolios()).find((p) => p.id === entrada.clienteId);
+  if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
+  const links = entrada.links.map((l) => l.trim()).filter(Boolean).slice(0, 20);
+  if (links.length === 0) return vacio("No me pasaron ningún link.");
+  if (!entrada.conjunto?.trim() && !entrada.campana?.trim()) return vacio("Falta indicar la campaña o el conjunto de destino.");
+
+  // 1) Destino entre todas las cuentas de Meta del cliente.
+  const destino = await resolverDestinoMeta(cliente, entrada);
+  if ("error" in destino) return vacio(destino.error, { conjuntosPosibles: destino.conjuntosPosibles });
+  const { elegido, supuestos } = destino;
 
   // 1b) Regla de Meta cuya condición se copia a una regla propia sobre el anuncio nuevo (la de Meta no se toca).
   let reglaPropia: ImpulsoDeInstagram["regla"];

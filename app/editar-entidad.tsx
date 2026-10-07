@@ -27,6 +27,7 @@ type Simulacion = {
     diff: CambioVisible[];
     problemas: Problema[];
     pausaAlAplicar: boolean;
+    pausaPedida?: boolean;
   };
   validacionGoogle: { ok: boolean; mensaje: string | null } | null;
 };
@@ -176,6 +177,7 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   const cambio = (k: string) => (ahora[k] ?? "") !== (antes[k] ?? "");
   const c: CambiosEdicion = {};
   if (cambio("nombre")) c.nombre = ahora.nombre;
+  if (ahora.pausar === "1") c.pausar = true;
 
   if (cambio("presupuestoMonto") || cambio("presupuestoTipo")) {
     const monto = num(ahora.presupuestoMonto ?? "");
@@ -371,13 +373,13 @@ export function EditarEntidad(props: Props) {
   const puedeAplicar0 =
     simulacion !== null &&
     bloqueantes.length === 0 &&
-    simulacion.plan.pasos.length > 0 &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
   const puedeAplicar =
     puedeAprobar &&
     simulacion !== null &&
     bloqueantes.length === 0 &&
-    simulacion.plan.pasos.length > 0 &&
+    (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
 
   return (
@@ -389,6 +391,13 @@ export function EditarEntidad(props: Props) {
             se puede pausar o activar.
           </p>
         ) : (
+          <>
+          <Campo etiqueta="Estado" ayuda="Pausar detiene la entrega. Se revierte activándolo de nuevo en la plataforma.">
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input type="checkbox" checked={valores.pausar === "1"} onChange={(e) => poner("pausar")(e.target.checked ? "1" : "")} />
+              Pausar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}
+            </label>
+          </Campo>
           <Campo
             etiqueta="Nombre"
             ayuda={provider === "linkedin" && nivel === "campana" ? "LinkedIn no permite renombrar un grupo de campañas desde Windsor." : undefined}
@@ -399,6 +408,7 @@ export function EditarEntidad(props: Props) {
               onChange={(e) => poner("nombre")(e.target.value)}
             />
           </Campo>
+          </>
         )}
 
         {!(provider === "linkedin" && nivel === "anuncio") &&
@@ -831,8 +841,7 @@ export function EditarEntidad(props: Props) {
           )}
           {simulacion.plan.pausaAlAplicar && (
             <p className="text-xs text-foreground/55">
-              Al aplicarlo, esto se pausa para que alguien lo revise antes de que siga corriendo con lo nuevo.
-              Cambiar solo el nombre no pausa nada.
+              Al aplicarlo, esto queda pausado: no entregará hasta que lo actives de nuevo en la plataforma.
             </p>
           )}
           {puedeAprobar ? (

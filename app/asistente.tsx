@@ -790,7 +790,7 @@ function TarjetaDePropuesta({
         </ul>
         {propuesta.pausaAlAplicar && propuesta.estado === "pendiente" && (
           <p className="mt-2 text-xs font-semibold text-warn">
-            Al aplicarlo, esto queda pausado para que alguien lo revise antes de seguir corriendo con lo nuevo.
+            Al aplicarlo, esto queda pausado: no entregará hasta que lo actives de nuevo.
           </p>
         )}
         {propuesta.avisos.map((aviso) => (

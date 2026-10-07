@@ -65,7 +65,7 @@ export function mensajeParaElCreador(s: SolicitudVisible, supervisores: string[]
       return "La retiraste antes de que se revisara.";
     case "publicada":
       if (s.esEdicion) return `${s.revisorNombre ?? "Un supervisor"} aprobó el cambio y ya se aplicó en la plataforma.`;
-      return `${s.revisorNombre ?? "Un supervisor"} la aprobó y quedó creada en la plataforma, pausada. Te avisamos cuando esté activa y funcionando.`;
+      return `${s.revisorNombre ?? "Un supervisor"} la aprobó y ya quedó creada en la plataforma. Te avisamos cuando esté activa y funcionando.`;
     case "activa":
       return "Aprobada y funcionando: ya está activa en la plataforma.";
     case "fallida":

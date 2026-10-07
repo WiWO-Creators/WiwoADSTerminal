@@ -508,6 +508,8 @@ export type EntradaDeContenido = {
   campanaNombre: string;
   /** Cuándo se creó el último anuncio de la campaña (ms); `null` si no se pudo saber. */
   ultimoAnuncio: number | null;
+  /** `ultimoAnuncio` es solo una cota: la plataforma no dice la fecha exacta, solo que es anterior (Google guarda 30 días de historial). */
+  soloCota?: boolean;
 };
 
 /**
@@ -536,15 +538,15 @@ export function sugerenciasDeContenido(entradas: EntradaDeContenido[], ahora: Da
       entityId: e.campanaId,
       entityName: e.campanaNombre,
       title: `No has actualizado el contenido de "${e.campanaNombre}"`,
-      diagnosis: `Su último anuncio nuevo se creó hace ${dias} días. Con el mismo contenido la audiencia se cansa y el rendimiento cae.`,
+      diagnosis: `Su último anuncio nuevo se creó hace ${e.soloCota ? "más de " : ""}${dias} días. Con el mismo contenido la audiencia se cansa y el rendimiento cae.`,
       proposedAction: "Subir contenido nuevo a sus conjuntos: una publicación, una imagen o un anuncio que ya funcione.",
       impact: "Renueva el contenido antes de que el cansancio de la audiencia suba el costo por resultado.",
       confidence: "Media",
-      before: `${dias} días sin contenido nuevo`,
+      before: `${e.soloCota ? "Más de " : ""}${dias} días sin contenido nuevo`,
       after: "Contenido renovado",
       guardrail: "Lo nuevo nace pausado y pasa por revisión: no cambia nada hasta que alguien lo apruebe.",
       metric: "Antigüedad del último anuncio",
-      delta: `${dias} días`,
+      delta: `${e.soloCota ? "+" : ""}${dias} días`,
       primaryLabel: "Subir contenido",
       accion: { tipo: "contenido", dias },
       generatedAt,

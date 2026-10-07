@@ -688,8 +688,8 @@ export function ConstructorView({
         <p className="text-xs leading-5 text-foreground/70">
           <strong className="text-foreground">Nada sale sin que lo apruebes.</strong>{" "}
           Armar y revisar el plan no toca ninguna plataforma. Solo el botón de
-          publicar, al final, crea de verdad — y todo nace pausado, así que no
-          gasta hasta que lo actives en la plataforma.
+          publicar, al final, crea de verdad — y lo aprobado queda corriendo,
+          así que revisa bien el plan antes de enviarlo.
         </p>
       </div>
 
@@ -794,25 +794,6 @@ export function ConstructorView({
           </GrupoDeSecciones>
           </div>
 
-          {paso === 2 && !draft.existingCampaign && (
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-[14px] border border-foreground/10 bg-foreground/[0.02] px-4 py-3">
-              <Checkbox
-                checked={draft.activarConjuntoYAnuncio}
-                onCheckedChange={(checked) =>
-                  actualizar({ activarConjuntoYAnuncio: checked === true })
-                }
-                className="mt-0.5"
-              />
-              <span className="text-xs leading-5 text-foreground/70">
-                <span className="font-bold text-foreground">
-                  Conjunto y anuncio nacen activos.
-                </span>{" "}
-                No entregan nada mientras la campaña siga pausada — al
-                activarla más tarde, corren solos, sin un paso extra. La
-                campaña en sí siempre nace pausada, sin excepción.
-              </span>
-            </label>
-          )}
 
           <div className="flex items-center justify-between gap-3 border-t border-foreground/10 pt-4">
             {paso > 0 ? (
@@ -1035,13 +1016,12 @@ export function ConstructorView({
                         ) : (
                           <Rocket />
                         )}
-                        Publicar pausado en{" "}
+                        Publicar en{" "}
                         {draft.platforms.map(platformLabel).join(" y ")}
                       </Button>
                       <p className="mt-2 text-center text-[0.68rem] leading-5 text-foreground/45">
-                        Se crea de verdad en la cuenta del cliente, en estado
-                        pausado. No empieza a gastar hasta que lo actives en la
-                        plataforma.
+                        Se crea de verdad en la cuenta del cliente y queda
+                        corriendo. Si eres analista, primero pasa por aprobación.
                       </p>
                     </div>
                   )}
@@ -3051,7 +3031,7 @@ function BloqueDisplay({
       </Campo>
       <p className="text-[0.68rem] leading-5 text-foreground/45">
         PNG o JPEG de hasta 5 MB, en una dirección pública https (Google las descarga desde ahí). Si la proporción o el tamaño no
-        cumplen, el plan lo avisa antes de publicar. El anuncio nace pausado.
+        cumplen, el plan lo avisa antes de publicar. El anuncio queda activo.
       </p>
     </div>
   );

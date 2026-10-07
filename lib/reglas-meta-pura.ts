@@ -90,9 +90,10 @@ export function interpretarReglaMeta(cruda: ReglaNativaCruda, moneda: string | n
  * Parámetros para crear en Meta una COPIA de una regla, vigilando solo el anuncio dado. La regla original no se toca:
  * la copia conserva su condición, su acción y su horario; solo cambia el nombre y la lista de anuncios.
  */
-export function copiaDeReglaParaAnuncio(cruda: ReglaNativaCruda, anuncioId: string, nombre: string): Record<string, string | object> {
+export function copiaDeReglaParaAnuncio(cruda: ReglaNativaCruda, anuncio: string | string[], nombre: string): Record<string, string | object> {
+  const anuncioIds = Array.isArray(anuncio) ? anuncio : [anuncio];
   const filtros = (cruda.evaluation_spec?.filters ?? []).filter((f) => f.field !== "ad.id" && f.field !== "adset.id" && f.field !== "campaign.id");
-  filtros.push({ field: "ad.id", value: [anuncioId], operator: "IN" });
+  filtros.push({ field: "ad.id", value: anuncioIds, operator: "IN" });
   const params: Record<string, string | object> = {
     name: nombre.slice(0, 100),
     status: "ENABLED",
@@ -101,6 +102,37 @@ export function copiaDeReglaParaAnuncio(cruda: ReglaNativaCruda, anuncioId: stri
   };
   if (cruda.schedule_spec) params.schedule_spec = cruda.schedule_spec;
   return params;
+}
+
+/** Monedas cuyo importe en Meta va en centavos o enteros; `null` si no se conoce (no se adivina). */
+export function divisorDeMoneda(moneda: string | null): number | null {
+  return DIVISOR[(moneda ?? "").toUpperCase()] ?? null;
+}
+
+/**
+ * Parámetros para crear en Meta una regla NUEVA «si un anuncio de la lista gasta más de X en total, pausarlo»
+ * (el mismo tipo que `highquality`). El importe se da en la moneda de la cuenta y se convierte a la unidad de Meta.
+ */
+export function especificacionDeReglaDeGasto(o: { nombre: string; anuncioIds: string[]; gasto: number; moneda: string | null; programacion?: string }): Record<string, string | object> {
+  const divisor = divisorDeMoneda(o.moneda);
+  if (!divisor) throw new Error(`No conozco la unidad de la moneda ${o.moneda ?? "desconocida"}: no se crea la regla para no equivocar el importe.`);
+  if (!(o.gasto > 0)) throw new Error("El gasto máximo debe ser mayor que cero.");
+  if (o.anuncioIds.length === 0) throw new Error("La regla necesita al menos un anuncio.");
+  return {
+    name: o.nombre.slice(0, 100),
+    status: "ENABLED",
+    evaluation_spec: {
+      evaluation_type: "SCHEDULE",
+      filters: [
+        { field: "entity_type", value: "AD", operator: "EQUAL" },
+        { field: "time_preset", value: "MAXIMUM", operator: "EQUAL" },
+        { field: "spent", value: Math.round(o.gasto * divisor), operator: "GREATER_THAN" },
+        { field: "ad.id", value: o.anuncioIds, operator: "IN" },
+      ],
+    },
+    execution_spec: { execution_type: "PAUSE" },
+    schedule_spec: { schedule_type: o.programacion ?? "SEMI_HOURLY" },
+  };
 }
 
 /** Elige una regla por nombre (sin importar mayúsculas, tildes ni espacios). */

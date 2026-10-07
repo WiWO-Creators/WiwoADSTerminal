@@ -3,7 +3,7 @@ import { getSession } from "@/app/sesion";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { entidadConAncestros, fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
 import { ejecutarPasosDeEdicion } from "@/lib/edicion-ejecutar";
-import { verificarCambios, type AntesDeEdicion, type CambiosEdicion } from "@/lib/edicion-plan";
+import { hayAlgoQueAplicar, verificarCambios, type AntesDeEdicion, type CambiosEdicion } from "@/lib/edicion-plan";
 import { armarAntes, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servicio";
 import { actualizarAnuncioRsa,
   actualizarCampanaGoogle, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
         { status: 422, headers: NO_STORE },
       );
     }
-    if (plan.pasos.length === 0) return fail("No hay ningún cambio que aplicar", 422);
+    if (!hayAlgoQueAplicar(plan)) return fail("No hay ningún cambio que aplicar", 422);
 
     const resultado = await ejecutarPasosDeEdicion({
       provider,
@@ -196,7 +196,7 @@ export async function POST(request: Request) {
             : resultado.pausa && !resultado.pausa.ok
               ? "El cambio se aplicó, pero no se pudo pausar. Revísalo en la plataforma: puede seguir corriendo con lo nuevo."
               : plan.pausaAlAplicar
-                ? "Cambio aplicado y pausado para su revisión. Actívalo cuando esté listo."
+                ? "Cambio aplicado y pausado, como se pidió. Se reactiva desde la plataforma."
                 : "Cambio aplicado.",
       },
       { headers: NO_STORE },

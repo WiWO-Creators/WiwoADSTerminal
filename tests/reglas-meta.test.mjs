@@ -65,3 +65,16 @@ test("la copia de una regla vigila solo el anuncio nuevo y conserva condición y
   assert.deepEqual(c.schedule_spec, { schedule_type: "SEMI_HOURLY" });
   assert.equal(highquality.evaluation_spec.filters.find((f) => f.field === "ad.id").value.length, 3, "la original no se modifica");
 });
+
+const { especificacionDeReglaDeGasto, divisorDeMoneda } = await import("../lib/reglas-meta-pura.ts");
+
+test("una regla nueva de tope de gasto: 10 USD son 1000 en la unidad de Meta; en CLP no se multiplica", () => {
+  const usd = especificacionDeReglaDeGasto({ nombre: "tope", anuncioIds: ["1"], gasto: 10, moneda: "USD" });
+  assert.equal(usd.evaluation_spec.filters.find((f) => f.field === "spent").value, 1000);
+  assert.deepEqual(usd.execution_spec, { execution_type: "PAUSE" });
+  assert.equal(especificacionDeReglaDeGasto({ nombre: "tope", anuncioIds: ["1"], gasto: 5000, moneda: "CLP" }).evaluation_spec.filters.find((f) => f.field === "spent").value, 5000);
+  assert.equal(divisorDeMoneda("XYZ"), null);
+  assert.throws(() => especificacionDeReglaDeGasto({ nombre: "x", anuncioIds: ["1"], gasto: 10, moneda: "XYZ" }), /unidad de la moneda/);
+  assert.throws(() => especificacionDeReglaDeGasto({ nombre: "x", anuncioIds: [], gasto: 10, moneda: "USD" }), /al menos un anuncio/);
+  assert.throws(() => especificacionDeReglaDeGasto({ nombre: "x", anuncioIds: ["1"], gasto: 0, moneda: "USD" }), /mayor que cero/);
+});

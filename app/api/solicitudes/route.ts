@@ -5,7 +5,9 @@ import { mismoOrigen } from "@/lib/origen-publico";
 import {
   crearSolicitud,
   crearSolicitudDeInstagram,
+  type ContenidoNuevo,
   type ImpulsoDeInstagram,
+  crearSolicitudDeContenido,
   resumenDeSolicitudes,
   ErrorDeSolicitud,
   listarSolicitudes,
@@ -41,11 +43,15 @@ export async function POST(request: Request) {
   if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
     return fail("Formato de solicitud no válido", 415, CODIGOS_ERROR.CONTENT_TYPE_INVALIDO);
   }
-  const body = (await request.json()) as { drafts?: Array<Partial<CampaignDraft>>; impulsosInstagram?: ImpulsoDeInstagram[]; leidas?: boolean };
+  const body = (await request.json()) as { drafts?: Array<Partial<CampaignDraft>>; impulsosInstagram?: ImpulsoDeInstagram[]; contenidoNuevo?: Array<Omit<ContenidoNuevo, "__contenido">>; leidas?: boolean };
   try {
     if (body.leidas) {
       await marcarComoLeidas(session.actor);
       return Response.json({ ok: true }, { headers: NO_STORE });
+    }
+    if (body.contenidoNuevo?.length) {
+      const marcados = body.contenidoNuevo.map((c) => ({ ...c, __contenido: true as const }));
+      return Response.json({ solicitud: await crearSolicitudDeContenido(session.actor, marcados) }, { status: 201, headers: NO_STORE });
     }
     if (body.impulsosInstagram?.length) {
       const marcados = body.impulsosInstagram.map((i) => ({ ...i, __instagram: true as const }));

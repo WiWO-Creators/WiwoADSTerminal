@@ -29,6 +29,8 @@ import type { Platform, ViaEscritura } from "./plataformas";
 /** Lo que la persona quiere cambiar. Un campo ausente no se toca. */
 export type CambiosEdicion = {
   nombre?: string;
+  /** true: pausar la entidad. Un Creator lo propone y lo aprueba un Lead o superior. */
+  pausar?: boolean;
   presupuesto?: { tipo: "daily" | "lifetime"; monto: number };
   /** Meta: puja del conjunto. Google: CPC máximo del grupo. En la moneda de la cuenta. */
   puja?: number;
@@ -147,7 +149,14 @@ export type PlanEdicion = {
    * alguien lo revise antes de que siga corriendo con lo nuevo.
    */
   pausaAlAplicar: boolean;
+  /** Se pidió pausar: es un cambio aunque no haya pasos de edición. */
+  pausaPedida?: boolean;
 };
+
+/** ¿Hay algo que aplicar? Pasos de edición o una pausa pedida. */
+export function hayAlgoQueAplicar(plan: PlanEdicion): boolean {
+  return plan.pasos.length > 0 || plan.pausaPedida === true;
+}
 
 /* -------------------------------------------------------------------------- */
 
@@ -211,13 +220,24 @@ export function planEdicion(
     );
   }
 
-  // Todo lo que no sea un renombre puro pausa la entidad. Bajar un presupuesto tampoco la pausa
-  // (regla del equipo): lo que preocupa es gastar más sin revisión, no menos.
-  plan.pausaAlAplicar = plan.pasos.some((p) => !p.sinPausa && !(p.campos.length === 1 && p.campos[0] === "nombre"));
+  // Decisión del equipo (2026-10-06): un cambio aprobado queda aplicado y corriendo; la pausa es solo la que se pide
+  // expresamente (`pausar`). La revisión ocurre ANTES, en la aprobación, no después con la entidad detenida.
+  plan.pausaAlAplicar = false;
+
+  if (cambios.pausar === true) {
+    const estado = String((antes.entidad as { estado?: string | null }).estado ?? "").toUpperCase();
+    if (["PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "ARCHIVED", "REMOVED"].includes(estado)) {
+      problema("pausar", "Ya está pausado: no hay nada que pausar.");
+    } else {
+      plan.pausaPedida = true;
+      plan.pausaAlAplicar = true;
+      plan.diff.push({ campo: "estado", etiqueta: "Estado", antes: estado === "" ? "—" : "Activo", despues: "Pausado" });
+    }
+  }
 
   const pedidos = Object.entries(cambios).filter(([, v]) => v !== undefined);
   if (pedidos.length === 0) problema("cambios", "No hay ningún cambio que aplicar.");
-  else if (plan.pasos.length === 0 && plan.problemas.length === 0) {
+  else if (!hayAlgoQueAplicar(plan) && plan.problemas.length === 0) {
     problema("cambios", "Lo que pediste ya es lo que tiene hoy: no hay nada que cambiar.");
   }
   return plan;
