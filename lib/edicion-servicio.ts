@@ -12,6 +12,7 @@ import {
   type PlanEdicion,
 } from "@/lib/edicion-plan";
 import { accesoNativoGoogle } from "@/lib/integration-store";
+import { accesoNativoLinkedin, type CredencialesLinkedin } from "@/lib/linkedin-conexion";
 import { enAlcance, type Actor } from "@/lib/permisos";
 import type { NivelEntidad, Platform } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
@@ -38,6 +39,8 @@ export type EdicionPreparada = {
   portfolioId: string;
   currency: string | null;
   credencialesGoogle: CredencialesGoogle | null;
+  /** Con esto LinkedIn se edita por su API directa; `null`: por Windsor (ver `accesoNativoLinkedin`). */
+  credencialesLinkedin: CredencialesLinkedin | null;
   detalle: DetalleDeCuenta;
 };
 
@@ -94,6 +97,8 @@ export async function prepararEdicion({
 
   const credencialesGoogle =
     provider === "google" ? await accesoNativoGoogle(actor, accountId) : null;
+  const credencialesLinkedin =
+    provider === "linkedin" ? await accesoNativoLinkedin(actor, accountId) : null;
   const detalle = await fetchDetalleDeCuenta(provider, accountId, { credencialesGoogle });
   const antes = armarAntes(nivel, entidadConAncestros(detalle, nivel, id));
   if (!antes) {
@@ -108,6 +113,7 @@ export async function prepararEdicion({
   const plan = planEdicion(provider, antes, cambios, {
     currency,
     nativaGoogle: credencialesGoogle !== null,
+    nativaLinkedin: credencialesLinkedin !== null,
   });
-  return { plan, antes, portfolioId, currency, credencialesGoogle, detalle };
+  return { plan, antes, portfolioId, currency, credencialesGoogle, credencialesLinkedin, detalle };
 }

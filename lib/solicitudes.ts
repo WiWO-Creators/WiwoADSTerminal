@@ -537,6 +537,7 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           pausarAlFinal: prep.plan.pausaAlAplicar,
           activarAlFinal: prep.plan.activacionPedida === true,
           credencialesGoogle: prep.credencialesGoogle,
+          credencialesLinkedin: prep.credencialesLinkedin,
         });
         await registrarEjecucion({ portfolioId: ed.portfolioId, name: `Cambio aprobado · ${ed.nivel} ${ed.id}`, platforms: [ed.provider as Platform] }, actor.email, r.pasos, r.ok);
         await registrarAuditoria({

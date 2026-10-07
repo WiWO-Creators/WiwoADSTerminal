@@ -46,19 +46,19 @@ test("un nombre de más de 200 bytes se rechaza (cuenta bytes, no letras)", () =
 });
 
 test("un grupo nuevo nace en borrador y las fechas van en milisegundos UTC", () => {
-  const plan = e.planDeGrupo({ cuentaId: "558457797", nombre: "Prueba", inicio: "2026-10-10", fin: "2026-11-10" });
+  const plan = e.planDeGrupo({ cuentaId: "558457797", nombre: "Prueba", inicio: "2099-10-10", fin: "2099-11-10" });
   assert.equal(plan.ruta, "/rest/adAccounts/558457797/adCampaignGroups");
   assert.equal(plan.cuerpo.status, "DRAFT");
   assert.equal(plan.cuerpo.account, "urn:li:sponsoredAccount:558457797");
-  assert.equal(plan.cuerpo.runSchedule.start, Date.UTC(2026, 9, 10));
-  assert.equal(plan.cuerpo.runSchedule.end, Date.UTC(2026, 10, 10));
+  assert.equal(plan.cuerpo.runSchedule.start, Date.UTC(2099, 9, 10));
+  assert.equal(plan.cuerpo.runSchedule.end, Date.UTC(2099, 10, 10));
   assert.equal("totalBudget" in plan.cuerpo, false);
 });
 
 test("un presupuesto total exige fecha de término, y el término debe ser posterior al inicio", () => {
-  assert.throws(() => e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2026-10-10", presupuestoTotal: { monto: 100, moneda: "USD" } }), /fecha de término/);
-  assert.throws(() => e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2026-10-10", fin: "2026-10-10" }), /posterior/);
-  const plan = e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2026-10-10", fin: "2026-11-10", presupuestoTotal: { monto: "100.00", moneda: "usd" } });
+  assert.throws(() => e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2099-10-10", presupuestoTotal: { monto: 100, moneda: "USD" } }), /fecha de término/);
+  assert.throws(() => e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2099-10-10", fin: "2099-10-10" }), /posterior/);
+  const plan = e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2099-10-10", fin: "2099-11-10", presupuestoTotal: { monto: "100.00", moneda: "usd" } });
   assert.deepEqual(plan.cuerpo.totalBudget, { amount: "100.00", currencyCode: "USD" });
 });
 
@@ -67,7 +67,7 @@ test("las fechas deben venir como AAAA-MM-DD", () => {
 });
 
 const CAMPANA = {
-  cuentaId: "558457797", grupoId: "1219853484", nombre: "Campaña de prueba", inicio: "2026-10-10",
+  cuentaId: "558457797", grupoId: "1219853484", nombre: "Campaña de prueba", inicio: "2099-10-10",
   presupuestoDiario: { monto: 10, moneda: "USD" }, costoUnitario: { monto: 5, moneda: "USD" }, ubicacionesGeo: ["103644278"], intencionPolitica: "NOT_DECLARED", entidadAsociada: "urn:li:organization:329866",
 };
 
@@ -126,4 +126,43 @@ test("la referencia solo se cambia en la cuenta, y solo a una organización", ()
   assert.throws(() => e.planDeActualizacion({ nivel: "campana", cuentaId: "1", id: "2", cambios: { referencia: "urn:li:organization:3" } }), /en la cuenta/);
   assert.throws(() => e.planDeActualizacion({ nivel: "cuenta", cuentaId: "1", id: "1", cambios: { referencia: "urn:li:person:abc" } }), /urn:li:organization/);
   assert.throws(() => e.planDeActualizacion({ nivel: "cuenta", cuentaId: "1", id: "1", cambios: { nombre: "x" } }), /solo se cambia la referencia/);
+});
+
+test("el presupuesto total va como totalBudget (grupo o campaña) y se verifica como número", () => {
+  for (const nivel of ["grupo", "campana"]) {
+    const plan = e.planDeActualizacion({ nivel, cuentaId: "1", id: "2", cambios: { presupuestoTotal: { monto: "400000", moneda: "clp" } } });
+    assert.deepEqual(plan.cuerpo, { patch: { $set: { totalBudget: { amount: "400000", currencyCode: "CLP" } } } });
+    assert.equal(plan.esperado["totalBudget.amount"], 400000);
+  }
+  assert.throws(() => e.planDeActualizacion({ nivel: "campana", cuentaId: "1", id: "2", cambios: { presupuestoTotal: { monto: 0, moneda: "USD" } } }), /positivo/);
+});
+
+test("la campaña admite presupuesto total (con término) o diario, nunca los dos ni ninguno", () => {
+  const { presupuestoDiario: _d, ...base } = CAMPANA;
+  const total = e.planDeCampana({ ...base, fin: "2099-11-15", presupuestoTotal: { monto: 500, moneda: "usd" } });
+  assert.deepEqual(total.cuerpo.totalBudget, { amount: "500", currencyCode: "USD" });
+  assert.equal("dailyBudget" in total.cuerpo, false);
+  assert.equal(total.esperado["totalBudget.amount"], 500);
+  assert.throws(() => e.planDeCampana({ ...base, presupuestoTotal: { monto: 500, moneda: "USD" } }), /fecha de término/);
+  assert.throws(() => e.planDeCampana({ ...CAMPANA, fin: "2099-11-15", presupuestoTotal: { monto: 500, moneda: "USD" } }), /solo uno/);
+  assert.throws(() => e.planDeCampana(base), /solo uno/);
+});
+
+test("la campaña admite UN idioma de interfaz (LinkedIn rechaza varios) y lo usa como el suyo", () => {
+  const plan = e.planDeCampana({ ...CAMPANA, interfaceLocales: ["es_ES"] });
+  assert.deepEqual(plan.cuerpo.locale, { language: "es", country: "ES" });
+  assert.deepEqual(plan.cuerpo.targetingCriteria.include.and[0].or["urn:li:adTargetingFacet:interfaceLocales"], ["urn:li:locale:es_ES"]);
+  assert.throws(() => e.planDeCampana({ ...CAMPANA, interfaceLocales: ["es_ES", "en_US"] }), /un idioma de interfaz por campaña/);
+  assert.throws(() => e.planDeCampana({ ...CAMPANA, interfaceLocales: ["español"] }), /Idioma de interfaz inválido/);
+  assert.throws(() => e.planDeCampana({ ...CAMPANA, interfaceLocales: ["es_es"] }), /Idioma de interfaz inválido/);
+});
+
+test("un inicio de hoy o del pasado significa «desde ahora»; uno futuro se respeta", () => {
+  const ahora = Date.UTC(2026, 9, 7, 15, 30);
+  assert.equal(e.inicioEfectivo("2026-10-07", ahora), ahora + 2 * 60 * 1000);
+  assert.equal(e.inicioEfectivo("2020-01-01", ahora), ahora + 2 * 60 * 1000);
+  assert.equal(e.inicioEfectivo("2026-10-20", ahora), Date.UTC(2026, 9, 20));
+  assert.throws(() => e.inicioEfectivo("07/10/2026", ahora), /AAAA-MM-DD/);
+  const plan = e.planDeGrupo({ cuentaId: "1", nombre: "x", inicio: "2020-01-01", fin: "2099-01-01" });
+  assert.ok(plan.cuerpo.runSchedule.start > Date.now());
 });

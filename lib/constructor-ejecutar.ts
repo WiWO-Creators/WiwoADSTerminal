@@ -6,6 +6,10 @@ import {
   type PlanStep,
 } from "@/lib/constructor";
 import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib/windsor";
+import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
+import { diferenciasConLoEsperado, planDeCampana, planDeGrupo, rutaDeEntidad, type DatosDeCampana } from "@/lib/linkedin-escritura-pura";
+import { enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
+import { ErrorDeLinkedin } from "@/lib/linkedin-nativo-pura";
 import {
   crearAnuncioDisplay,
   crearCampanaPmax,
@@ -49,6 +53,8 @@ const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   update_campaign: { campo: "campaign_id", de: "campaign" },
   create_ad: { campo: "adset_id", de: "adset" },
   boost_post: { campo: "adset_id", de: "adset" },
+  // LinkedIn: la campaña va DENTRO del grupo que se acaba de crear.
+  "linkedin:create_campaign": { campo: "grupoId", de: "linkedinGroup" },
 };
 
 /** Claves donde cada plataforma deja el id de lo que acaba de crear. */
@@ -84,7 +90,7 @@ const ACCION_DE_RENOMBRE: Partial<Record<WindsorProvider, string>> = {
  */
 export const PREFIJO_INCOMPLETA = "[INCOMPLETA — revisar] ";
 
-export type ClaveId = "campaign" | "adGroup" | "adset" | "video";
+export type ClaveId = "campaign" | "adGroup" | "adset" | "video" | "linkedinGroup";
 
 export type PasoEjecutado = {
   platform: string;
@@ -202,12 +208,69 @@ async function ejecutarPasoNativo(
   }
 }
 
+/**
+ * Crea en LinkedIn por su API directa (Windsor no puede crear nada ahí): primero el grupo de campañas y luego la campaña
+ * dentro de él, ambos en borrador. Cada cosa creada se LEE DE VUELTA de LinkedIn y debe coincidir con lo pedido; si LinkedIn
+ * responde que sí pero no devuelve el id, el paso falla en vez de darse por bueno. Nunca reintenta (un reintento duplicaría).
+ */
+async function ejecutarPasoLinkedin(
+  accion: string,
+  accountId: string,
+  params: Record<string, unknown>,
+  cred: CredencialesLinkedin | null,
+): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+  if (accion !== "linkedin:create_group" && accion !== "linkedin:create_campaign") {
+    return { ok: false, error: `Acción de LinkedIn desconocida: ${accion}`, raw: null };
+  }
+  if (!cred) {
+    return {
+      ok: false,
+      error:
+        "Para crear en LinkedIn conecta tu cuenta de LinkedIn en Integraciones. En cuentas de clientes, además, la escritura debe estar habilitada (LINKEDIN_ESCRITURA_CLIENTES).",
+      raw: null,
+    };
+  }
+  try {
+    const plan =
+      accion === "linkedin:create_group"
+        ? planDeGrupo({
+            cuentaId: accountId,
+            nombre: String(params.nombre ?? ""),
+            inicio: String(params.inicio ?? ""),
+            fin: typeof params.fin === "string" ? params.fin : undefined,
+          })
+        : planDeCampana({ ...(params as unknown as Omit<DatosDeCampana, "cuentaId">), cuentaId: accountId });
+    const enviado = await enviarPlanALinkedin(plan, cred.token);
+    if (!enviado.id) {
+      return {
+        ok: false,
+        error: "LinkedIn aceptó la creación pero no devolvió el id: revisa la cuenta en Campaign Manager antes de reintentar, puede haber quedado creado.",
+        raw: null,
+      };
+    }
+    const actual = await leerDeLinkedin(rutaDeEntidad(plan.nivel, accountId, enviado.id), cred.token);
+    const diferencias = diferenciasConLoEsperado(plan.esperado, actual);
+    if (diferencias.length > 0) {
+      return {
+        ok: false,
+        error: `LinkedIn lo creó (id ${enviado.id}) pero al leerlo no coincide: ${diferencias.map((d) => d.campo).join(", ")}.`,
+        raw: { id: enviado.id, diferencias },
+      };
+    }
+    return { ok: true, error: null, raw: { id: enviado.id, verificado: true } };
+  } catch (e) {
+    return { ok: false, error: e instanceof ErrorDeLinkedin ? e.message : "No se pudo crear en LinkedIn.", raw: String(e) };
+  }
+}
+
 export async function ejecutarPasosDelPlan(
   steps: PlanStep[],
   draft: Pick<CampaignDraft, "accountByPlatform">,
   cuentas: CuentaCliente[],
   /** Conexión directa a Google Ads de quien publica; la necesitan los pasos `via: "nativa"` (Display con imagen). */
   credencialesGoogle: CredencialesGoogle | null = null,
+  /** Conexión directa a LinkedIn de quien publica (ver `accesoNativoLinkedin`): la necesitan los pasos de LinkedIn. */
+  credencialesLinkedin: CredencialesLinkedin | null = null,
 ): Promise<ResultadoEjecucion> {
   const ejecutables = steps.filter((step) => !step.informativo);
   const ids: Partial<Record<ClaveId, string>> = {};
@@ -271,9 +334,11 @@ export async function ejecutarPasosDelPlan(
     }
 
     const resultado =
-      step.via === "nativa"
-        ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
-        : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);
+      step.via === "nativa" && step.platform === "linkedin"
+        ? await ejecutarPasoLinkedin(step.action, cuenta.externalId, params, credencialesLinkedin)
+        : step.via === "nativa"
+          ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
+          : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);
     realizados.push({
       ...resumen(step),
       params,
@@ -286,6 +351,11 @@ export async function ejecutarPasosDelPlan(
       todoBien = false;
       pasoFallido = step;
       break;
+    }
+
+    if (step.action === "linkedin:create_group") {
+      // El grupo de LinkedIn ya está creado (y verificado): la campaña siguiente necesita su id.
+      ids.linkedinGroup = String((resultado.raw as { id?: string } | null)?.id ?? "");
     }
 
     const salida = CLAVES_DE_ID[step.action];

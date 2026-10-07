@@ -20,6 +20,7 @@ import type { SugerenciaVista } from "@/lib/sugerencias-store";
 import { cn } from "@/lib/utils";
 import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
 import { ImpulsarView } from "./impulsar-view";
+import { ThinkingOrb } from "./ui";
 
 type Datos = { pendientes: SugerenciaVista[]; puedeResolver: boolean };
 
@@ -99,6 +100,22 @@ export function BotonDeSugerencias({
   const [subiendo, setSubiendo] = useState<SugerenciaVista | null>(null);
   const [seleccionId, setSeleccionId] = useState<string | null>(null);
   const [reactivando, setReactivando] = useState<SugerenciaVista | null>(null);
+  const [revisando, setRevisando] = useState<SugerenciaVista | null>(null);
+  /** La decisión cuyo cambio se está haciendo en el editor: se resuelve solo si el cambio se aplica. */
+  const [editorDe, setEditorDe] = useState<SugerenciaVista | null>(null);
+  const aplicadoEnEditor = useRef(false);
+  /** Lo que el Orb hizo con cada decisión: propuso una solución o ya la aplicó. */
+  const [orb, setOrb] = useState<Record<string, "propuesta" | "aplicada">>({});
+
+  useEffect(() => {
+    function alEstado(e: Event) {
+      const d = (e as CustomEvent<{ decisionId: string; estado: "propuesta" | "aplicada" }>).detail;
+      if (!d) return;
+      setOrb((a) => ({ ...a, [d.decisionId]: d.estado }));
+    }
+    window.addEventListener("wiwo:orb-estado", alEstado);
+    return () => window.removeEventListener("wiwo:orb-estado", alEstado);
+  }, []);
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroPlataforma, setFiltroPlataforma] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
@@ -221,20 +238,66 @@ export function BotonDeSugerencias({
       setPausando(s);
       return;
     }
-    if (!(await resolver(s, "approve"))) return;
     if (s.accion?.tipo === "presupuesto") {
-      toast.success("Aprobada. Revisa el cambio de presupuesto y aplícalo.");
-      quitar(s);
+      // Aprobar no cambia nada por sí solo: se abre el editor y la decisión se resuelve cuando el cambio se aplica.
+      toast.info("Revisa el cambio de presupuesto y aplícalo: la decisión se cierra cuando se aplique.");
+      setEditorDe(s);
+      aplicadoEnEditor.current = false;
       await abrirEnEditor(s, true);
       return;
     }
-    toast.success("Marcada como atendida");
-    quitar(s);
+    // Sin cambio que hacer: «revisada» pide confirmación y dice claramente que no se tocó nada.
+    setDx(0);
+    setRevisando(s);
+  }
+
+  /** Le pide al Orb que resuelva esta decisión: él propone y una persona aprueba; la decisión se cierra cuando el cambio se aplica. */
+  function resolverConOrb(s: SugerenciaVista) {
+    const texto = [
+      `Resuelve esta decisión de ${s.clienteNombre} en ${s.platform}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
+      `Diagnóstico: ${s.diagnosis}`,
+      `Sugerencia: ${s.proposedAction}`,
+      "Lee primero los datos reales de la campaña y propón el cambio concreto (no cambies nada sin que yo lo apruebe). Si no hace falta ningún cambio, dímelo.",
+    ].join("\n");
+    setOrb((a) => ({ ...a, [s.id]: "propuesta" }));
+    window.dispatchEvent(new CustomEvent("wiwo:orb-pedir", { detail: { decisionId: s.id, texto } }));
+  }
+
+  /** El editor aplicó el cambio: ahora sí se cierra la decisión. */
+  async function alAplicarEnEditor() {
+    const s = editorDe;
+    aplicadoEnEditor.current = true;
+    if (s && (await resolver(s, "approve"))) {
+      toast.success("Cambio aplicado y decisión cerrada");
+      quitar(s);
+    }
+  }
+
+  /** El editor se cerró: si no se aplicó nada, la decisión sigue pendiente y se dice. */
+  function alCerrarEditor() {
+    if (editorDe && !aplicadoEnEditor.current) toast.info("No se aplicó ningún cambio: la decisión sigue pendiente.");
+    setEditor(null);
+    setEditorDe(null);
+  }
+
+  async function marcarRevisada(s: SugerenciaVista) {
+    if (await resolver(s, "approve")) {
+      toast.success("Marcada como revisada. No se cambió nada en la plataforma.");
+      quitar(s);
+    }
+  }
+
+  /** Dice lo que pasó de verdad al pausar o reactivar. */
+  function contarResultado(cuerpo: { sinCambios?: boolean; verificado?: boolean | null }, verbo: "pausó" | "reactivó"): void {
+    if (cuerpo.sinCambios) toast.info(`No hubo cambios: la campaña ya estaba ${verbo === "pausó" ? "pausada" : "activa"} en Meta.`);
+    else if (cuerpo.verificado === false) toast.warning(`Se envió la orden, pero Meta todavía no confirma que se ${verbo}. Revísalo en un momento.`);
+    else toast.success(cuerpo.verificado ? `Se ${verbo} la campaña (confirmado en Meta)` : `Se ${verbo} la campaña`);
   }
 
   async function pausarCampana(s: SugerenciaVista) {
     if (!s.provider || !s.accountId || !s.entityId) return;
     setTrabajando(true);
+    let resultado: { sinCambios?: boolean; verificado?: boolean | null } = {};
     try {
       const respuesta = await fetch("/api/anuncios/estado", {
         method: "POST",
@@ -249,15 +312,17 @@ export function BotonDeSugerencias({
       });
       const cuerpo = await respuesta.json().catch(() => ({}));
       if (!respuesta.ok || cuerpo?.ok === false) throw new Error(cuerpo?.error ?? "No se pudo pausar la campaña");
+      resultado = cuerpo;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo pausar la campaña");
       setTrabajando(false);
       return;
     }
     setTrabajando(false);
-    // Ya se pausó de verdad: se deja constancia de la aprobación.
+    // Se cierra solo si quedó pausada (o ya lo estaba); si Meta no lo confirma, sigue pendiente.
+    if (resultado.verificado === false) return contarResultado(resultado, "pausó");
     if (await resolver(s, "approve")) {
-      toast.success("Campaña pausada");
+      contarResultado(resultado, "pausó");
       quitar(s);
     }
   }
@@ -265,6 +330,7 @@ export function BotonDeSugerencias({
   async function reactivarCampana(s: SugerenciaVista) {
     if (!s.provider || !s.accountId || !s.entityId) return;
     setTrabajando(true);
+    let resultado: { sinCambios?: boolean; verificado?: boolean | null } = {};
     try {
       const respuesta = await fetch("/api/anuncios/estado", {
         method: "POST",
@@ -273,14 +339,16 @@ export function BotonDeSugerencias({
       });
       const cuerpo = await respuesta.json().catch(() => ({}));
       if (!respuesta.ok || cuerpo?.ok === false) throw new Error(cuerpo?.error ?? "No se pudo reactivar la campaña");
+      resultado = cuerpo;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo reactivar la campaña");
       setTrabajando(false);
       return;
     }
     setTrabajando(false);
+    if (resultado.verificado === false) return contarResultado(resultado, "reactivó");
     if (await resolver(s, "approve")) {
-      toast.success("Campaña reactivada");
+      contarResultado(resultado, "reactivó");
       quitar(s);
     }
   }
@@ -519,6 +587,30 @@ export function BotonDeSugerencias({
                       Subir contenido a esta campaña
                     </button>
                   )}
+                  {puede && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onPointerDown={(ev) => ev.stopPropagation()}
+                        onClick={() => resolverConOrb(actual)}
+                        className="inline-flex items-center gap-2 rounded-full border border-brand/40 px-3 py-1.5 text-xs font-bold text-brand transition-colors hover:bg-brand/10"
+                      >
+                        <ThinkingOrb size="xs" state="idle" label="" />
+                        Solucionar con Thinking Orb
+                      </button>
+                      {orb[actual.id] && (
+                        <button
+                          type="button"
+                          onPointerDown={(ev) => ev.stopPropagation()}
+                          onClick={() => window.dispatchEvent(new CustomEvent("wiwo:orb-abrir"))}
+                          className="inline-flex items-center gap-2 rounded-full bg-brand/12 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-brand/20"
+                        >
+                          <ThinkingOrb size="xs" state={orb[actual.id] === "aplicada" ? "idle" : "generating"} label="" />
+                          {orb[actual.id] === "aplicada" ? "El Orb lo solucionó · ver" : "El Orb propuso una solución · ver"}
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {actual.entityId && actual.accion?.tipo !== "contenido" && actual.accion?.tipo !== "reactivar" && (
                     <button
                       type="button"
@@ -730,7 +822,16 @@ export function BotonDeSugerencias({
             <DialogTitle>Subir contenido a «{subiendo?.entityName}»</DialogTitle>
             <DialogDescription>Elige el conjunto y la publicación, el anuncio o la imagen. Lo nuevo pasa por aprobación y, al aprobarse, queda corriendo.</DialogDescription>
           </DialogHeader>
-          {subiendo?.clienteId && <ImpulsarView clienteId={subiendo.clienteId} puedeAprobar={puede} campanaInicial={subiendo.entityId ?? undefined} />}
+          {subiendo?.clienteId && <ImpulsarView
+            clienteId={subiendo.clienteId}
+            puedeAprobar={puede}
+            campanaInicial={subiendo.entityId ?? undefined}
+            onHecho={() => {
+              // Se cierra la decisión solo cuando el contenido ya se envió.
+              const s = subiendo;
+              if (s) void resolver(s, "approve").then((ok) => ok && quitar(s));
+            }}
+          />}
         </DialogContent>
       </Dialog>
 
@@ -786,8 +887,33 @@ export function BotonDeSugerencias({
         entidad={editor}
         ads={adsDelEditor}
         puedeAprobar={puede}
-        onOpenChange={(a) => !a && setEditor(null)}
+        onOpenChange={(a) => !a && alCerrarEditor()}
+        onAplicado={() => void alAplicarEnEditor()}
       />
+
+      <AlertDialog open={revisando !== null} onOpenChange={(a) => !a && setRevisando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Marcar como revisada?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esto solo cierra la decisión: no cambia nada en la cuenta del cliente. Úsalo si ya lo miraste y no hace falta tocar nada,
+              o si lo harás por tu cuenta. Si prefieres no verla más, descártala con un motivo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const x = revisando;
+                setRevisando(null);
+                if (x) void marcarRevisada(x);
+              }}
+            >
+              Marcar como revisada
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

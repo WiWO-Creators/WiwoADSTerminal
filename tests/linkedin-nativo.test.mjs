@@ -144,6 +144,8 @@ test("idDeCabeceraCreada solo acepta ids numéricos", () => {
   assert.equal(p.idDeCabeceraCreada("123456"), "123456");
   assert.equal(p.idDeCabeceraCreada(" 77 "), "77");
   assert.equal(p.idDeCabeceraCreada("urn:li:x:1"), null);
+  assert.equal(p.idDeCabeceraCreada("urn:li:ugcPost:6844785523593134080"), "urn:li:ugcPost:6844785523593134080");
+  assert.equal(p.idDeCabeceraCreada("urn:li:sponsoredCreative:55"), "urn:li:sponsoredCreative:55");
   assert.equal(p.idDeCabeceraCreada(null), null);
   assert.equal(p.idDeCabeceraCreada(""), null);
 });

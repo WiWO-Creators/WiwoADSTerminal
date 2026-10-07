@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,8 @@ type Cuenta = {
   mensaje: string;
 };
 
+type VariableEstado = { nombre: string; para: string; grupo: string; requerida: boolean; cargada: boolean };
+
 const ICONO = { ok: CheckCircle2, advertencia: AlertTriangle, problema: XCircle } as const;
 const TONO = { ok: "text-ok", advertencia: "text-warn", problema: "text-danger" } as const;
 
@@ -33,6 +35,16 @@ export function DiagnosticoView({ clienteId }: { clienteId: string | null }) {
   const [datos, setDatos] = useState<{ llaves: number; cuentas: Cuenta[] } | null>(null);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [entorno, setEntorno] = useState<VariableEstado[] | null>(null);
+
+  // Lo primero que se ve: qué conexiones del servidor están cargadas (solo nombres, nunca valores).
+  useEffect(() => {
+    fetch("/api/diagnostico/entorno", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { variables?: VariableEstado[] } | null) => setEntorno(j?.variables ?? null))
+      .catch(() => setEntorno(null));
+  }, []);
+  const faltan = entorno?.filter((v) => v.requerida && !v.cargada) ?? [];
 
   async function revisar() {
     setCargando(true);
@@ -60,6 +72,25 @@ export function DiagnosticoView({ clienteId }: { clienteId: string | null }) {
           anunciar en la cuenta y en la página a la vez.
         </p>
       </div>
+      {entorno && (
+        <Surface className="p-4">
+          <p className="text-sm font-semibold text-foreground">
+            Conexiones del servidor · {faltan.length === 0 ? "todo cargado" : `faltan ${faltan.length}`}
+          </p>
+          <ul className="mt-2 space-y-1 text-xs">
+            {entorno.map((v) => (
+              <li key={v.nombre} className="flex items-start gap-2">
+                {v.cargada ? <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-ok" /> : v.requerida ? <XCircle className="mt-0.5 size-3.5 shrink-0 text-danger" /> : <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warn" />}
+                <span className="min-w-0">
+                  <span className="font-mono font-semibold text-foreground">{v.nombre}</span>
+                  <span className="text-foreground/55"> · {v.para}{!v.requerida && !v.cargada ? " (opcional)" : ""}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {faltan.length > 0 && <p className="mt-2 text-xs text-foreground/60">Se cargan en el .env del servidor y se recarga la app con --update-env.</p>}
+        </Surface>
+      )}
       <Button type="button" disabled={cargando} onClick={() => void revisar()}>
         {cargando ? "Revisando…" : datos ? "Volver a revisar" : clienteId ? "Revisar este cliente" : "Revisar todos los clientes"}
       </Button>

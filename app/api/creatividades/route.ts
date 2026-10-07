@@ -1,6 +1,7 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
+import { listarMediosInstagram, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { listPortfolios, updatePortfolio } from "@/lib/portafolios-store";
 import {
   fetchFacebookPosts,
@@ -100,9 +101,7 @@ export async function GET(request: Request) {
 
     const [posts, instagram] = await Promise.all([
       fetchFacebookPosts(pageId, desde, hasta),
-      instagramId
-        ? fetchInstagramMedia(instagramId, desde, hasta)
-        : Promise.resolve<OrganicPost[]>([]),
+      instagramId ? instagramRapido(instagramId, desde, hasta) : Promise.resolve<OrganicPost[]>([]),
     ]);
     // Recién después: `fetchIdentidadMeta` solo lee lo que las dos llamadas
     // de arriba acaban de guardar de paso (nunca golpea Windsor por su
@@ -137,6 +136,25 @@ export async function GET(request: Request) {
     console.error("WiWO.ADS creatividades", error);
     return fail(mensaje, 502);
   }
+}
+
+/**
+ * Instagram directo de Meta (segundos) y, si no está configurado o falla, Windsor (puede tardar minutos la primera vez).
+ * Se queda con lo publicado dentro del periodo pedido.
+ */
+async function instagramRapido(instagramId: string, desde: string, hasta: string): Promise<OrganicPost[]> {
+  if (metaNativoConfigurado()) {
+    try {
+      const medios = await listarMediosInstagram(instagramId);
+      return medios.filter((m) => {
+        const dia = m.createdAt?.slice(0, 10) ?? "";
+        return dia >= desde && dia <= hasta;
+      });
+    } catch (error) {
+      console.error("WiWO.ADS creatividades: Instagram directo falló, se usa Windsor", error);
+    }
+  }
+  return fetchInstagramMedia(instagramId, desde, hasta);
 }
 
 function isoHoy(): string {

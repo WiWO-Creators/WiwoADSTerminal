@@ -33,7 +33,8 @@ import { registrarAuditoria } from "@/lib/auditoria";
 import { recortar } from "@/lib/auditoria-pura";
 import { ultimoAnuncioGooglePorCampana } from "@/lib/google-ads-nativo";
 import { accesoNativoGoogle } from "@/lib/integration-store";
-import { metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
+import { campanasVivasDeMeta, metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
+import { idDeCuentaMeta, soloVigentes, type CampanasVivasPorCuenta } from "@/lib/sugerencias-verificacion-pura";
 
 export class ErrorDeSugerencias extends Error {
   status: number;
@@ -366,7 +367,7 @@ export async function evaluarSugerencias(
     }
   }
 
-  const candidatas = [
+  const candidatasSinVerificar = [
     ...sugerenciasDeCampanaApagada(entradasApagadas, ahora),
     ...sugerenciasDeContenido(entradasDeContenido, ahora),
     ...generarSugerencias(
@@ -380,7 +381,57 @@ export async function evaluarSugerencias(
     ...sugerenciasDeMedicion(entradasDeMedicion, ahora),
   ];
 
+  // Windsor va horas atrás: lo de Meta se confirma contra la plataforma antes de mostrarse. Si Meta no responde, se conserva.
+  const vivas: CampanasVivasPorCuenta = new Map();
+  if (metaNativoConfigurado()) {
+    const cuentas = new Set(
+      candidatasSinVerificar.filter((s) => s.provider === "meta" && s.entityLevel === "campana" && s.accountId).map((s) => idDeCuentaMeta(s.accountId as string)),
+    );
+    await Promise.all(
+      [...cuentas].map(async (c) => {
+        try {
+          vivas.set(c, await campanasVivasDeMeta(c));
+        } catch {
+          // Sin lectura de esta cuenta no se descarta nada.
+        }
+      }),
+    );
+  }
+  const candidatas = soloVigentes(candidatasSinVerificar, vivas);
+
+  // Las pendientes de Meta que ya no son ciertas (campaña borrada o en otro estado) se quitan.
+  for (const [cuenta, campanas] of vivas) {
+    const pendientes = await getRawDb()
+      .prepare("SELECT id, entity_id, action_json FROM decisions WHERE status = 'pending' AND provider = 'meta' AND entity_level = 'campana' AND account_id IN (?, ?)")
+      .bind(cuenta, `act_${cuenta}`)
+      .all<{ id: string; entity_id: string | null; action_json: string | null }>();
+    for (const p of pendientes.results ?? []) {
+      let tipo = "revisar";
+      try {
+        tipo = (JSON.parse(p.action_json ?? "{}") as { tipo?: string }).tipo ?? "revisar";
+      } catch {
+        // acción ilegible: se trata como «revisar»
+      }
+      const vigente = soloVigentes(
+        [{ provider: "meta", accountId: cuenta, entityId: p.entity_id, entityLevel: "campana", accion: { tipo } }],
+        new Map([[cuenta, campanas]]),
+      ).length > 0;
+      if (!vigente) await getRawDb().prepare("DELETE FROM decisions WHERE id = ?").bind(p.id).run();
+    }
+  }
+
   const db = getRawDb();
+  // Limpieza: de las pendientes que dicen lo mismo (mismo cliente, regla y entidad) queda solo la más nueva.
+  await db
+    .prepare(
+      `DELETE FROM decisions
+        WHERE status = 'pending' AND agent = 'Sugerencias'
+          AND rowid NOT IN (
+            SELECT MAX(rowid) FROM decisions
+             WHERE status = 'pending' AND agent = 'Sugerencias'
+             GROUP BY COALESCE(portfolio_id, ''), rule, COALESCE(entity_id, ''))`,
+    )
+    .run();
   const aInsertar: Sugerencia[] = [];
   for (const s of candidatas) {
     if (
@@ -393,6 +444,11 @@ export async function evaluarSugerencias(
       continue;
     }
     if (await silenciada(s, ahora.getTime())) continue;
+    const igual = await db
+      .prepare("SELECT 1 AS x FROM decisions WHERE status = 'pending' AND COALESCE(portfolio_id, '') = ? AND rule = ? AND COALESCE(entity_id, '') = ? LIMIT 1")
+      .bind(s.portfolioId ?? "", s.rule, s.entityId ?? "")
+      .first<{ x: number }>();
+    if (igual) continue;
     aInsertar.push(s);
   }
 
@@ -505,12 +561,15 @@ export async function listarPendientesDeAlcance(
   const propios = actor.portfolioIds;
   if (!todos && propios.length === 0) return { pendientes: [], puedeResolver: can(actor, "aprobar_cambios") };
   const filtroAlcance = todos ? "" : `AND portfolio_id IN (${propios.map(() => "?").join(",")})`;
+  // Las advertencias de GA4 y de medición son de los Directores (administradores).
+  const filtroMedicion = can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%'";
   const filas = await getRawDb()
     .prepare(
       `SELECT ${COLUMNAS} FROM decisions
        WHERE status = 'pending' AND expires_at > ?
          AND (snoozed_until IS NULL OR snoozed_until <= ?)
          ${filtroAlcance}
+         ${filtroMedicion}
        ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
          generated_at DESC`,
     )
@@ -536,7 +595,7 @@ export async function listarSugerencias(
     db
       .prepare(
         `SELECT ${COLUMNAS} FROM decisions
-         WHERE ${dueno} AND status = 'pending' AND expires_at > ?
+         WHERE ${dueno} AND status = 'pending' AND expires_at > ? ${can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%'"}
            AND (snoozed_until IS NULL OR snoozed_until <= ?)
          ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
            generated_at DESC`,

@@ -203,6 +203,7 @@ export function ClientesView({
   onVersionNueva,
   onDatosCambiaron,
   cargandoAnuncios = false,
+  puedeVerMedicion = false,
 }: {
   performance: PerformanceSnapshot;
   /**
@@ -226,6 +227,8 @@ export function ClientesView({
   onDatosCambiaron?: () => void;
   /** Los anuncios del cliente se están leyendo: se muestra eso en vez de una tabla vacía. */
   cargandoAnuncios?: boolean;
+  /** GA4 y Tag Manager en la ficha del cliente: solo Directores y Admins. */
+  puedeVerMedicion?: boolean;
 }) {
   const [data, setData] = useState<Respuesta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -494,6 +497,7 @@ export function ClientesView({
             // entrada — "two children with the same key" — y terminaba
             // duplicando la Ficha en vez de reemplazarla al cerrar/abrir.
             key={`ficha-${seleccionadoObj.id}`}
+            puedeVerMedicion={puedeVerMedicion}
             portfolio={seleccionadoObj}
             editable={Boolean(data?.canManage)}
             guardando={saving === seleccionadoObj.id}
@@ -537,11 +541,14 @@ export function ClientesView({
 function Ficha({
   portfolio,
   editable,
+  puedeVerMedicion,
   guardando,
   onGuardar,
 }: {
   portfolio: Portfolio;
   editable: boolean;
+  /** GA4 y Tag Manager son técnicos: solo Directores y Admins los ven. */
+  puedeVerMedicion: boolean;
   guardando: boolean;
   onGuardar: (cambios: CambiosPortfolio) => void;
 }) {
@@ -939,6 +946,9 @@ function Ficha({
               </div>
             )}
           </div>
+          {/* GA4 y Tag Manager: solo Directores y Admins. */}
+          {puedeVerMedicion && (
+            <>
           <div className="mt-3 border-t border-foreground/8 pt-3">
             <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
               PROPIEDADES DE GOOGLE ANALYTICS 4
@@ -1008,6 +1018,8 @@ function Ficha({
               Un cliente marcado sin GTM aparece en Alertas y con un aviso en su pantalla. «Sin verificar» no genera ninguna alerta.
             </p>
           </div>
+            </>
+          )}
           <div className="mt-3 border-t border-foreground/8 pt-3">
             <label className="font-micro mb-1 block text-[0.58rem] text-foreground/45">
               KPI PRINCIPAL DE ESTE CLIENTE

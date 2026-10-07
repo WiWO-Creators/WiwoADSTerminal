@@ -240,6 +240,18 @@ export async function leerEstructuraMeta(accountId: string, divisorMenor: number
   };
 }
 
+/** Las campañas de una cuenta tal como están hoy en Meta (id → nombre y estado). Solo lectura. */
+export async function campanasVivasDeMeta(accountId: string): Promise<Map<string, { nombre: string | null; estado: string | null }>> {
+  const filas = await leerTodas(`${cuenta(accountId)}/campaigns`, "id,name,status", 200, 4);
+  return new Map(filas.map((c) => [String(c.id), { nombre: c.name ? String(c.name) : null, estado: c.status ? String(c.status) : null }]));
+}
+
+/** Estado de una campaña, conjunto o anuncio tal como está hoy en Meta. Solo lectura. */
+export async function estadoDeEntidadMeta(entidadId: string): Promise<{ status: string | null; efectivo: string | null }> {
+  const j = await graph<{ status?: string; effective_status?: string }>(entidadId, "GET", { fields: "status,effective_status" });
+  return { status: j.status ?? null, efectivo: j.effective_status ?? null };
+}
+
 /** Cuándo se creó el último anuncio de cada campaña de una cuenta (ms). Solo lectura. */
 export async function ultimoAnuncioPorCampana(accountId: string): Promise<Map<string, number>> {
   const salida = new Map<string, number>();
@@ -278,10 +290,10 @@ export async function eliminarReglaMetaDePrueba(reglaId: string): Promise<void> 
 
 /** Últimas publicaciones de una cuenta de Instagram, leídas directo de Meta (rápido; Windsor puede tardar minutos). Solo lectura. */
 export async function listarMediosInstagram(instagramId: string): Promise<OrganicPost[]> {
-  const j = await graph<{ data?: Array<{ id: string; permalink?: string; caption?: string; media_type?: string; media_product_type?: string; timestamp?: string; media_url?: string; thumbnail_url?: string }> }>(
+  const j = await graph<{ data?: Array<{ id: string; permalink?: string; caption?: string; media_type?: string; media_product_type?: string; timestamp?: string; media_url?: string; thumbnail_url?: string; like_count?: number; comments_count?: number }> }>(
     `${instagramId}/media`,
     "GET",
-    { fields: "id,permalink,caption,media_type,media_product_type,timestamp,media_url,thumbnail_url", limit: 100 },
+    { fields: "id,permalink,caption,media_type,media_product_type,timestamp,media_url,thumbnail_url,like_count,comments_count", limit: 100 },
   );
   return (j.data ?? []).map((m) => ({
     platform: "instagram" as const,
@@ -292,7 +304,7 @@ export async function listarMediosInstagram(instagramId: string): Promise<Organi
     mediaUrl: m.media_url ?? m.thumbnail_url ?? "",
     caption: m.caption ?? null,
     format: m.media_product_type === "REELS" ? ("reel" as const) : m.media_type === "CAROUSEL_ALBUM" ? ("carousel" as const) : m.media_type === "VIDEO" ? ("video" as const) : ("image" as const),
-    engagement: null,
+    engagement: (m.like_count ?? 0) + (m.comments_count ?? 0) || null,
   }));
 }
 
@@ -313,6 +325,25 @@ export async function crearAnuncioConCreativo(
   });
   if (!anuncio.id) throw new ErrorDeMeta("Meta no devolvió el anuncio.");
   return { creativeId: creativo.id, anuncioId: anuncio.id };
+}
+
+/**
+ * Boostea cualquier anuncio existente: crea uno nuevo en otro conjunto reutilizando el creativo del original
+ * (sirve también cuando el anuncio no usa una publicación: imagen o video subidos, carruseles…). Queda activo.
+ */
+export async function crearAnuncioDesdeCreativo(
+  accountId: string,
+  o: { nombre: string; conjuntoId: string; creativeId: string; estado?: "ACTIVE" | "PAUSED" },
+): Promise<AnuncioDeInstagram> {
+  if (!/^\d+$/.test(o.creativeId)) throw new ErrorDeMeta("Identificador de creativo no válido.", 400);
+  const anuncio = await graph<{ id?: string }>(`${cuenta(accountId)}/ads`, "POST", {
+    name: o.nombre.slice(0, 100),
+    adset_id: o.conjuntoId,
+    creative: { creative_id: o.creativeId },
+    status: o.estado ?? "ACTIVE",
+  });
+  if (!anuncio.id) throw new ErrorDeMeta("Meta no devolvió el anuncio.");
+  return { creativeId: o.creativeId, anuncioId: anuncio.id };
 }
 
 /** Qué ubicaciones (feed, stories, reels) cubre un conjunto de Meta. Solo lectura. */

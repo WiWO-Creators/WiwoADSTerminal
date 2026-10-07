@@ -1,5 +1,6 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
+import { can } from "@/lib/permisos";
 import { ErrorDeMedicion, medicionDelCliente } from "@/lib/medicion-store";
 
 /**
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) return fail("Tu cuenta no tiene acceso a WiWO.ADS", 403, CODIGOS_ERROR.SIN_SESION);
+  if (!can(session.actor, "aprobar_presupuesto")) return fail("La salud de medición es de los Directores.", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
   const cliente = new URL(request.url).searchParams.get("cliente") ?? "";
   if (!cliente) return fail("Falta el cliente", 400);
   try {

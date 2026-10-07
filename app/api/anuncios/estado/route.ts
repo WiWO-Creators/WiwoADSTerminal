@@ -8,6 +8,7 @@ import { can, enAlcance } from "@/lib/permisos";
 import { ACCION, valoresDeParametros, type Nivel } from "@/lib/acciones-estado";
 import { puedeAdministrar } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
+import { estadoDeEntidadMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { executeWindsorAction } from "@/lib/windsor";
 
 /**
@@ -88,6 +89,21 @@ export async function POST(request: Request) {
     return fail("Ese cliente no está en tu alcance", 403);
   }
 
+  // Meta: se mira cómo está de verdad antes y después. Si ya estaba como se pide, no se escribe nada; si no, se confirma.
+  const idMeta = provider === "meta" && metaNativoConfigurado() ? String(Object.values(params)[Object.values(params).length - 1] ?? "") : "";
+  const buscado = body.activar ? "ACTIVE" : "PAUSED";
+  const leer = async () => {
+    try {
+      return idMeta ? await estadoDeEntidadMeta(idMeta) : null;
+    } catch {
+      return null;
+    }
+  };
+  const antes = await leer();
+  if (antes?.status === buscado) {
+    return Response.json({ ok: true, sinCambios: true, estado: antes.status, efectivo: antes.efectivo }, { headers: NO_STORE });
+  }
+
   const resultado = await executeWindsorAction(
     provider,
     body.accountId,
@@ -126,6 +142,10 @@ export async function POST(request: Request) {
       { status: 502, headers: NO_STORE },
     );
   }
-  return Response.json({ ok: true }, { headers: NO_STORE });
+  const despues = await leer();
+  return Response.json(
+    { ok: true, sinCambios: false, verificado: despues ? despues.status === buscado : null, estado: despues?.status ?? null, efectivo: despues?.efectivo ?? null },
+    { headers: NO_STORE },
+  );
 }
 

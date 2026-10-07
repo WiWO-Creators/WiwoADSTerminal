@@ -1,3 +1,4 @@
+import { inferirProveedorDeCuenta } from "@/lib/proveedor-de-cuenta-pura";
 import {
   ctrABp,
   esKpiPrincipal,
@@ -285,7 +286,8 @@ export async function listPortfolios(): Promise<Portfolio[]> {
       : [];
     countriesByPortfolio.set(link.portfolio_id, paises);
     const proveedores = providersByPortfolio.get(link.portfolio_id) ?? {};
-    proveedores[link.external_id] = link.provider;
+    // Sin proveedor guardado, se deduce de la forma del id: así las cuentas siempre se ven en su plataforma.
+    proveedores[link.external_id] = link.provider ?? inferirProveedorDeCuenta(link.external_id);
     providersByPortfolio.set(link.portfolio_id, proveedores);
   }
 

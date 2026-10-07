@@ -519,9 +519,9 @@ function TarjetaPublicacion({
   // por esta vía, pero eso no importa porque nunca se usa como pieza. Solo
   // Instagram (que no bostea, sigue el camino de armar una pieza nueva desde
   // el archivo) necesita el video completo.
-  const usable =
-    post.platform === "facebook" ||
-    !(post.format === "video" || post.format === "reel");
+  // Cualquier publicación se puede boostear: Facebook por su id de publicación e Instagram por su id de medio
+  // (también reels y videos), sin necesitar el archivo.
+  const usable = true;
   const IconoInteraccion = post.platform === "facebook" ? ThumbsUp : Heart;
   const esArchivoDeVideo =
     post.platform === "instagram" && (post.format === "reel" || post.format === "video");
@@ -610,16 +610,9 @@ function TarjetaPublicacion({
         ) : (
           <p className="text-xs italic text-foreground/30">Sin texto</p>
         )}
-        {usable ? (
-          <Button type="button" size="sm" onClick={onUsar} className="mt-2 w-full font-bold">
-            Usar esta publicación
-          </Button>
-        ) : (
-          <p className="mt-2 flex items-start gap-1.5 text-[0.62rem] leading-4 text-warn/80">
-            <Info className="mt-0.5 size-3 shrink-0" />
-            Solo hay miniatura disponible; pega el archivo de video a mano.
-          </p>
-        )}
+        <Button type="button" size="sm" onClick={onUsar} disabled={!usable} className="mt-2 w-full font-bold">
+          Usar esta publicación
+        </Button>
       </div>
     </article>
   );

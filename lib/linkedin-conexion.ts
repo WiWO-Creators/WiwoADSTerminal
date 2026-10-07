@@ -24,6 +24,7 @@ import {
   alcancesSolicitados,
   canjearCodigoDeLinkedin,
   crearUrlDeAutorizacion,
+  cuentasDeLinkedin,
   faltaParaLinkedin,
   linkedinNativoConfigurado,
   renovarTokenDeLinkedin,
@@ -170,4 +171,30 @@ export async function tokenDeLinkedin(user: Actor): Promise<string> {
   const renovados = await renovarTokenDeLinkedin(paquete.refreshToken);
   await guardarTokens(user, renovados, paquete.refreshToken);
   return renovados.accessToken;
+}
+
+/** Con esto se escribe en LinkedIn por la vía nativa. Es el token de QUIEN edita, nunca el de otra persona. */
+export type CredencialesLinkedin = { token: string };
+
+/**
+ * Credenciales para editar una cuenta de LinkedIn por su API directa, o `null` si no corresponde: no hay credenciales de la app,
+ * la persona no conectó su LinkedIn (o venció), o esa cuenta no es una que su conexión vea. `null` no es un error: quien llama
+ * cae a Windsor, como con Google.
+ *
+ * REGLA DE SEGURIDAD: una cuenta de CLIENTE solo se escribe por esta vía si `LINKEDIN_ESCRITURA_CLIENTES=true`. Es la misma
+ * guarda que `/api/linkedin/escritura`; vive aquí para que el editor, el asistente y las solicitudes aprobadas no puedan
+ * saltársela. Con la guarda cerrada, las cuentas de clientes siguen por Windsor, como antes.
+ */
+export async function accesoNativoLinkedin(user: Actor, accountId: string): Promise<CredencialesLinkedin | null> {
+  if (!linkedinNativoConfigurado()) return null;
+  try {
+    const token = await tokenDeLinkedin(user);
+    const cuenta = (await cuentasDeLinkedin(token)).find((c) => c.id === accountId);
+    if (!cuenta) return null;
+    if (!cuenta.prueba && env.LINKEDIN_ESCRITURA_CLIENTES !== "true") return null;
+    return { token };
+  } catch {
+    // Sin conexión, vencida o LinkedIn caído: se sigue por Windsor, no se rompe la edición.
+    return null;
+  }
 }

@@ -90,7 +90,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { plan, antes, portfolioId, currency, credencialesGoogle } = await prepararEdicion({
+    const { plan, antes, portfolioId, currency, credencialesGoogle, credencialesLinkedin } = await prepararEdicion({
       actor: session.actor,
       provider,
       accountId,
@@ -150,6 +150,7 @@ export async function POST(request: Request) {
       pausarAlFinal: plan.pausaAlAplicar,
       activarAlFinal: plan.activacionPedida === true,
       credencialesGoogle,
+      credencialesLinkedin,
     });
 
     await registrarEjecucion(

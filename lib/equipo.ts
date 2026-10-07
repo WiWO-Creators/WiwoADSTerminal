@@ -1,3 +1,4 @@
+import { puedeModificarPorJerarquia } from "@/lib/jerarquia-pura";
 import { env } from "cloudflare:workers";
 
 import type { ChatGPTUser } from "@/app/chatgpt-auth";
@@ -295,6 +296,14 @@ export async function updateMember(
   if (!row) throw new EquipoError("Esa persona no existe", 404);
   if (esCargoProtegido(row.cargo)) {
     throw new EquipoError("Los jefes no se modifican desde la app", 403);
+  }
+  // Jerarquía: solo se modifica a quien está por debajo (un Admin, que está arriba de todo, puede con cualquiera).
+  const miCargo = await db
+    .prepare("SELECT cargo FROM users WHERE lower(email) = lower(?) LIMIT 1")
+    .bind(actor.email)
+    .first<{ cargo: string | null }>();
+  if (!puedeModificarPorJerarquia(miCargo?.cargo ?? (actor.role === "admin" ? "Admin" : null), row.cargo)) {
+    throw new EquipoError("Solo puedes modificar a quien está por debajo de tu cargo", 403);
   }
 
   // Un administrador fundador no se puede degradar ni desactivar desde acá:

@@ -78,3 +78,69 @@ test("LinkedIn grupo: solo presupuesto total (con fecha de término); renombrar 
   const e = planEdicion("linkedin", { nivel: "anuncio", entidad: ad }, { titulo: "x" }, CLP);
   assert.ok(e.problemas.some((x) => x.campo === "contenido"));
 });
+
+// ---- Con la API directa de LinkedIn (nativaLinkedin) ----
+const NATIVA = { currency: "CLP", nativaLinkedin: true };
+const GRUPO_CON_FIN = detalleCampanaLinkedin({
+  account_id: "555900177", campaign_group_id: "1218893583", campaign_group_name: "Grupo A", campaign_group_status: "ACTIVE",
+  campaign_group_total_budget: 0, campaign_group_run_scedule_start_time: "2026-08-26T20:59:59", campaign_group_run_scedule_end_time: "2099-10-31T23:45:00",
+});
+
+test("LinkedIn nativo: renombrar un grupo ya es posible (con Windsor no lo era)", () => {
+  const sin = planEdicion("linkedin", { nivel: "campana", entidad: GRUPO }, { nombre: "Otro" }, CLP);
+  assert.ok(sin.problemas.some((p) => p.campo === "nombre" && p.bloqueante));
+  const con = planEdicion("linkedin", { nivel: "campana", entidad: GRUPO }, { nombre: "Otro" }, NATIVA);
+  assert.deepEqual(con.problemas, []);
+  assert.equal(con.pasos.length, 1);
+  assert.deepEqual({ via: con.pasos[0].via, platform: con.pasos[0].platform, action: con.pasos[0].action }, { via: "nativa", platform: "linkedin", action: "linkedin:actualizar" });
+  assert.deepEqual(con.pasos[0].params, { nivel: "grupo", id: "1218893583", cambios: { nombre: "Otro" } });
+});
+
+test("LinkedIn nativo: renombrar una campaña y cambiar su presupuesto diario van como pasos nativos con la moneda de la cuenta", () => {
+  const p = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { nombre: "Nuevo", presupuesto: { tipo: "daily", monto: 100000 } }, NATIVA);
+  assert.deepEqual(p.problemas, []);
+  assert.deepEqual(p.pasos.map((s) => s.via), ["nativa", "nativa"]);
+  assert.deepEqual(p.pasos[0].params, { nivel: "campana", id: "895500533", cambios: { nombre: "Nuevo" } });
+  assert.deepEqual(p.pasos[1].params, { nivel: "campana", id: "895500533", cambios: { presupuestoDiario: { monto: 100000, moneda: "CLP" } } });
+});
+
+test("LinkedIn nativo: bajar el presupuesto no obliga a pausar; subirlo sí lo marca como un cambio normal", () => {
+  const baja = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { presupuesto: { tipo: "daily", monto: 50000 } }, NATIVA);
+  assert.equal(baja.pasos[0].sinPausa, true);
+  const sube = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { presupuesto: { tipo: "daily", monto: 90000 } }, NATIVA);
+  assert.equal(sube.pasos[0].sinPausa, false);
+});
+
+test("LinkedIn nativo: un presupuesto total de grupo exige fecha de término y moneda conocida", () => {
+  const ok = planEdicion("linkedin", { nivel: "campana", entidad: GRUPO_CON_FIN }, { presupuesto: { tipo: "lifetime", monto: 900000 } }, NATIVA);
+  assert.deepEqual(ok.problemas, []);
+  assert.deepEqual(ok.pasos[0].params, { nivel: "grupo", id: "1218893583", cambios: { presupuestoTotal: { monto: 900000, moneda: "CLP" } } });
+  const sinMoneda = planEdicion("linkedin", { nivel: "campana", entidad: GRUPO_CON_FIN }, { presupuesto: { tipo: "lifetime", monto: 900000 } }, { currency: null, nativaLinkedin: true });
+  assert.ok(sinMoneda.problemas.some((p) => p.campo === "presupuesto" && /moneda/.test(p.mensaje)));
+  const sinFin = planEdicion("linkedin", { nivel: "campana", entidad: { ...GRUPO_CON_FIN, fin: null } }, { presupuesto: { tipo: "lifetime", monto: 900000 } }, NATIVA);
+  assert.ok(sinFin.problemas.some((p) => p.campo === "presupuesto"));
+});
+
+test("LinkedIn nativo: reactivar ya se permite; sin la vía nativa sigue bloqueado", () => {
+  const pausada = { ...CAMPANA_DIARIA, estado: "PAUSED" };
+  const con = planEdicion("linkedin", { nivel: "conjunto", entidad: pausada, campana: GRUPO }, { activar: true }, NATIVA);
+  assert.equal(con.activacionPedida, true);
+  assert.deepEqual(con.problemas, []);
+  const sin = planEdicion("linkedin", { nivel: "conjunto", entidad: pausada, campana: GRUPO }, { activar: true }, CLP);
+  assert.ok(sin.problemas.some((p) => p.campo === "activar" && p.bloqueante));
+});
+
+test("LinkedIn nativo: los pasos nativos de LinkedIn no piden conectar Google", () => {
+  const p = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { nombre: "X" }, NATIVA);
+  assert.ok(!p.problemas.some((q) => q.campo === "conexion"));
+});
+
+test("LinkedIn: la fecha de término sigue yendo por Windsor aunque lo demás sea nativo", () => {
+  const p = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { fin: "2099-12-31" }, NATIVA);
+  assert.deepEqual(p.pasos.map((s) => [s.via, s.action]), [["windsor", "set_campaign_schedule"]]);
+});
+
+test("LinkedIn sin vía nativa: el plan es exactamente el de siempre (Windsor)", () => {
+  const p = planEdicion("linkedin", { nivel: "conjunto", entidad: CAMPANA_DIARIA, campana: GRUPO }, { nombre: "Otro", presupuesto: { tipo: "daily", monto: 100000 } }, CLP);
+  assert.deepEqual(p.pasos.map((s) => [s.via, s.action]), [["windsor", "rename_campaign"], ["windsor", "set_campaign_budget"]]);
+});
