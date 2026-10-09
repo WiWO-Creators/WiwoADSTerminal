@@ -3,10 +3,10 @@ import { getSession } from "@/app/sesion";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
 import { entidadConAncestros, fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
 import { ejecutarPasosDeEdicion } from "@/lib/edicion-ejecutar";
-import { hayAlgoQueAplicar, verificarCambios, type AntesDeEdicion, type CambiosEdicion } from "@/lib/edicion-plan";
+import { hayAlgoQueAplicar, tocaPresupuesto, verificarCambios, type AntesDeEdicion, type CambiosEdicion } from "@/lib/edicion-plan";
 import { armarAntes, ErrorDeEdicion, prepararEdicion } from "@/lib/edicion-servicio";
-import { actualizarAnuncioRsa,
-  actualizarCampanaGoogle, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
+import { eliminarEnGoogle, actualizarAnuncioRsa,
+  actualizarCampanaGoogle, actualizarExtensionesCampana, actualizarGrupoDeRecursos, GoogleAdsNativoError } from "@/lib/google-ads-nativo";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { registrarAuditoria } from "@/lib/auditoria";
 import { etiquetasDeCambios, resumenDeCambios } from "@/lib/auditoria-pura";
@@ -77,6 +77,8 @@ export async function POST(request: Request) {
       if (error instanceof ErrorDeSolicitud) return fail(error.message, error.status);
       if (error instanceof ErrorDeEdicion) return Response.json({ error: error.message }, { status: error.status, headers: NO_STORE });
       console.error("WiWO.ADS solicitar edición", error);
+      // Sin poder leer lo publicado (Windsor o la plataforma no respondieron) no se arma el cambio: se dice y no se envía nada.
+      if (error instanceof WindsorError) return fail("No se pudo leer lo publicado en la plataforma en este momento, así que no se envió nada. Intenta de nuevo en un rato.", 502);
       return fail("No se pudo enviar el cambio a revisión", 500);
     }
   }
@@ -85,6 +87,10 @@ export async function POST(request: Request) {
   if (aplicar) {
     if (!can(session.actor, "aprobar_cambios")) {
       return fail("Tu rol puede armar cambios pero no aplicarlos. Pídele a un administrador que lo apruebe.", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
+    }
+    // Todos pueden proponer un cambio de presupuesto, pero solo Directores y Administradores lo aplican sin aprobación.
+    if (tocaPresupuesto(body.cambios as CambiosEdicion) && !can(session.actor, "aprobar_presupuesto")) {
+      return fail("Un cambio de presupuesto lo aplica un Director o un Administrador. Envíalo a revisión y lo aprueban.", 403, CODIGOS_ERROR.PERMISO_INSUFICIENTE);
     }
     if (body.confirmacion !== "EDITAR") return fail("Falta la confirmación explícita", 400);
   }
@@ -106,7 +112,20 @@ export async function POST(request: Request) {
       const nativo = plan.pasos.find((p) => p.via === "nativa");
       if (nativo && credencialesGoogle && bloqueantes.length === 0) {
         try {
-          if (nativo.action === "ads:update_campaign") {
+          if (nativo.action === "ads:update_campaign_assets") {
+            await actualizarExtensionesCampana(credencialesGoogle, accountId, String(nativo.params.campaign_id), nativo.params.cambios as never, { validateOnly: true });
+          } else if (nativo.action === "ads:update_asset_group") {
+            await actualizarGrupoDeRecursos(credencialesGoogle, accountId, String(nativo.params.asset_group_id), nativo.params.cambios as never, { validateOnly: true });
+          } else if (nativo.action === "ads:eliminar") {
+            await eliminarEnGoogle(
+              credencialesGoogle,
+              accountId,
+              nativo.params.nivel === "campana" ? "campana" : nativo.params.nivel === "conjunto" ? "conjunto" : "anuncio",
+              String(nativo.params.id),
+              nativo.params.ad_group_id ? String(nativo.params.ad_group_id) : null,
+              { validateOnly: true },
+            );
+          } else if (nativo.action === "ads:update_campaign") {
             await actualizarCampanaGoogle(credencialesGoogle, accountId, String(nativo.params.campaign_id), nativo.params.cambios as never, {
               validateOnly: true,
             });

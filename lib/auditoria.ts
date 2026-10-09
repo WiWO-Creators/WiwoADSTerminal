@@ -80,6 +80,8 @@ export type FiltrosDeAuditoria = {
   texto?: string;
   desde?: number;
   soloImportantes?: boolean;
+  /** Id de una conversación con el bot: devuelve todo lo de ese chat. */
+  conversacion?: string;
   limite?: number;
 };
 
@@ -129,6 +131,10 @@ export async function listarAuditoria(actor: Actor, filtros: FiltrosDeAuditoria 
   if (filtros.etiqueta) { condiciones.push("(',' || etiquetas || ',') LIKE ?"); valores.push(`%,${filtros.etiqueta},%`); }
   if (filtros.desde) { condiciones.push("created_at >= ?"); valores.push(filtros.desde); }
   if (filtros.soloImportantes) condiciones.push("importancia = 'alta'");
+  if (filtros.conversacion && /^[A-Za-z0-9-]{8,64}$/.test(filtros.conversacion)) {
+    condiciones.push("instr(detalle_json, ?) > 0");
+    valores.push(`"conversacion":"${filtros.conversacion}"`);
+  }
   if (filtros.texto?.trim()) {
     condiciones.push("(titulo LIKE ? OR entidad_nombre LIKE ? OR actor_email LIKE ? OR portfolio_nombre LIKE ?)");
     const q = `%${filtros.texto.trim()}%`;

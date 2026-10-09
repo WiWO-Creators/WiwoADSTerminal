@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
@@ -33,7 +34,17 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+// Identificador de esta versión: el commit con el que se construye (cambia en cada despliegue). La pantalla lo compara con el
+// que corre en el servidor para avisar de una actualización nueva (ver app/actualizacion.tsx y lib/version.ts).
+function identificadorDeVersion(): string {
+  try {
+    return execSync("git rev-parse --short=12 HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || Date.now().toString(36);
+  } catch {
+    return Date.now().toString(36);
+  }
+}
+
+export default defineConfig(async ({ command }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -44,6 +55,8 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    // Solo al construir para producción: en desarrollo la versión es «dev» y no se avisa nada.
+    ...(command === "build" ? { define: { __WIWO_BUILD__: JSON.stringify(identificadorDeVersion()) } } : {}),
     server: {
       host: "0.0.0.0",
       allowedHosts: ["terminal.local"],

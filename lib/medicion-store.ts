@@ -3,7 +3,7 @@
  * reglas de `lib/medicion.ts`. Solo lectura, acotada al alcance de quien pregunta.
  */
 import { getRawDb } from "@/db";
-import { evaluarMedicion, type EventoGa4, type ResultadoMedicion } from "@/lib/medicion";
+import { evaluarMedicion, principalesEventos, type EventoGa4, type ResultadoMedicion } from "@/lib/medicion";
 import type { GtmEstado } from "@/lib/gtm";
 import { can, enAlcance, type Actor } from "@/lib/permisos";
 import { propiedadesDeGa4 } from "@/lib/ga4";
@@ -73,6 +73,18 @@ async function guardarCache(propiedad: string, estado: EstadoDeMedicion): Promis
   }
 }
 
+/** Junta los eventos de varias propiedades: el mismo evento suma. */
+function sumarEventos(listas: EventoGa4[][]): EventoGa4[] {
+  const por = new Map<string, EventoGa4>();
+  for (const e of listas.flat()) {
+    const a = por.get(e.nombre) ?? { nombre: e.nombre, eventos: 0, clave: 0 };
+    a.eventos += e.eventos;
+    a.clave += e.clave;
+    por.set(e.nombre, a);
+  }
+  return principalesEventos([...por.values()]);
+}
+
 /** Evalúa una propiedad de GA4 (últimos 30 días, y los últimos 7 para detectar caídas). */
 export async function medirPropiedad(propiedad: string): Promise<EstadoDeMedicion> {
   if (!windsorConfigured()) return { estado: "error", mensaje: "Falta configurar WINDSOR_API_KEY" };
@@ -126,6 +138,8 @@ export async function medirPropiedades(lista: string | null | undefined): Promis
       leadsMarcadosComoClave: buenas.reduce((s, { m }) => s + m.resultado.resumen.leadsMarcadosComoClave, 0),
     },
     sano: buenas.every(({ m }) => m.resultado.sano),
+    eventos: sumarEventos(buenas.map(({ m }) => m.resultado.eventos ?? [])),
+    eventos7: buenas.every(({ m }) => m.resultado.eventos7) ? sumarEventos(buenas.map(({ m }) => m.resultado.eventos7 ?? [])) : null,
   };
   return { estado: "ok", propiedad: ids.join(", "), resultado, desde: buenas[0].m.desde, hasta: buenas[0].m.hasta };
 }

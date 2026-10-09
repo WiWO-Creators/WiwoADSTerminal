@@ -19,10 +19,15 @@ import type { AdSummary } from "@/lib/performance-store";
 import type { SugerenciaVista } from "@/lib/sugerencias-store";
 import { cn } from "@/lib/utils";
 import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
+import { ElegirDondeCrear, type DestinoDeCreacion } from "./crear-en";
 import { ImpulsarView } from "./impulsar-view";
-import { ThinkingOrb } from "./ui";
+import { OrbeDeBoton, ThinkingOrb } from "./ui";
+import { QueReemplazar } from "./que-reemplazar";
+import type { PiezaParaReemplazar } from "@/lib/renovar-piezas";
 
-type Datos = { pendientes: SugerenciaVista[]; puedeResolver: boolean };
+type Datos = {
+  /** Decisiones de proyectos que no llevamos (otros equipos dentro de la misma cuenta, como en Grupo Valor), que no se muestran. */
+  ocultas?: number; pendientes: SugerenciaVista[]; puedeResolver: boolean };
 
 const SEVERIDAD: Record<SugerenciaVista["severity"], { etiqueta: string; clase: string }> = {
   critical: { etiqueta: "Urgente", clase: "border-danger/40 bg-danger/10 text-danger" },
@@ -43,6 +48,7 @@ function tipoDe(s: SugerenciaVista): string {
   if (s.accion?.tipo === "contenido") return "Contenido";
   if (s.accion?.tipo === "presupuesto") return "Presupuesto";
   if (s.accion?.tipo === "pausar") return "Pausar";
+  if (s.rule.startsWith("ficha_")) return "Ficha";
   return s.rule.startsWith("medicion_") ? "Medición" : "Revisar";
 }
 
@@ -81,7 +87,10 @@ export function BotonDeSugerencias({
   clienteId,
   rango,
   modo = "boton",
+  onCrearAnuncio,
 }: {
+  /** «Subir contenido»: abre el Constructor para crear un anuncio nuevo dentro de la campaña de la decisión. */
+  onCrearAnuncio?: (destino: DestinoDeCreacion) => void;
   /** `pagina`: las tarjetas ocupan la pantalla (Decisiones); `boton`: un botón que las abre en un diálogo. */
   modo?: "boton" | "pagina";
   /** Cliente que se mira en el Dashboard; sin cliente, las de toda la cartera visible. */
@@ -90,6 +99,9 @@ export function BotonDeSugerencias({
 }) {
   const [abierto, setAbierto] = useState(false);
   const [datos, setDatos] = useState<Datos | null>(null);
+  /** De qué cliente (o «todos») es la última lectura terminada, y de cuál terminó también la revisión de rendimiento. */
+  const [leidoDe, setLeidoDe] = useState<string | null>(null);
+  const [revisadoDe, setRevisadoDe] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trabajando, setTrabajando] = useState(false);
   const [eligiendoMotivo, setEligiendoMotivo] = useState(false);
@@ -101,17 +113,23 @@ export function BotonDeSugerencias({
   const [seleccionId, setSeleccionId] = useState<string | null>(null);
   const [reactivando, setReactivando] = useState<SugerenciaVista | null>(null);
   const [revisando, setRevisando] = useState<SugerenciaVista | null>(null);
+  const [creandoAnuncioDe, setCreandoAnuncioDe] = useState<SugerenciaVista | null>(null);
   /** La decisión cuyo cambio se está haciendo en el editor: se resuelve solo si el cambio se aplica. */
   const [editorDe, setEditorDe] = useState<SugerenciaVista | null>(null);
   const aplicadoEnEditor = useRef(false);
+  const cerrarSolucionada = useRef<(id: string) => Promise<void>>(async () => {});
   /** Lo que el Orb hizo con cada decisión: propuso una solución o ya la aplicó. */
   const [orb, setOrb] = useState<Record<string, "propuesta" | "aplicada">>({});
+  /** Los anuncios de peor rendimiento de la campaña de cada decisión de contenido (los lee `QueReemplazar`), para pasárselos al Orb. */
+  const [peoresDe, setPeoresDe] = useState<Record<string, PiezaParaReemplazar[]>>({});
 
   useEffect(() => {
     function alEstado(e: Event) {
       const d = (e as CustomEvent<{ decisionId: string; estado: "propuesta" | "aplicada" }>).detail;
       if (!d) return;
       setOrb((a) => ({ ...a, [d.decisionId]: d.estado }));
+      // El Orb aplicó el cambio con el «sí» de la persona: la decisión queda solucionada.
+      if (d.estado === "aplicada") void cerrarSolucionada.current(d.decisionId);
     }
     window.addEventListener("wiwo:orb-estado", alEstado);
     return () => window.removeEventListener("wiwo:orb-estado", alEstado);
@@ -129,7 +147,8 @@ export function BotonDeSugerencias({
     const respuesta = await fetch(url, { cache: "no-store" });
     const cuerpo = await respuesta.json().catch(() => null);
     if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudieron leer las sugerencias");
-    setDatos({ pendientes: cuerpo.pendientes ?? [], puedeResolver: Boolean(cuerpo.puedeResolver) });
+    setDatos({ pendientes: cuerpo.pendientes ?? [], ocultas: Number(cuerpo.ocultas ?? 0), puedeResolver: Boolean(cuerpo.puedeResolver) });
+    setLeidoDe(clienteId ?? "todos");
   }, [clienteId]);
 
   // Al mirar un cliente: lee lo que hay y, si toca, deja que el servidor revise su rendimiento.
@@ -143,6 +162,8 @@ export function BotonDeSugerencias({
         if (!cancelado && evaluada.ok && Number(evaluada.cuerpo.generadas ?? 0) > 0) await leer();
       } catch (e) {
         if (!cancelado) setError(e instanceof Error ? e.message : "No se pudieron leer las sugerencias");
+      } finally {
+        if (!cancelado) setRevisadoDe(clienteId ?? "todos");
       }
     })();
     return () => {
@@ -150,13 +171,34 @@ export function BotonDeSugerencias({
     };
   }, [clienteId, leer]);
 
+  // La lista se vuelve a leer cada minuto y al volver a la pestaña: lo que ya se resolvió (por ejemplo, contenido que se acaba de subir) sale solo.
+  useEffect(() => {
+    const refrescar = () => {
+      if (document.visibilityState === "visible") void leer().catch(() => undefined);
+    };
+    const t = window.setInterval(refrescar, 60_000);
+    document.addEventListener("visibilitychange", refrescar);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", refrescar);
+    };
+  }, [leer]);
+
   const pendientes = datos?.pendientes ?? [];
   // En pantalla completa hay cola con filtros y se elige cuál ver; en el diálogo, siempre la primera.
+  // Un filtro que ya no existe entre las opciones (cambiaste de cliente) no filtra: antes la cola parecía vacía con el filtro viejo escondido.
+  const vigente = (valor: string, opciones: string[]) => (opciones.includes(valor) ? valor : "");
+  const fCliente = vigente(filtroCliente, pendientes.map((x) => x.clienteId ?? ""));
+  const fPlataforma = vigente(filtroPlataforma, pendientes.map((x) => x.platform ?? ""));
+  const fTipo = vigente(filtroTipo, pendientes.map(tipoDe));
+  const claveActual = clienteId ?? "todos";
+  const leyendo = leidoDe !== claveActual;
+  const evaluando = revisadoDe !== claveActual;
   const filtradas = pendientes.filter(
     (x) =>
-      (!filtroCliente || x.clienteId === filtroCliente) &&
-      (!filtroPlataforma || x.platform === filtroPlataforma) &&
-      (!filtroTipo || tipoDe(x) === filtroTipo) &&
+      (!fCliente || x.clienteId === fCliente) &&
+      (!fPlataforma || x.platform === fPlataforma) &&
+      (!fTipo || tipoDe(x) === fTipo) &&
       (!busqueda.trim() || `${x.title} ${x.entityName ?? ""} ${x.clienteNombre}`.toLowerCase().includes(busqueda.trim().toLowerCase())),
   );
   const actual = modo === "pagina" ? (filtradas.find((x) => x.id === seleccionId) ?? filtradas[0] ?? null) : (pendientes[0] ?? null);
@@ -220,12 +262,47 @@ export function BotonDeSugerencias({
     });
   }
 
+  /**
+   * «Subir contenido»: la campaña de la tarjeta ya viene elegida. En Meta se abre el flujo de subir o impulsar con esa campaña
+   * y su cuenta cargadas; en Google (y el resto) se abre directo el editor de esa campaña, donde se edita el contenido.
+   */
+  /** El conjunto donde más anuncios hay que reemplazar (con esos anuncios), si ya se leyeron los de peor rendimiento. */
+  function conjuntoParaRenovar(s: SugerenciaVista): { adsetId: string; adsetName: string; retirar: Array<{ id: string; nombre: string }> } | null {
+    const por = new Map<string, { adsetName: string; retirar: Array<{ id: string; nombre: string }> }>();
+    for (const p of peoresDe[s.id] ?? []) {
+      if (!p.conjuntoId) continue;
+      const g = por.get(p.conjuntoId) ?? { adsetName: p.conjunto ?? p.conjuntoId, retirar: [] };
+      g.retirar.push({ id: p.id, nombre: p.nombre });
+      por.set(p.conjuntoId, g);
+    }
+    const mejor = [...por.entries()].sort((a, b) => b[1].retirar.length - a[1].retirar.length)[0];
+    return mejor ? { adsetId: mejor[0], ...mejor[1] } : null;
+  }
+
+  function subirContenido(s: SugerenciaVista) {
+    // Directo al conjunto donde hay que renovar (con los anuncios viejos ya marcados para retirar); sin eso, se elige el destino.
+    const destino = conjuntoParaRenovar(s);
+    if (onCrearAnuncio && s.clienteId && s.entityId && s.accountId && s.provider === "meta" && destino) {
+      onCrearAnuncio({ portfolioId: s.clienteId, platform: "meta", accountId: s.accountId, campaignId: s.entityId, campaignName: s.entityName ?? "", adsetId: destino.adsetId, adsetName: destino.adsetName, retirarAnuncios: destino.retirar });
+      return;
+    }
+    // Con el Constructor disponible: se crea un anuncio nuevo en la campaña de la decisión y la persona elige la pieza.
+    if (onCrearAnuncio && s.clienteId && s.entityId) setCreandoAnuncioDe(s);
+    else if (s.provider === "meta") setSubiendo(s);
+    else {
+      // La decisión se cierra cuando se aplique un cambio en el editor.
+      setEditorDe(s);
+      aplicadoEnEditor.current = false;
+      void abrirEnEditor(s, false);
+    }
+  }
+
   /** ✓ */
   async function aprobar(s: SugerenciaVista) {
     if (!puede || trabajando) return;
     if (s.accion?.tipo === "contenido") {
       setDx(0);
-      setSubiendo(s);
+      subirContenido(s);
       return;
     }
     if (s.accion?.tipo === "reactivar") {
@@ -254,12 +331,24 @@ export function BotonDeSugerencias({
   /** Le pide al Orb que resuelva esta decisión: él propone y una persona aprueba; la decisión se cierra cuando el cambio se aplica. */
   function resolverConOrb(s: SugerenciaVista) {
     const texto = [
-      `Resuelve esta decisión de ${s.clienteNombre} en ${s.platform}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
+      `Resuelve esta decisión de ${s.clienteNombre} en ${s.platform}${s.cuentaNombre ? ` (cuenta ${s.cuentaNombre})` : ""}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
       `Diagnóstico: ${s.diagnosis}`,
       `Sugerencia: ${s.proposedAction}`,
-      "Lee primero los datos reales de la campaña y propón el cambio concreto (no cambies nada sin que yo lo apruebe). Si no hace falta ningún cambio, dímelo.",
+      "Responde en máximo 3 líneas: qué pasa de verdad y UNA acción concreta como pregunta corta. Deja la propuesta lista; si digo «sí», se aplica. Si no hace falta ningún cambio, dímelo en una línea.",
     ].join("\n");
-    setOrb((a) => ({ ...a, [s.id]: "propuesta" }));
+    window.dispatchEvent(new CustomEvent("wiwo:orb-pedir", { detail: { decisionId: s.id, texto } }));
+  }
+
+  /** Renovar: subir contenido nuevo y, a la vez, retirar los anuncios viejos del conjunto para que la campaña no se sature. */
+  function renovarConOrb(s: SugerenciaVista) {
+    const texto = [
+      `Quiero RENOVAR el contenido de ${s.clienteNombre} en ${s.platform}${s.cuentaNombre ? ` (cuenta ${s.cuentaNombre})` : ""}${s.entityName ? ` en la campaña «${s.entityName}»` : ""}.`,
+      (peoresDe[s.id] ?? []).length > 0
+        ? `Los 3 anuncios de peor rendimiento de esa campaña son: ${(peoresDe[s.id] ?? []).map((p) => `«${p.nombre}»${p.conjunto ? ` (conjunto ${p.conjunto})` : ""}: ${p.porQue}`).join(" | ")}. Propón reemplazar esos.`
+        : "Primero muéstrame las piezas activas de su conjunto (días activas, impresiones y CTR) y dime cuáles conviene retirar para que no se sature.",
+      "Yo te paso el contenido nuevo (imágenes, un carrusel o un link de publicación); al prepararlo, propón pausar las piezas que elija.",
+      "No envíes nada hasta que yo confirme.",
+    ].join("\n");
     window.dispatchEvent(new CustomEvent("wiwo:orb-pedir", { detail: { decisionId: s.id, texto } }));
   }
 
@@ -272,6 +361,17 @@ export function BotonDeSugerencias({
       quitar(s);
     }
   }
+
+  useEffect(() => {
+    cerrarSolucionada.current = async (id: string) => {
+      const s = pendientes.find((x) => x.id === id);
+      if (!s) return;
+      if (await resolver(s, "approve")) {
+        toast.success("El Orb solucionó la decisión");
+        quitar(s);
+      }
+    };
+  });
 
   /** El editor se cerró: si no se aplicó nada, la decisión sigue pendiente y se dice. */
   function alCerrarEditor() {
@@ -456,7 +556,13 @@ export function BotonDeSugerencias({
     <>
           {error && <p className="rounded-xl border border-danger/25 bg-danger/8 p-3 text-sm text-danger">{error}</p>}
 
-          {!actual && datos && !error && (
+          {(leyendo || (!actual && evaluando)) && !error && (
+            <p className="flex items-center justify-center gap-2 py-10 text-center text-sm text-foreground/60">
+              <OrbeDeBoton /> {leyendo ? "Cargando las decisiones…" : "Revisando el rendimiento del cliente…"}
+            </p>
+          )}
+
+          {!actual && datos && !error && !leyendo && !evaluando && (
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <CheckCircle2 className="size-12 text-brand" />
               <p className="text-base font-bold text-foreground">
@@ -507,7 +613,7 @@ export function BotonDeSugerencias({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={cn("rounded-full border px-2 py-0.5 text-[0.65rem] font-bold", sev.clase)}>{sev.etiqueta}</span>
                     {!clienteId && <span className="text-xs font-semibold text-foreground/70">{actual.clienteNombre}</span>}
-                    <span className="text-xs text-foreground/45">{actual.platform}</span>
+                    <span className="text-xs text-foreground/45">{actual.cuentaNombre && actual.cuentaNombre !== actual.clienteNombre ? `${actual.cuentaNombre} · ` : ""}{actual.platform}</span>
                   </div>
                   <h3 className="text-base font-bold leading-snug text-foreground">{actual.title}</h3>
                   {actual.entityName && <p className="truncate text-xs text-foreground/45">{actual.entityName}</p>}
@@ -516,6 +622,14 @@ export function BotonDeSugerencias({
                     <span className="font-semibold">Qué hacer: </span>
                     {actual.proposedAction}
                   </p>
+                  {actual.provider === "meta" && actual.accion?.tipo === "contenido" && actual.accountId && actual.entityId && /^\d+$/.test(actual.entityId) && (
+                    <QueReemplazar
+                      key={actual.id}
+                      accountId={actual.accountId}
+                      campaignId={actual.entityId}
+                      onCargado={(piezas) => setPeoresDe((a) => ({ ...a, [actual.id]: piezas }))}
+                    />
+                  )}
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div className="rounded-xl border border-foreground/10 p-3">
                       <p className="text-[0.65rem] text-foreground/50">Impacto estimado</p>
@@ -581,13 +695,23 @@ export function BotonDeSugerencias({
                     <button
                       type="button"
                       onPointerDown={(ev) => ev.stopPropagation()}
-                      onClick={() => setSubiendo(actual)}
+                      onClick={() => subirContenido(actual)}
                       className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
                     >
-                      Subir contenido a esta campaña
+                      {conjuntoParaRenovar(actual) ? `Ir al conjunto «${conjuntoParaRenovar(actual)?.adsetName}» y subir contenido` : "Elegir conjunto y subir contenido"}
                     </button>
                   )}
-                  {puede && (
+                  {actual.accion?.tipo === "contenido" && actual.clienteId && actual.provider === "meta" && (
+                    <button
+                      type="button"
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => renovarConOrb(actual)}
+                      className="rounded-full border border-brand/40 px-4 py-2 text-xs font-bold text-brand hover:bg-brand/10"
+                    >
+                      Renovar: reemplazar anuncios viejos
+                    </button>
+                  )}
+                  {(
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
@@ -744,8 +868,13 @@ export function BotonDeSugerencias({
           <div>
             <p className="font-micro text-[0.65rem] text-muted-foreground">OPERACIÓN</p>
             <h2 className="neo-section-title">
-              {pendientes.length} {pendientes.length === 1 ? "decisión requiere" : "decisiones requieren"} {puede ? "firma" : "aprobación"}
+              {leyendo ? "Cargando decisiones…" : `${pendientes.length} ${pendientes.length === 1 ? "decisión requiere" : "decisiones requieren"} ${puede ? "firma" : "aprobación"}`}
             </h2>
+            {leyendo && (
+              <p className="mt-2 flex items-center gap-2 text-sm text-foreground/70">
+                <OrbeDeBoton /> Leyendo las decisiones y verificándolas contra la plataforma: puede tardar unos segundos. Esto no significa que no haya nada.
+              </p>
+            )}
             <p className="mt-1 text-sm text-muted-foreground">
               <span className="text-danger">{pendientes.filter((x) => x.severity === "critical").length} crítica</span>
               {" · "}
@@ -756,6 +885,12 @@ export function BotonDeSugerencias({
             </p>
           </div>
 
+          {(datos?.ocultas ?? 0) > 0 && (
+            <p className="rounded-xl border border-foreground/10 bg-foreground/4 px-4 py-2.5 text-xs leading-5 text-foreground/65">
+              {datos?.ocultas} {datos?.ocultas === 1 ? "decisión no se muestra" : "decisiones no se muestran"}: son de proyectos que no llevamos (otros equipos dentro de la misma cuenta). Solo se ven las de los proyectos asignados.
+            </p>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border p-3">
             <input
               value={busqueda}
@@ -764,9 +899,9 @@ export function BotonDeSugerencias({
               className="h-10 min-w-48 flex-1 rounded-full border border-border bg-background px-4 text-sm"
             />
             {([
-              ["Todos los clientes", filtroCliente, setFiltroCliente, [...new Map(pendientes.map((x) => [x.clienteId, x.clienteNombre])).entries()]],
-              ["Toda plataforma", filtroPlataforma, setFiltroPlataforma, [...new Set(pendientes.map((x) => x.platform))].map((x) => [x, x] as [string, string])],
-              ["Todo tipo", filtroTipo, setFiltroTipo, [...new Set(pendientes.map(tipoDe))].map((x) => [x, x] as [string, string])],
+              ["Todos los clientes", fCliente, setFiltroCliente, [...new Map(pendientes.map((x) => [x.clienteId, x.clienteNombre])).entries()]],
+              ["Toda plataforma", fPlataforma, setFiltroPlataforma, [...new Set(pendientes.map((x) => x.platform))].map((x) => [x, x] as [string, string])],
+              ["Todo tipo", fTipo, setFiltroTipo, [...new Set(pendientes.map(tipoDe))].map((x) => [x, x] as [string, string])],
             ] as Array<[string, string, (v: string) => void, Array<[string, string]>]>).map(([etiqueta, valor, poner, opciones]) => (
               <select
                 key={etiqueta}
@@ -789,7 +924,17 @@ export function BotonDeSugerencias({
 
           <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
             <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1">
-              {filtradas.length === 0 && datos && <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Cola despejada: no quedan decisiones con los filtros actuales.</p>}
+              {leyendo && (
+                <p className="flex items-center gap-2 rounded-xl border border-border p-4 text-sm text-muted-foreground">
+                  <OrbeDeBoton /> Cargando las decisiones de este cliente…
+                </p>
+              )}
+              {!leyendo && evaluando && (
+                <p className="flex items-center gap-2 rounded-xl border border-brand/25 bg-brand/6 p-3 text-xs text-foreground/70">
+                  <OrbeDeBoton /> Revisando el rendimiento del cliente: pueden aparecer más decisiones en unos segundos.
+                </p>
+              )}
+              {!leyendo && !evaluando && filtradas.length === 0 && datos && <p className="rounded-xl border border-border p-4 text-sm text-muted-foreground">Cola despejada: no quedan decisiones con los filtros actuales.</p>}
               {filtradas.map((x) => (
                 <button
                   key={x.id}
@@ -806,7 +951,7 @@ export function BotonDeSugerencias({
                   </div>
                   <p className="mt-1.5 text-sm font-semibold leading-snug text-foreground">{x.title}</p>
                   <p className="mt-0.5 truncate text-xs text-foreground/55">
-                    {x.clienteNombre} · {x.platform}
+                    {x.clienteNombre}{x.cuentaNombre && x.cuentaNombre !== x.clienteNombre ? ` · ${x.cuentaNombre}` : ""} · {x.platform}
                   </p>
                 </button>
               ))}
@@ -826,6 +971,7 @@ export function BotonDeSugerencias({
             clienteId={subiendo.clienteId}
             puedeAprobar={puede}
             campanaInicial={subiendo.entityId ?? undefined}
+            cuentaInicial={subiendo.accountId ?? undefined}
             onHecho={() => {
               // Se cierra la decisión solo cuando el contenido ya se envió.
               const s = subiendo;
@@ -889,6 +1035,14 @@ export function BotonDeSugerencias({
         puedeAprobar={puede}
         onOpenChange={(a) => !a && alCerrarEditor()}
         onAplicado={() => void alAplicarEnEditor()}
+      />
+
+      <ElegirDondeCrear
+        nivel={creandoAnuncioDe ? "anuncio" : null}
+        clienteId={creandoAnuncioDe?.clienteId ?? ""}
+        inicial={creandoAnuncioDe?.accountId && creandoAnuncioDe.entityId ? { accountId: creandoAnuncioDe.accountId, campaignId: creandoAnuncioDe.entityId } : undefined}
+        onCerrar={() => setCreandoAnuncioDe(null)}
+        onElegir={(destino) => onCrearAnuncio?.(destino)}
       />
 
       <AlertDialog open={revisando !== null} onOpenChange={(a) => !a && setRevisando(null)}>

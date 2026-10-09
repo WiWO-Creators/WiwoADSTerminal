@@ -141,6 +141,9 @@ function PanelDeMemoria({ clienteId, clienteNombre, onCerrar }: { clienteId: str
   );
 }
 
+/** «Sí», «dale», «hazlo»…: una respuesta corta que aprueba lo propuesto. */
+const AFIRMATIVO = /^\s*(s[ií]|dale|ok(ay)?|hazlo|h[aá]zlo|adelante|claro|de acuerdo|listo|activ[aá]lo|aplic[aá]lo|p[aá]usalo|confirmo|procede)[\s.!¡]*$/i;
+
 const FRASES_DE_ESPERA = ["Trabajando…", "Pensando…", "Revisando los datos…", "Armando la respuesta…", "Ordenando las ideas…"];
 
 /** Mientras no hay un aviso concreto de lo que se está haciendo, rota entre varias frases en vez de repetir una. */
@@ -174,6 +177,9 @@ export function AsistenteFlotante({
   const [mensajes, setMensajes] = useState<Mensaje[]>([]);
   const [texto, setTexto] = useState("");
   const [csv, setCsv] = useState<{ nombre: string; texto: string } | null>(null);
+  // Imágenes o videos ya subidos: el Orb los recibe como una URL en el mensaje y la usa como pieza del anuncio.
+  const [medios, setMedios] = useState<Array<{ nombre: string; url: string }>>([]);
+  const [subiendoMedio, setSubiendoMedio] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [herramienta, setHerramienta] = useState<string | null>(null);
   const [errorDeCarga, setErrorDeCarga] = useState<string | null>(null);
@@ -183,7 +189,11 @@ export function AsistenteFlotante({
   const areaDeTexto = useRef<HTMLTextAreaElement>(null);
   /** La decisión que el Orb está resolviendo (la pidió el tablero de Decisiones). */
   const decisionActiva = useRef<string | null>(null);
+  /** Id de este chat: une en la auditoría lo que se preguntó, lo que el bot usó y lo que respondió. */
+  const conversacionId = useRef<string>(typeof crypto !== "undefined" ? crypto.randomUUID() : "");
   const respuestaConPropuestas = useRef(false);
+  /** Cómo terminó el último intento de aplicar una propuesta. */
+  const resultadoDeAplicar = useRef<{ estado: EstadoDePropuesta; error?: string }>({ estado: "pendiente" });
   const enviarActual = useRef<(pregunta: string) => Promise<void>>(async () => {});
 
   // Crece con el contenido en vez de quedar en una sola línea siempre —
@@ -213,15 +223,64 @@ export function AsistenteFlotante({
     setMensajes((actuales) => actuales.map((m) => (m.id === id ? cambio(m) : m)));
   }
 
+  /**
+   * Un «sí» corto después de una propuesta pendiente es la aprobación de la persona: se aplica por el mismo camino del botón
+   * (el servidor vuelve a validar y a comprobar permisos) y no se vuelve a llamar al modelo.
+   */
+  async function aprobarPorChat(limpia: string): Promise<boolean> {
+    if (!puedeAprobar || !AFIRMATIVO.test(limpia)) return false;
+    const ultimo = [...mensajes].reverse().find((m) => m.role === "assistant");
+    const aplicables = ultimo?.propuestas.filter((p) => p.estado === "pendiente" && (p.tipo === "estado" || p.tipo === "edicion")) ?? [];
+    // Un «sí» no basta para tocar dinero: lo del presupuesto se aprueba con el botón de su tarjeta, viendo el antes y el después.
+    const tocaDinero = (p: PropuestaEnPantalla) => p.tipo === "edicion" && (p.cambios.presupuesto !== undefined || p.cambios.limiteGasto !== undefined);
+    // Eliminar tampoco: es irreversible y se aprueba con el botón de su tarjeta.
+    const eliminaAlgo = (p: PropuestaEnPantalla) => p.tipo === "edicion" && p.cambios.eliminar === true;
+    const pendientes = aplicables.filter((p) => !tocaDinero(p) && !eliminaAlgo(p));
+    if (!ultimo || aplicables.length === 0) return false;
+    if (pendientes.length === 0) {
+      const usuario: Mensaje = { id: nuevoId(), role: "user", text: limpia, propuestas: [] };
+      const aviso: Mensaje = { id: nuevoId(), role: "assistant", text: "Lo del presupuesto y eliminar no se aplican con un «sí»: apruébalo con el botón de su tarjeta, donde ves el antes y el después.", propuestas: [] };
+      setMensajes((a) => [...a, usuario, aviso]);
+      setTexto("");
+      return true;
+    }
+    const usuario: Mensaje = { id: nuevoId(), role: "user", text: limpia, propuestas: [] };
+    const respuesta: Mensaje = { id: nuevoId(), role: "assistant", text: "Aplicando…", propuestas: [] };
+    setMensajes((a) => [...a, usuario, respuesta]);
+    setTexto("");
+    setCargando(true);
+    const lineas: string[] = [];
+    let todoBien = true;
+    for (const p of pendientes) {
+      await aplicar(ultimo.id, p);
+      const r = resultadoDeAplicar.current;
+      const nombre = "nombre" in p ? p.nombre : "cambio";
+      if (r.estado === "aplicada") lineas.push(`Listo: ${nombre}.`);
+      else {
+        todoBien = false;
+        lineas.push(`No se pudo aplicar ${nombre}: ${r.error ?? "error desconocido"}.`);
+      }
+    }
+    setCargando(false);
+    actualizarMensaje(respuesta.id, (m) => ({ ...m, text: lineas.join("\n") }));
+    if (todoBien) avisarDecision("aplicada");
+    return true;
+  }
+
   async function enviar(pregunta: string) {
     const limpia = pregunta.trim();
     if (!limpia || cargando) return;
+    if (await aprobarPorChat(limpia)) return;
     setErrorDeCarga(null);
 
+    // Los adjuntos viajan en orden natural por nombre (Imagen A, B, C… o Imagen 1, 2, 10): es el orden de un carrusel.
+    const ordenados = [...medios].sort((a, b) => a.nombre.localeCompare(b.nombre, "es", { numeric: true, sensitivity: "base" }));
+    const textoConMedios = ordenados.length > 0 ? `${limpia}\n${ordenados.map((m, i) => `[Adjunto ${i + 1}/${ordenados.length}: ${m.nombre} → ${m.url}]`).join("\n")}` : limpia;
+    setMedios([]);
     const usuario: Mensaje = {
       id: nuevoId(),
       role: "user",
-      text: limpia,
+      text: textoConMedios,
       archivo: csv?.nombre,
       propuestas: [],
     };
@@ -246,6 +305,7 @@ export function AsistenteFlotante({
           rango,
           clienteId,
           clienteNombre,
+          conversacionId: conversacionId.current,
           csv: adjunto,
         }),
       });
@@ -333,11 +393,13 @@ export function AsistenteFlotante({
 
   async function aplicar(mensajeId: string, propuesta: PropuestaEnPantalla) {
     if (propuesta.tipo !== "estado" && propuesta.tipo !== "edicion") return;
-    const marcar = (estado: EstadoDePropuesta, error?: string, aviso?: string) =>
+    const marcar = (estado: EstadoDePropuesta, error?: string, aviso?: string) => {
+      resultadoDeAplicar.current = { estado, error };
       actualizarMensaje(mensajeId, (m) => ({
         ...m,
         propuestas: m.propuestas.map((p) => (p.id === propuesta.id ? { ...p, estado, error, aviso } : p)),
       }));
+    };
     marcar("aplicando");
     if (propuesta.tipo === "edicion") {
       // Lo que se aplica no es lo que dibujó el modelo: el servidor vuelve a leer
@@ -399,9 +461,50 @@ export function AsistenteFlotante({
   }
 
   async function alElegirArchivo(evento: React.ChangeEvent<HTMLInputElement>) {
-    const elegido = evento.target.files?.[0];
+    const todos = Array.from(evento.target.files ?? []);
     evento.target.value = "";
-    if (!elegido) return;
+    if (todos.length === 0) return;
+    // Varias imágenes a la vez (por ejemplo para un carrusel): se suben una por una y quedan ordenadas por su nombre.
+    const medios = todos.filter((a) => /^(image|video)\//.test(a.type));
+    if (medios.length > 0) {
+      for (const m of medios.sort((a, b) => a.name.localeCompare(b.name, "es", { numeric: true, sensitivity: "base" }))) await subirMedio(m);
+      return;
+    }
+    await alElegirUno(todos[0]);
+  }
+
+  async function subirMedio(elegido: File) {
+    {
+      if (!clienteId) {
+        setErrorDeCarga("Elige un cliente arriba para poder subir imágenes o videos.");
+        return;
+      }
+      setErrorDeCarga(null);
+      setSubiendoMedio(true);
+      try {
+        const respuesta = await fetch("/api/creatividades/subir", {
+          method: "POST",
+          headers: { "content-type": elegido.type, "x-portfolio-id": encodeURIComponent(clienteId) },
+          body: elegido,
+        });
+        const crudo = await respuesta.text();
+        let cuerpo: { url?: string; error?: string } = {};
+        try {
+          cuerpo = JSON.parse(crudo) as typeof cuerpo;
+        } catch {
+          cuerpo = { error: respuesta.status === 413 ? "El archivo pesa demasiado: pega su URL en el mensaje." : `No se pudo subir (${respuesta.status}).` };
+        }
+        if (!respuesta.ok || !cuerpo.url) throw new Error(cuerpo.error ?? "No se pudo subir el archivo");
+        setMedios((a) => [...a, { nombre: elegido.name, url: cuerpo.url as string }]);
+      } catch (issue) {
+        setErrorDeCarga(issue instanceof Error ? issue.message : "No se pudo subir el archivo");
+      } finally {
+        setSubiendoMedio(false);
+      }
+    }
+  }
+
+  async function alElegirUno(elegido: File) {
     if (elegido.size > CSV_MAXIMO) {
       setErrorDeCarga("El archivo es demasiado grande (máximo 1,5 MB).");
       return;
@@ -412,12 +515,15 @@ export function AsistenteFlotante({
 
   function reiniciar() {
     cancelar.current?.abort();
+    conversacionId.current = crypto.randomUUID();
     setMensajes([]);
     setCsv(null);
+    setMedios([]);
     setErrorDeCarga(null);
   }
 
   const vacio = mensajes.length === 0;
+  const ultimoDelAsistente = [...mensajes].reverse().find((m) => m.role === "assistant");
   const [verMemoria, setVerMemoria] = useState(false);
   const ultima = mensajes[mensajes.length - 1];
   const esperandoTexto = cargando && ultima?.role === "assistant" && ultima.text === "";
@@ -530,6 +636,15 @@ export function AsistenteFlotante({
                     {m.role === "assistant" ? conNegritas(m.text) : m.text}
                   </div>
                 )}
+                {m.role === "assistant" && decisionActiva.current && !cargando && m.id === ultimoDelAsistente?.id && m.text && (
+                  <button
+                    type="button"
+                    onClick={() => void enviar("Amplía: explícame el diagnóstico completo con las cifras, las causas posibles y las alternativas.")}
+                    className="self-start rounded-full border border-brand/40 px-3 py-1 text-[0.7rem] font-bold text-brand hover:bg-brand/10"
+                  >
+                    Ampliar la explicación
+                  </button>
+                )}
                 {m.propuestas.map((p) => (
                   <TarjetaDePropuesta
                     key={p.id}
@@ -624,19 +739,30 @@ export function AsistenteFlotante({
                 </button>
               </div>
             )}
+            {medios.map((m) => (
+              <div key={m.url} className="mb-2 flex items-center gap-2 rounded-full border border-border bg-field px-3 py-1 text-xs text-foreground">
+                <Paperclip className="size-3 text-brand" />
+                <span className="min-w-0 flex-1 truncate">{m.nombre}</span>
+                <button type="button" onClick={() => setMedios((a) => a.filter((x) => x.url !== m.url))} aria-label="Quitar archivo" className="text-muted-foreground hover:text-foreground">
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            ))}
+            {subiendoMedio && <p className="mb-2 text-xs text-muted-foreground">Subiendo el archivo…</p>}
             <div className="flex items-end gap-2">
               <input
                 ref={archivo}
                 type="file"
-                accept=".csv,text/csv"
+                multiple
+                accept=".csv,text/csv,image/*,video/*"
                 className="hidden"
                 onChange={(evento) => void alElegirArchivo(evento)}
               />
               <button
                 type="button"
                 onClick={() => archivo.current?.click()}
-                aria-label="Adjuntar un CSV"
-                title="Adjuntar un CSV (por ejemplo de MetriQ)"
+                aria-label="Adjuntar un archivo"
+                title="Adjuntar una imagen, un video o un CSV (por ejemplo de MetriQ)"
                 className="grid size-10 shrink-0 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:border-brand hover:text-foreground"
               >
                 <Paperclip className="size-4" />

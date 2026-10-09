@@ -1,5 +1,7 @@
 import {
   CAMPOS_DETALLE,
+  archivosDeRecursos,
+  conVisuales,
   detalleAnuncioGaql,
   detalleAnuncioGoogle,
   detalleAnuncioLinkedin,
@@ -7,10 +9,15 @@ import {
   detalleCampanaGaql,
   detalleCampanaGoogle,
   detalleCampanaLinkedin,
+  detalleCampanaLinkedinNativa,
+  detalleConjuntoLinkedinNativo,
   detalleCampanaMeta,
   detalleConjuntoGaql,
+  gruposDeRecursosGaql,
   detalleConjuntoGoogle,
   palabraClaveGaql,
+  recursosDeVisuales,
+  visualesDeAnunciosGaql,
   type PalabraClave,
   detalleConjuntoLinkedin,
   detalleConjuntoMeta,
@@ -22,13 +29,21 @@ import {
   type Row,
 } from "@/lib/detalle-entidad";
 import { versionDeEscrituras } from "@/lib/escrituras";
+import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
+import { campanasDeLinkedin, gruposDeLinkedin } from "@/lib/linkedin-nativo";
 import { graphJson, leerEstructuraMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { unidadesMenoresMeta } from "@/lib/monedas";
 import {
   consultarGaql,
   GAQL_ANUNCIOS,
+  GAQL_ANUNCIOS_VISUALES,
+  gaqlDeRecursos,
   GAQL_CAMPANAS,
+  GAQL_EXTENSIONES,
+  extensionesActualesDeFilas,
   GAQL_GRUPOS,
+  GAQL_GRUPOS_DE_RECURSOS,
+  GAQL_RECURSOS_DE_GRUPO,
   GAQL_PALABRAS,
   GoogleAdsNativoError,
   type CredencialesGoogle,
@@ -78,23 +93,57 @@ function ventana(dias: number): { desde: string; hasta: string } {
  * escritura (`lib/escrituras.ts`) invalida lo recordado, para que el editor no muestre lo anterior.
  */
 const MEMORIA_DETALLE_MS = 3 * 60 * 1000;
-const memoriaDeDetalle = new Map<string, { at: number; datos: Promise<DetalleDeCuenta> }>();
+/** Para MOSTRAR (editor y árboles) se acepta algo más viejo mientras se renueva por detrás; para escribir, nunca. */
+const MEMORIA_VIEJA_MS = 45 * 60 * 1000;
+type EntradaDeMemoria = { at: number; datos: Promise<DetalleDeCuenta>; refrescando?: boolean };
+const memoriaDeDetalle = new Map<string, EntradaDeMemoria>();
 
-export function fetchDetalleDeCuenta(
+type OpcionesDeLectura = { dias?: number; credencialesGoogle?: CredencialesGoogle | null; credencialesLinkedin?: CredencialesLinkedin | null };
+
+function leerYCompletar(provider: Platform, accountId: string, opciones: OpcionesDeLectura): Promise<DetalleDeCuenta> {
+  return leerDetalleDeCuenta(provider, accountId, opciones)
+    .then(completarConNativoMeta)
+    .then((d) => completarConNativoLinkedin(d, opciones.credencialesLinkedin ?? null))
+    .then(completarConRecientes);
+}
+
+/**
+ * Lectura de la cuenta para MOSTRAR: con `permitirViejo`, lo ya leído (hasta 45 min) se devuelve al instante, marcado como
+ * `obsoleto`, y se renueva por detrás para la próxima. `fresco` fuerza una lectura nueva. Quien va a ESCRIBIR usa
+ * `fetchDetalleDeCuenta`, que nunca devuelve algo de más de 3 minutos.
+ */
+export function leerDetalleParaMostrar(
   provider: Platform,
   accountId: string,
-  opciones: { dias?: number; credencialesGoogle?: CredencialesGoogle | null } = {},
-): Promise<DetalleDeCuenta> {
-  const clave = `${provider}:${accountId}:${opciones.dias ?? VENTANA_DETALLE_DIAS}:${opciones.credencialesGoogle ? "nativa" : "windsor"}:${versionDeEscrituras()}`;
+  opciones: OpcionesDeLectura & { permitirViejo?: boolean; fresco?: boolean } = {},
+): { datos: Promise<DetalleDeCuenta>; obsoleto: boolean } {
+  const clave = `${provider}:${accountId}:${opciones.dias ?? VENTANA_DETALLE_DIAS}:${opciones.credencialesGoogle || opciones.credencialesLinkedin ? "nativa" : "windsor"}:${versionDeEscrituras()}`;
   const guardado = memoriaDeDetalle.get(clave);
-  if (guardado && Date.now() - guardado.at < MEMORIA_DETALLE_MS) return guardado.datos;
-  const datos = leerDetalleDeCuenta(provider, accountId, opciones).then(completarConNativoMeta).then(completarConRecientes);
+  const edad = guardado ? Date.now() - guardado.at : Infinity;
+  if (guardado && !opciones.fresco && edad < MEMORIA_DETALLE_MS) return { datos: guardado.datos, obsoleto: false };
+  if (guardado && !opciones.fresco && opciones.permitirViejo && edad < MEMORIA_VIEJA_MS) {
+    if (!guardado.refrescando) {
+      guardado.refrescando = true;
+      const nuevo = leerYCompletar(provider, accountId, opciones);
+      nuevo
+        .then(() => memoriaDeDetalle.set(clave, { at: Date.now(), datos: nuevo }))
+        .catch(() => {
+          guardado.refrescando = false;
+        });
+    }
+    return { datos: guardado.datos, obsoleto: true };
+  }
+  const datos = leerYCompletar(provider, accountId, opciones);
   memoriaDeDetalle.set(clave, { at: Date.now(), datos });
   datos.catch(() => {
     if (memoriaDeDetalle.get(clave)?.datos === datos) memoriaDeDetalle.delete(clave);
   });
   if (memoriaDeDetalle.size > 12) memoriaDeDetalle.delete(memoriaDeDetalle.keys().next().value as string);
-  return datos;
+  return { datos, obsoleto: false };
+}
+
+export function fetchDetalleDeCuenta(provider: Platform, accountId: string, opciones: OpcionesDeLectura = {}): Promise<DetalleDeCuenta> {
+  return leerDetalleParaMostrar(provider, accountId, opciones).datos;
 }
 
 async function leerDetalleDeCuenta(
@@ -103,7 +152,7 @@ async function leerDetalleDeCuenta(
   {
     dias = VENTANA_DETALLE_DIAS,
     credencialesGoogle = null,
-  }: { dias?: number; credencialesGoogle?: CredencialesGoogle | null } = {},
+  }: OpcionesDeLectura = {},
 ): Promise<DetalleDeCuenta> {
   // Google con la API de la propia plataforma: trae todo lo que existe, no solo
   // lo que tuvo actividad. Si falla, se cae a Windsor y se dice por qué en vez
@@ -118,7 +167,15 @@ async function leerDetalleDeCuenta(
       avisoNativo = `${error.message} Se muestra lo que entrega Windsor.`;
     }
   }
-  const detalle = await fetchDetalleWindsor(provider, accountId, dias);
+  let detalle: DetalleDeCuenta;
+  try {
+    detalle = await fetchDetalleWindsor(provider, accountId, dias);
+  } catch (error) {
+    // Meta: si Windsor no entrega esta cuenta (o responde 400), se sigue con la lectura directa de Meta en vez de perderla toda.
+    if (provider !== "meta" || !metaNativoConfigurado()) throw error;
+    console.error("WiWO.ADS detalle Meta: Windsor falló, se usa Meta directo", error instanceof Error ? error.message : "error");
+    detalle = { provider, accountId, campanas: [], conjuntos: [], anuncios: [], fuente: "windsor", avisos: ["Windsor no entregó esta cuenta: se leyó directo de Meta."] };
+  }
   if (provider === "google") {
     detalle.avisos.push(avisoNativo ?? AVISO_CONECTAR_GOOGLE);
   }
@@ -143,6 +200,34 @@ const MOTIVO_RECIEN_CREADO =
  * Meta: Windsor solo entrega lo que tuvo actividad. Con la conexión directa se suma lo que falta (campañas y conjuntos
  * pausados o recién creados), para poder verlos, editarlos y proponer cambios sobre ellos. Si la lectura falla, queda lo de Windsor.
  */
+/**
+ * LinkedIn: Windsor solo entrega lo que tuvo actividad y sin objetivo ni parte del presupuesto. Con la conexión directa se lee
+ * cada grupo y campaña tal como está en LinkedIn: sus valores mandan sobre los de Windsor y se suma lo que Windsor no trae.
+ */
+async function completarConNativoLinkedin(detalle: DetalleDeCuenta, credenciales: CredencialesLinkedin | null): Promise<DetalleDeCuenta> {
+  if (detalle.provider !== "linkedin" || !credenciales) return detalle;
+  try {
+    const [grupos, campanas] = await Promise.all([
+      gruposDeLinkedin(detalle.accountId, credenciales.token),
+      campanasDeLinkedin(detalle.accountId, credenciales.token),
+    ]);
+    const nativasG = nonNull(grupos.map((g) => detalleCampanaLinkedinNativa(g, detalle.accountId)));
+    const nativasC = nonNull(campanas.map((c) => detalleConjuntoLinkedinNativo(c, detalle.accountId)));
+    // Si la API no trae nada, se conserva lo de Windsor en vez de vaciar la pantalla.
+    if (nativasG.length + nativasC.length === 0) return detalle;
+    return {
+      ...detalle,
+      campanas: nativasG.length ? nativasG : detalle.campanas,
+      conjuntos: nativasC.length ? nativasC : detalle.conjuntos,
+      fuente: "nativa",
+      avisos: detalle.avisos.filter((a) => a !== AVISO_SOLO_ACTIVIDAD),
+    };
+  } catch (error) {
+    console.error("WiWO.ADS detalle LinkedIn nativo", error instanceof Error ? error.message : "error");
+    return detalle;
+  }
+}
+
 async function completarConNativoMeta(detalle: DetalleDeCuenta): Promise<DetalleDeCuenta> {
   if (detalle.provider !== "meta" || !metaNativoConfigurado()) return detalle;
   try {
@@ -214,16 +299,31 @@ async function completarConRecientes(detalle: DetalleDeCuenta): Promise<DetalleD
   }
 }
 
+/** Imágenes, logos y videos de los anuncios Display, de Video y Demand Gen. Si Google no los entrega, el anuncio se muestra sin ellos. */
+async function leerVisualesGoogle(cred: CredencialesGoogle, accountId: string, vacio: () => Promise<Array<Record<string, unknown>>>) {
+  const filas = (await Promise.all(GAQL_ANUNCIOS_VISUALES.map((q) => consultarGaql(cred, accountId, q).catch(vacio)))).flat();
+  const consultas = gaqlDeRecursos(recursosDeVisuales(filas));
+  const recursos = (await Promise.all(consultas.map((q) => consultarGaql(cred, accountId, q).catch(vacio)))).flat();
+  return visualesDeAnunciosGaql(filas, archivosDeRecursos(recursos));
+}
+
 async function fetchDetalleGoogleNativo(
   accountId: string,
   cred: CredencialesGoogle,
 ): Promise<DetalleDeCuenta> {
-  const [campanas, conjuntos, anuncios, palabras] = await Promise.all([
+  // Los grupos de recursos son de Performance Max: si la lectura falla (cuenta sin PMax, permisos) no se cae el resto.
+  const sinGrupos = (): Promise<Array<Record<string, unknown>>> => Promise.resolve([]);
+  const [campanas, conjuntos, anuncios, palabras, gruposRecursos, recursos, filasExtensiones] = await Promise.all([
     consultarGaql(cred, accountId, GAQL_CAMPANAS),
     consultarGaql(cred, accountId, GAQL_GRUPOS),
     consultarGaql(cred, accountId, GAQL_ANUNCIOS),
     consultarGaql(cred, accountId, GAQL_PALABRAS),
+    consultarGaql(cred, accountId, GAQL_GRUPOS_DE_RECURSOS).catch(sinGrupos),
+    consultarGaql(cred, accountId, GAQL_RECURSOS_DE_GRUPO).catch(sinGrupos),
+    // Extensiones: si la lectura falla (permisos), la campaña se muestra igual, sin ellas.
+    consultarGaql(cred, accountId, GAQL_EXTENSIONES).catch(sinGrupos),
   ]);
+  const visuales = await leerVisualesGoogle(cred, accountId, sinGrupos);
   // Con la API nativa se leyeron TODAS las palabras clave: un grupo sin
   // ninguna queda con lista vacía (no `null`, que significaría "sin leer").
   const porGrupo = new Map<string, PalabraClave[]>();
@@ -232,14 +332,26 @@ async function fetchDetalleGoogleNativo(
     if (!k) continue;
     porGrupo.set(k.grupoId, [...(porGrupo.get(k.grupoId) ?? []), k.palabra]);
   }
+  const gruposDeRecursos = gruposDeRecursosGaql(gruposRecursos, recursos);
   return {
     provider: "google",
     accountId,
-    campanas: unicosPorId(nonNull(campanas.map((f) => detalleCampanaGaql(f, accountId)))),
+    campanas: unicosPorId(nonNull(campanas.map((f) => detalleCampanaGaql(f, accountId)))).map((c) => {
+      const ext = extensionesActualesDeFilas(filasExtensiones, c.id);
+      const conExtensiones = {
+        ...c,
+        extensiones: {
+          sitelinks: ext.filter((e) => e.tipo === "SITELINK").map((e) => ({ texto: e.texto, url: e.url, descripcion1: e.descripcion1, descripcion2: e.descripcion2 })),
+          destacados: ext.filter((e) => e.tipo === "CALLOUT").map((e) => e.texto),
+        },
+      };
+      return c.objetivo === "PERFORMANCE_MAX" ? { ...conExtensiones, gruposDeRecursos: gruposDeRecursos.filter((g) => g.campaignId === c.id) } : conExtensiones;
+    }),
     conjuntos: unicosPorId(nonNull(conjuntos.map((f) => detalleConjuntoGaql(f, accountId)))).map(
       (g) => ({ ...g, palabrasClave: porGrupo.get(g.id) ?? [] }),
     ),
-    anuncios: unicosPorId(nonNull(anuncios.map((f) => detalleAnuncioGaql(f, accountId)))),
+    anuncios: conVisuales(unicosPorId(nonNull(anuncios.map((f) => detalleAnuncioGaql(f, accountId)))), visuales),
+    gruposDeRecursos,
     fuente: "nativa",
     avisos: [],
   };

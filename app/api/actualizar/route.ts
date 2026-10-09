@@ -41,8 +41,8 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE = { "cache-control": "no-store" };
 
-/** Cada cuánto se reconstruye solo el catálogo completo. */
-const INTERVALO_AUTOACTUALIZACION_MS = 2 * 60 * 60 * 1000;
+/** Cada cuánto se reconstruye solo el catálogo completo: cada hora (y a mano cuando se quiera). */
+const INTERVALO_AUTOACTUALIZACION_MS = 60 * 60 * 1000;
 
 /**
  * Con la automática bajada a 2 h en vez de 7 días, es mucho más probable que

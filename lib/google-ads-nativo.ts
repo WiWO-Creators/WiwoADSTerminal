@@ -152,7 +152,7 @@ export async function consultarGaql(
 /** Todo lo de un tipo salvo lo eliminado, con o sin actividad. */
 export const GAQL_CAMPANAS = [
   "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,",
-  "campaign.bidding_strategy_type, campaign_budget.amount_micros,",
+  "campaign.bidding_strategy_type, campaign_budget.amount_micros, campaign_budget.total_amount_micros, campaign_budget.period,",
   "campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros,",
   "campaign.target_roas.target_roas, campaign.network_settings.target_google_search,",
   "campaign.network_settings.target_search_network, campaign.network_settings.target_content_network,",
@@ -177,6 +177,21 @@ export const GAQL_PALABRAS = [
   "AND ad_group_criterion.status != 'REMOVED'",
 ].join(" ");
 
+/** Performance Max: sus grupos de recursos (no tiene grupos de anuncios ni anuncios sueltos). */
+export const GAQL_GRUPOS_DE_RECURSOS = [
+  "SELECT asset_group.id, asset_group.name, asset_group.status, asset_group.final_urls,",
+  "asset_group.path1, asset_group.path2, campaign.id",
+  "FROM asset_group WHERE asset_group.status != 'REMOVED'",
+].join(" ");
+
+/** Los recursos (textos, imágenes, videos, logos) de cada grupo de recursos. */
+export const GAQL_RECURSOS_DE_GRUPO = [
+  "SELECT asset_group.id, asset_group_asset.field_type, asset_group_asset.status,",
+  "asset.id, asset.name, asset.text_asset.text, asset.image_asset.full_size.url,",
+  "asset.youtube_video_asset.youtube_video_id",
+  "FROM asset_group_asset WHERE asset_group_asset.status != 'REMOVED'",
+].join(" ");
+
 export const GAQL_ANUNCIOS = [
   "SELECT ad_group_ad.ad.id, ad_group_ad.ad.type, ad_group_ad.status,",
   "ad_group_ad.ad.final_urls, ad_group_ad.ad.final_url_suffix, ad_group_ad.ad.display_url,",
@@ -185,6 +200,63 @@ export const GAQL_ANUNCIOS = [
   "ad_group_ad.policy_summary.approval_status, ad_group.id, campaign.id",
   "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'",
 ].join(" ");
+
+/**
+ * Lo visual de los anuncios que no son de búsqueda. Una consulta por familia: si Google cambia o no reconoce un campo en
+ * una cuenta, solo falla esa familia y el resto del detalle se lee igual.
+ */
+const ANUNCIO_VISUAL = "ad_group_ad.ad.id, ad_group_ad.ad.type";
+export const GAQL_ANUNCIOS_VISUALES = [
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.long_headline,",
+    "ad_group_ad.ad.responsive_display_ad.descriptions, ad_group_ad.ad.responsive_display_ad.business_name,",
+    "ad_group_ad.ad.responsive_display_ad.marketing_images, ad_group_ad.ad.responsive_display_ad.square_marketing_images,",
+    "ad_group_ad.ad.responsive_display_ad.logo_images, ad_group_ad.ad.responsive_display_ad.square_logo_images,",
+    "ad_group_ad.ad.responsive_display_ad.youtube_videos, ad_group_ad.ad.responsive_display_ad.call_to_action_text",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'RESPONSIVE_DISPLAY_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.video_responsive_ad.headlines, ad_group_ad.ad.video_responsive_ad.long_headlines,",
+    "ad_group_ad.ad.video_responsive_ad.descriptions, ad_group_ad.ad.video_responsive_ad.videos,",
+    "ad_group_ad.ad.video_responsive_ad.call_to_actions",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'VIDEO_RESPONSIVE_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.headlines, ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.business_name, ad_group_ad.ad.demand_gen_multi_asset_ad.call_to_action_text,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.square_marketing_images,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.portrait_marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.logo_images",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'DEMAND_GEN_MULTI_ASSET_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.headlines, ad_group_ad.ad.demand_gen_video_responsive_ad.long_headlines,",
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.descriptions, ad_group_ad.ad.demand_gen_video_responsive_ad.business_name,",
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.videos, ad_group_ad.ad.demand_gen_video_responsive_ad.logo_images",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'DEMAND_GEN_VIDEO_RESPONSIVE_AD'",
+  ].join(" "),
+] as const;
+
+/** Imágenes y videos de YouTube por nombre de recurso. Se piden de a 100 para no pasarse del tamaño de la consulta. */
+export function gaqlDeRecursos(nombres: string[]): string[] {
+  const consultas: string[] = [];
+  for (let i = 0; i < nombres.length; i += 100) {
+    const lista = nombres
+      .slice(i, i + 100)
+      .filter((n) => /^customers\/\d+\/assets\/\d+$/.test(n))
+      .map((n) => `'${n}'`)
+      .join(", ");
+    if (lista) {
+      consultas.push(
+        `SELECT asset.resource_name, asset.image_asset.full_size.url, asset.youtube_video_asset.youtube_video_id FROM asset WHERE asset.resource_name IN (${lista})`,
+      );
+    }
+  }
+  return consultas;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Escritura: editar un anuncio de búsqueda responsivo                        */
@@ -710,6 +782,40 @@ export function armarMutacionCampana(
   };
 }
 
+/** Elimina (REMOVED, irreversible) una campaña, un grupo de anuncios o un anuncio de Google Ads. */
+export async function eliminarEnGoogle(
+  cred: CredencialesGoogle,
+  customerId: string,
+  nivel: "campana" | "conjunto" | "anuncio",
+  id: string,
+  grupoId: string | null,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): Promise<ResultadoMutacion> {
+  const cliente = idNumerico(customerId);
+  if (!/^\d+$/.test(id)) throw new GoogleAdsNativoError("Identificador no válido.", 400);
+  let ruta: string;
+  let recurso: string;
+  if (nivel === "campana") {
+    ruta = `customers/${cliente}/campaigns:mutate`;
+    recurso = `customers/${cliente}/campaigns/${id}`;
+  } else if (nivel === "conjunto") {
+    ruta = `customers/${cliente}/adGroups:mutate`;
+    recurso = `customers/${cliente}/adGroups/${id}`;
+  } else {
+    if (!grupoId || !/^\d+$/.test(grupoId)) throw new GoogleAdsNativoError("Falta el grupo de anuncios del anuncio.", 400);
+    ruta = `customers/${cliente}/adGroupAds:mutate`;
+    recurso = `customers/${cliente}/adGroupAds/${grupoId}~${id}`;
+  }
+  if (!validateOnly) registrarEscritura();
+  let respuesta: { results?: Array<{ resourceName?: string }> };
+  try {
+    respuesta = await llamar<{ results?: Array<{ resourceName?: string }> }>(cred, ruta, { operations: [{ remove: recurso }], validateOnly, partialFailure: false });
+  } finally {
+    if (!validateOnly) registrarEscritura();
+  }
+  return { soloValidado: validateOnly, resourceName: respuesta.results?.[0]?.resourceName ?? null };
+}
+
 /** Edita la campaña (conserva su id). Con `validateOnly`, Google valida contra la cuenta real sin aplicar nada. */
 export async function actualizarCampanaGoogle(
   cred: CredencialesGoogle,
@@ -947,6 +1053,295 @@ export async function crearCampanaPmax(
   const recursos = (respuesta.mutateOperationResponses ?? []).flatMap((r) => Object.values(r).map((v) => v.resourceName ?? "")).filter(Boolean);
   const campana = recursos.find((r) => /\/campaigns\/\d+$/.test(r));
   return { campanaId: campana ? (campana.split("/").pop() ?? null) : null, recursos, soloValidado: soloValidar };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Performance Max: editar los textos y las URL de un grupo de recursos        */
+/* -------------------------------------------------------------------------- */
+
+/** Lo que se cambia de un grupo de recursos. Un campo ausente no se toca; las listas son la lista COMPLETA que debe quedar. */
+export type CambiosGrupoDeRecursos = {
+  titulares?: string[];
+  titulosLargos?: string[];
+  descripciones?: string[];
+  urlsFinales?: string[];
+  path1?: string;
+  path2?: string;
+};
+
+/** Límites de Google para los textos de un grupo de recursos de Performance Max. */
+export const LIMITES_GRUPO_DE_RECURSOS = {
+  titulares: { min: 3, max: 15, largo: 30 },
+  titulosLargos: { min: 1, max: 5, largo: 90 },
+  descripciones: { min: 2, max: 5, largo: 90, cortaMax: 60 },
+  path: 15,
+} as const;
+
+export function validarCambiosGrupoDeRecursos(c: CambiosGrupoDeRecursos): string[] {
+  const p: string[] = [];
+  const L = LIMITES_GRUPO_DE_RECURSOS;
+  const lista = (nombre: string, textos: string[] | undefined, lim: { min: number; max: number; largo: number }) => {
+    if (!textos) return;
+    const limpios = textos.map((t) => t.trim());
+    if (limpios.length < lim.min || limpios.length > lim.max) p.push(`Se necesitan entre ${lim.min} y ${lim.max} ${nombre} (hay ${limpios.length}).`);
+    limpios.forEach((t, i) => {
+      if (!t) p.push(`${nombre} ${i + 1} está vacío.`);
+      else if (t.length > lim.largo) p.push(`${nombre} ${i + 1} tiene ${t.length} caracteres (máximo ${lim.largo}).`);
+    });
+    if (new Set(limpios.map((t) => t.toLowerCase())).size !== limpios.length) p.push(`Hay ${nombre} repetidos.`);
+  };
+  lista("titulares", c.titulares, L.titulares);
+  lista("títulos largos", c.titulosLargos, L.titulosLargos);
+  lista("descripciones", c.descripciones, L.descripciones);
+  if (c.descripciones && !c.descripciones.some((d) => d.trim() && d.trim().length <= L.descripciones.cortaMax)) {
+    p.push(`Al menos una descripción debe tener ${L.descripciones.cortaMax} caracteres o menos.`);
+  }
+  if (c.urlsFinales) {
+    if (c.urlsFinales.length !== 1) p.push("Un grupo de recursos lleva una sola URL final.");
+    for (const u of c.urlsFinales) if (!/^https?:\/\/[^\s]+$/i.test(u.trim())) p.push(`La URL final «${u}» no es válida (debe empezar con http:// o https://).`);
+  }
+  for (const [n, v] of [["path1", c.path1], ["path2", c.path2]] as const) {
+    if (v !== undefined && v.length > L.path) p.push(`${n} tiene ${v.length} caracteres (máximo ${L.path}).`);
+  }
+  return p;
+}
+
+/** Un recurso de texto que ya está enlazado al grupo (lo que hay hoy en Google). */
+export type TextoEnlazado = { enlace: string; campo: string; texto: string };
+
+/**
+ * Arma la mutación: los textos nuevos se crean y se enlazan; los que sobran se desenlazan. Los textos de Google no se
+ * editan: se reemplazan. Se crea antes de quitar mientras no se pase del máximo, así nunca queda por debajo del mínimo.
+ */
+export function armarMutacionGrupoDeRecursos(
+  customerId: string,
+  grupoId: string,
+  actuales: TextoEnlazado[],
+  cambios: CambiosGrupoDeRecursos,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): { ruta: string; cuerpo: Record<string, unknown>; resumen: string[] } {
+  const cliente = idNumerico(customerId);
+  const grupo = idNumerico(grupoId);
+  const rc = (tipo: string, n: number | string) => `customers/${cliente}/${tipo}/${n}`;
+  const ops: Array<Record<string, unknown>> = [];
+  const resumen: string[] = [];
+  let temporal = -1;
+
+  const CAMPOS: Array<[keyof CambiosGrupoDeRecursos, string, number]> = [
+    ["titulares", "HEADLINE", LIMITES_GRUPO_DE_RECURSOS.titulares.max],
+    ["titulosLargos", "LONG_HEADLINE", LIMITES_GRUPO_DE_RECURSOS.titulosLargos.max],
+    ["descripciones", "DESCRIPTION", LIMITES_GRUPO_DE_RECURSOS.descripciones.max],
+  ];
+  for (const [clave, campo, max] of CAMPOS) {
+    const pedidos = cambios[clave] as string[] | undefined;
+    if (!pedidos) continue;
+    const quedan = pedidos.map((t) => t.trim());
+    const hoy = actuales.filter((a) => a.campo === campo);
+    const hoyTextos = new Set(hoy.map((a) => a.texto.trim().toLowerCase()));
+    const quedanTextos = new Set(quedan.map((t) => t.toLowerCase()));
+    const aQuitar = hoy.filter((a) => !quedanTextos.has(a.texto.trim().toLowerCase()));
+    const aCrear = quedan.filter((t) => !hoyTextos.has(t.toLowerCase()));
+    const crear = (t: string) => {
+      const nombre = rc("assets", temporal);
+      temporal -= 1;
+      ops.push({ assetOperation: { create: { resourceName: nombre, textAsset: { text: t } } } });
+      ops.push({ assetGroupAssetOperation: { create: { assetGroup: rc("assetGroups", grupo), asset: nombre, fieldType: campo } } });
+    };
+    let cuenta = hoy.length;
+    const pendientes = [...aCrear];
+    while (pendientes.length > 0 && cuenta < max) {
+      crear(pendientes.shift() as string);
+      cuenta += 1;
+    }
+    for (const q of aQuitar) {
+      ops.push({ assetGroupAssetOperation: { remove: q.enlace } });
+      cuenta -= 1;
+    }
+    for (const t of pendientes) crear(t);
+    if (aCrear.length > 0 || aQuitar.length > 0) resumen.push(`${clave}: +${aCrear.length} −${aQuitar.length}`);
+  }
+
+  const camposDelGrupo: Record<string, unknown> = {};
+  const mascara: string[] = [];
+  if (cambios.urlsFinales) { camposDelGrupo.finalUrls = cambios.urlsFinales.map((u) => u.trim()); mascara.push("final_urls"); }
+  if (cambios.path1 !== undefined) { camposDelGrupo.path1 = cambios.path1; mascara.push("path1"); }
+  if (cambios.path2 !== undefined) { camposDelGrupo.path2 = cambios.path2; mascara.push("path2"); }
+  if (mascara.length > 0) {
+    ops.push({ assetGroupOperation: { update: { resourceName: rc("assetGroups", grupo), ...camposDelGrupo }, updateMask: mascara.join(",") } });
+    resumen.push(`grupo: ${mascara.join(", ")}`);
+  }
+  return { ruta: `customers/${cliente}/googleAds:mutate`, cuerpo: { mutateOperations: ops, validateOnly, partialFailure: false }, resumen };
+}
+
+export const GAQL_TEXTOS_DE_GRUPO = (grupoId: string): string =>
+  [
+    "SELECT asset_group_asset.resource_name, asset_group_asset.field_type, asset.text_asset.text",
+    `FROM asset_group_asset WHERE asset_group.id = ${idNumerico(grupoId)}`,
+    "AND asset_group_asset.status != 'REMOVED' AND asset.type = 'TEXT'",
+  ].join(" ");
+
+export async function actualizarGrupoDeRecursos(
+  cred: CredencialesGoogle,
+  customerId: string,
+  grupoId: string,
+  cambios: CambiosGrupoDeRecursos,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): Promise<ResultadoMutacion & { resumen: string[] }> {
+  const problemas = validarCambiosGrupoDeRecursos(cambios);
+  if (problemas.length > 0) throw new GoogleAdsNativoError(problemas.join(" "), 400);
+  const filas = await consultarGaql(cred, customerId, GAQL_TEXTOS_DE_GRUPO(grupoId));
+  const actuales: TextoEnlazado[] = [];
+  for (const f of filas) {
+    const v = (f.assetGroupAsset ?? {}) as { resourceName?: string; fieldType?: string };
+    const t = (((f.asset ?? {}) as { textAsset?: { text?: string } }).textAsset ?? {}).text;
+    if (v.resourceName && v.fieldType && typeof t === "string") actuales.push({ enlace: v.resourceName, campo: v.fieldType, texto: t });
+  }
+  const { ruta, cuerpo, resumen } = armarMutacionGrupoDeRecursos(customerId, grupoId, actuales, cambios, { validateOnly });
+  if ((cuerpo.mutateOperations as unknown[]).length === 0) return { soloValidado: validateOnly, resourceName: null, resumen: ["sin cambios"] };
+  if (!validateOnly) registrarEscritura();
+  let respuesta: { mutateOperationResponses?: Array<Record<string, { resourceName?: string }>> };
+  try {
+    respuesta = await llamar<typeof respuesta>(cred, ruta, cuerpo, 60_000);
+  } finally {
+    if (!validateOnly) registrarEscritura();
+  }
+  const primero = Object.values(respuesta.mutateOperationResponses?.[0] ?? {})[0];
+  return { soloValidado: validateOnly, resourceName: primero?.resourceName ?? null, resumen };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Extensiones de campaña: enlaces de sitio y textos destacados               */
+/* -------------------------------------------------------------------------- */
+
+/** Los enlaces de sitio y textos destacados enlazados a campañas (con o sin actividad). */
+export const GAQL_EXTENSIONES = [
+  "SELECT campaign.id, campaign_asset.resource_name, campaign_asset.field_type, campaign_asset.status,",
+  "asset.id, asset.final_urls, asset.sitelink_asset.link_text, asset.sitelink_asset.description1,",
+  "asset.sitelink_asset.description2, asset.callout_asset.callout_text",
+  "FROM campaign_asset WHERE campaign_asset.field_type IN ('SITELINK', 'CALLOUT') AND campaign_asset.status != 'REMOVED'",
+].join(" ");
+
+export type EnlaceDeSitio = { texto: string; url: string; descripcion1: string; descripcion2: string };
+/** Lo que debe quedar: las listas completas. Un campo ausente no se toca. */
+export type CambiosExtensiones = { sitelinks?: EnlaceDeSitio[]; destacados?: string[] };
+/** Una extensión que ya está enlazada a la campaña (lo que hay hoy en Google). */
+export type ExtensionActual = { enlace: string; tipo: "SITELINK" | "CALLOUT"; texto: string; url: string; descripcion1: string; descripcion2: string };
+
+export const LIMITES_EXTENSIONES = { maxPorTipo: 20, textoEnlace: 25, descripcion: 35, destacado: 25 } as const;
+
+export function validarCambiosExtensiones(c: CambiosExtensiones): string[] {
+  const p: string[] = [];
+  const L = LIMITES_EXTENSIONES;
+  if (c.sitelinks) {
+    if (c.sitelinks.length > L.maxPorTipo) p.push(`Una campaña admite hasta ${L.maxPorTipo} enlaces de sitio (hay ${c.sitelinks.length}).`);
+    for (const e of c.sitelinks) {
+      if (!e.texto.trim() || e.texto.trim().length > L.textoEnlace) p.push(`El enlace «${e.texto.trim() || "sin texto"}» debe tener entre 1 y ${L.textoEnlace} caracteres.`);
+      if (e.descripcion1.length > L.descripcion || e.descripcion2.length > L.descripcion) p.push(`Las descripciones del enlace «${e.texto.trim()}» admiten hasta ${L.descripcion} caracteres.`);
+      if (Boolean(e.descripcion1.trim()) !== Boolean(e.descripcion2.trim())) p.push(`El enlace «${e.texto.trim()}» necesita las dos descripciones o ninguna: Google no admite solo una.`);
+      if (!/^https?:\/\/[^\s]+$/i.test(e.url.trim())) p.push(`El enlace «${e.texto.trim()}» necesita una URL que empiece con http:// o https://.`);
+    }
+    const claves = c.sitelinks.map((e) => `${e.texto.trim().toLowerCase()}|${e.url.trim().toLowerCase()}`);
+    if (new Set(claves).size !== claves.length) p.push("Hay enlaces de sitio repetidos (mismo texto y misma URL).");
+  }
+  if (c.destacados) {
+    if (c.destacados.length > L.maxPorTipo) p.push(`Una campaña admite hasta ${L.maxPorTipo} textos destacados (hay ${c.destacados.length}).`);
+    const limpios = c.destacados.map((x) => x.trim());
+    if (limpios.some((x) => !x || x.length > L.destacado)) p.push(`Cada texto destacado debe tener entre 1 y ${L.destacado} caracteres.`);
+    if (new Set(limpios.map((x) => x.toLowerCase())).size !== limpios.length) p.push("Hay textos destacados repetidos.");
+  }
+  return p;
+}
+
+const claveDeEnlace = (e: { texto: string; url: string; descripcion1: string; descripcion2: string }) =>
+  [e.texto, e.url, e.descripcion1, e.descripcion2].map((x) => x.trim().toLowerCase()).join("|");
+
+/** Crea y enlaza lo nuevo; desenlaza lo que sobra. Lo que no cambia ni se toca. */
+export function armarMutacionExtensiones(
+  customerId: string,
+  campaignId: string,
+  actuales: ExtensionActual[],
+  cambios: CambiosExtensiones,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): { ruta: string; cuerpo: Record<string, unknown>; resumen: string[] } {
+  const cliente = idNumerico(customerId);
+  const campana = `customers/${cliente}/campaigns/${idNumerico(campaignId)}`;
+  const ops: Array<Record<string, unknown>> = [];
+  const resumen: string[] = [];
+  let temporal = -1;
+  const crear = (asset: Record<string, unknown>, campo: "SITELINK" | "CALLOUT") => {
+    const nombre = `customers/${cliente}/assets/${temporal}`;
+    temporal -= 1;
+    ops.push({ assetOperation: { create: { resourceName: nombre, ...asset } } });
+    ops.push({ campaignAssetOperation: { create: { campaign: campana, asset: nombre, fieldType: campo } } });
+  };
+
+  if (cambios.sitelinks) {
+    const hoy = actuales.filter((a) => a.tipo === "SITELINK");
+    const hoyClaves = new Set(hoy.map(claveDeEnlace));
+    const quedan = cambios.sitelinks.map((e) => ({ texto: e.texto.trim(), url: e.url.trim(), descripcion1: e.descripcion1.trim(), descripcion2: e.descripcion2.trim() }));
+    const quedanClaves = new Set(quedan.map(claveDeEnlace));
+    const nuevos = quedan.filter((e) => !hoyClaves.has(claveDeEnlace(e)));
+    const sobran = hoy.filter((a) => !quedanClaves.has(claveDeEnlace(a)));
+    for (const e of nuevos) {
+      crear({ finalUrls: [e.url], sitelinkAsset: { linkText: e.texto, ...(e.descripcion1 ? { description1: e.descripcion1 } : {}), ...(e.descripcion2 ? { description2: e.descripcion2 } : {}) } }, "SITELINK");
+    }
+    for (const a of sobran) ops.push({ campaignAssetOperation: { remove: a.enlace } });
+    if (nuevos.length > 0 || sobran.length > 0) resumen.push(`enlaces de sitio: +${nuevos.length} −${sobran.length}`);
+  }
+  if (cambios.destacados) {
+    const hoy = actuales.filter((a) => a.tipo === "CALLOUT");
+    const hoyTextos = new Set(hoy.map((a) => a.texto.trim().toLowerCase()));
+    const quedan = cambios.destacados.map((x) => x.trim());
+    const quedanTextos = new Set(quedan.map((x) => x.toLowerCase()));
+    const nuevos = quedan.filter((x) => !hoyTextos.has(x.toLowerCase()));
+    const sobran = hoy.filter((a) => !quedanTextos.has(a.texto.trim().toLowerCase()));
+    for (const t of nuevos) crear({ calloutAsset: { calloutText: t } }, "CALLOUT");
+    for (const a of sobran) ops.push({ campaignAssetOperation: { remove: a.enlace } });
+    if (nuevos.length > 0 || sobran.length > 0) resumen.push(`textos destacados: +${nuevos.length} −${sobran.length}`);
+  }
+  return { ruta: `customers/${cliente}/googleAds:mutate`, cuerpo: { mutateOperations: ops, validateOnly, partialFailure: false }, resumen };
+}
+
+/** Las filas de `GAQL_EXTENSIONES` de UNA campaña → extensiones actuales. */
+export function extensionesActualesDeFilas(filas: Array<Record<string, unknown>>, campaignId: string): ExtensionActual[] {
+  const salida: ExtensionActual[] = [];
+  for (const f of filas) {
+    const camp = ((f.campaign ?? {}) as { id?: string | number }).id;
+    if (String(camp ?? "") !== String(campaignId)) continue;
+    const v = (f.campaignAsset ?? {}) as { resourceName?: string; fieldType?: string };
+    const asset = (f.asset ?? {}) as { finalUrls?: string[]; sitelinkAsset?: { linkText?: string; description1?: string; description2?: string }; calloutAsset?: { calloutText?: string } };
+    if (!v.resourceName) continue;
+    if (v.fieldType === "SITELINK" && asset.sitelinkAsset?.linkText) {
+      salida.push({ enlace: v.resourceName, tipo: "SITELINK", texto: asset.sitelinkAsset.linkText, url: asset.finalUrls?.[0] ?? "", descripcion1: asset.sitelinkAsset.description1 ?? "", descripcion2: asset.sitelinkAsset.description2 ?? "" });
+    } else if (v.fieldType === "CALLOUT" && asset.calloutAsset?.calloutText) {
+      salida.push({ enlace: v.resourceName, tipo: "CALLOUT", texto: asset.calloutAsset.calloutText, url: "", descripcion1: "", descripcion2: "" });
+    }
+  }
+  return salida;
+}
+
+export async function actualizarExtensionesCampana(
+  cred: CredencialesGoogle,
+  customerId: string,
+  campaignId: string,
+  cambios: CambiosExtensiones,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): Promise<ResultadoMutacion & { resumen: string[] }> {
+  const problemas = validarCambiosExtensiones(cambios);
+  if (problemas.length > 0) throw new GoogleAdsNativoError(problemas.join(" "), 400);
+  const filas = await consultarGaql(cred, customerId, GAQL_EXTENSIONES);
+  const actuales = extensionesActualesDeFilas(filas, campaignId);
+  const { ruta, cuerpo, resumen } = armarMutacionExtensiones(customerId, campaignId, actuales, cambios, { validateOnly });
+  if ((cuerpo.mutateOperations as unknown[]).length === 0) return { soloValidado: validateOnly, resourceName: null, resumen: ["sin cambios"] };
+  if (!validateOnly) registrarEscritura();
+  let respuesta: { mutateOperationResponses?: Array<Record<string, { resourceName?: string }>> };
+  try {
+    respuesta = await llamar<typeof respuesta>(cred, ruta, cuerpo, 60_000);
+  } finally {
+    if (!validateOnly) registrarEscritura();
+  }
+  const primero = Object.values(respuesta.mutateOperationResponses?.[0] ?? {})[0];
+  return { soloValidado: validateOnly, resourceName: primero?.resourceName ?? null, resumen };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1304,14 +1699,18 @@ export async function ultimoAnuncioGooglePorCampana(cred: CredencialesGoogle, cu
   const filas = await consultarGaql(
     cred,
     customerId,
-    `SELECT change_event.change_date_time, change_event.campaign FROM change_event
+    `SELECT change_event.change_date_time, change_event.campaign, change_event.change_resource_type, change_event.resource_change_operation, change_event.changed_fields FROM change_event
      WHERE change_event.change_date_time >= '${formato(desde)}' AND change_event.change_date_time <= '${formato(ahora)}'
-       AND change_event.change_resource_type = 'AD_GROUP_AD' AND change_event.resource_change_operation = 'CREATE'
+       AND change_event.change_resource_type IN ('AD_GROUP_AD', 'AD') AND change_event.resource_change_operation IN ('CREATE', 'UPDATE')
      ORDER BY change_event.change_date_time DESC LIMIT 10000`,
   );
   const salida = new Map<string, number>();
   for (const f of filas) {
-    const ev = (f.changeEvent ?? {}) as { changeDateTime?: string; campaign?: string };
+    const ev = (f.changeEvent ?? {}) as { changeDateTime?: string; campaign?: string; changeResourceType?: string; resourceChangeOperation?: string; changedFields?: unknown };
+    // Cuenta un anuncio nuevo o un cambio del contenido de uno existente (titulares, descripciones, URL, rutas); pausar o activar no.
+    const campos = JSON.stringify(ev.changedFields ?? "");
+    const esContenido = ev.resourceChangeOperation === "CREATE" || /responsive_search_ad|responsiveSearchAd|final_urls|finalUrls|responsive_display_ad|responsiveDisplayAd/i.test(campos);
+    if (!esContenido) continue;
     const id = /campaigns\/(\d+)/.exec(ev.campaign ?? "")?.[1];
     const t = ev.changeDateTime ? Date.parse(ev.changeDateTime.replace(" ", "T") + "Z") : NaN;
     if (id && Number.isFinite(t) && t > (salida.get(id) ?? 0)) salida.set(id, t);

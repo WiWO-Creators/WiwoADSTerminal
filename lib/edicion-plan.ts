@@ -16,8 +16,10 @@
  * contenido de un anuncio de búsqueda de Google).
  */
 import { esCta } from "./cta";
+import { horarioParaMeta, problemasDeHorario, textoDeHorario, type TramoDeHorario } from "./horario-meta-pura";
+import { FORMATOS_META, formatosDeSegmentacion, META_SURFACES, POSICIONES_META, posicionesInvalidas, REDES_CON_POSICIONES, type FormatoMeta, type RedConPosiciones } from "./formatos-meta-pura";
 import { formatearPalabraClave, parsearPalabraClave, problemaDePalabraClave } from "./palabras-clave";
-import { validarCambiosCampana, validarCambiosRsa, type CambiosCampanaGoogle, type CambiosRsa } from "./google-ads-nativo";
+import { validarCambiosCampana, validarCambiosExtensiones, validarCambiosGrupoDeRecursos, validarCambiosRsa, type CambiosCampanaGoogle, type CambiosExtensiones, type CambiosGrupoDeRecursos, type CambiosRsa } from "./google-ads-nativo";
 import {
   type DetalleAnuncio,
   type DetalleCampana,
@@ -33,6 +35,8 @@ export type CambiosEdicion = {
   pausar?: boolean;
   /** true: volver a activar la entidad (por ejemplo, una campaña que quedó apagada). */
   activar?: boolean;
+  /** true: ELIMINAR la entidad (irreversible). Un Creator lo propone y lo aprueba un Lead o superior. Se pide solo. */
+  eliminar?: boolean;
   presupuesto?: { tipo: "daily" | "lifetime"; monto: number };
   /** Meta: puja del conjunto. Google: CPC máximo del grupo. En la moneda de la cuenta. */
   puja?: number;
@@ -78,6 +82,12 @@ export type CambiosEdicion = {
   atribucion?: "default" | "click_1d" | "click_7d" | "click_1d_view_1d";
   /** Meta (conjunto): redes donde se muestra. Vacío = automáticas. */
   plataformas?: Array<"facebook" | "instagram" | "audience_network" | "messenger">;
+  /** Meta (conjunto): dónde se muestra dentro de Facebook e Instagram (Feed, Historias, Reels). Vacío = automáticos. Exige haber elegido las redes. */
+  formatos?: FormatoMeta[];
+  /** Meta (conjunto): horario de entrega por días y horas. Vacío = todo el día. Meta lo admite solo con presupuesto TOTAL del conjunto y fecha de término. */
+  horario?: TramoDeHorario[];
+  /** Meta (conjunto): TODAS las ubicaciones, por red y con su valor de API (por ejemplo `instagram: ["stream", "reels", "explore"]`). Lista vacía = automáticas en esa red. La red debe estar elegida. */
+  posiciones?: Partial<Record<RedConPosiciones, string[]>>;
   edadMin?: number;
   edadMax?: number;
   paises?: string[];
@@ -100,6 +110,10 @@ export type CambiosEdicion = {
     /** Qué hacer con cada palabra clave existente, por su id de criterio. */
     acciones?: Record<string, "quitar" | "pausar" | "activar">;
   };
+  /** Google (campaña): enlaces de sitio y textos destacados. Las listas son las que deben quedar. */
+  extensiones?: CambiosExtensiones;
+  /** Google Performance Max (campaña): cambia los textos y las URL de UN grupo de recursos. Las listas son las que deben quedar. */
+  grupoDeRecursos?: { id: string } & CambiosGrupoDeRecursos;
   /** Google (anuncio de búsqueda responsivo). */
   titulares?: Array<{ texto: string; fijado?: string | null }>;
   descripciones?: Array<{ texto: string; fijado?: string | null }>;
@@ -215,6 +229,11 @@ export function planEdicion(
   const problema = (campo: string, mensaje: string, bloqueante = true) =>
     plan.problemas.push({ campo, mensaje, bloqueante });
 
+  if (cambios.eliminar === true) {
+    planDeEliminacion(plan, provider, antes, cambios, problema);
+    return plan;
+  }
+
   if (provider === "google") planGoogle(plan, antes, cambios, currency, problema);
   else if (provider === "meta") planMeta(plan, antes, cambios, currency, problema);
   else if (provider === "linkedin") planLinkedin(plan, antes, cambios, currency, problema, nativaLinkedin);
@@ -265,6 +284,39 @@ export function planEdicion(
 }
 
 type Reporte = (campo: string, mensaje: string, bloqueante?: boolean) => void;
+
+/** Eliminar: irreversible, se pide solo y lo aprueba un Lead o superior. LinkedIn no lo permite desde aquí. */
+function planDeEliminacion(plan: PlanEdicion, provider: Platform, antes: AntesDeEdicion, cambios: CambiosEdicion, problema: Reporte) {
+  const otros = Object.entries(cambios).filter(([k, v]) => k !== "eliminar" && v !== undefined);
+  if (otros.length > 0) {
+    problema("eliminar", "Eliminar se pide solo, sin otros cambios a la vez.");
+    return;
+  }
+  const entidad = antes.entidad as { id: string; estado?: string | null; conjuntoId?: string | null };
+  const estado = String(entidad.estado ?? "").toUpperCase();
+  if (["DELETED", "REMOVED"].includes(estado)) {
+    problema("eliminar", "Ya está eliminado.");
+    return;
+  }
+  const que = antes.nivel === "campana" ? "la campaña" : antes.nivel === "conjunto" ? (provider === "google" ? "el grupo de anuncios" : "el conjunto") : "el anuncio";
+  if (provider === "meta") {
+    plan.pasos.push({ via: "nativa", platform: "meta", action: "meta:eliminar", label: `Eliminar ${que} en Meta`, params: { id: entidad.id, nivel: antes.nivel }, campos: ["eliminar"] });
+  } else if (provider === "google") {
+    plan.pasos.push({
+      via: "nativa", platform: "google", action: "ads:eliminar", label: `Eliminar ${que} en Google Ads`,
+      params: { id: entidad.id, nivel: antes.nivel, ad_group_id: antes.nivel === "anuncio" ? (entidad.conjuntoId ?? null) : null }, campos: ["eliminar"],
+    });
+  } else {
+    problema("eliminar", "LinkedIn no permite eliminar desde WiWO.ADS: se archiva o se elimina en Campaign Manager. Aquí solo se puede pausar.");
+    return;
+  }
+  plan.diff.push({ campo: "eliminar", etiqueta: "Eliminar", antes: "Existe", despues: "Eliminado para siempre" });
+  problema(
+    "eliminar",
+    `Eliminar no se puede deshacer${antes.nivel === "anuncio" ? "." : antes.nivel === "conjunto" ? ": también se eliminan sus anuncios." : ": también se eliminan sus conjuntos y anuncios."} Si solo quieres detener la entrega, pausa.`,
+    false,
+  );
+}
 
 /** Campo de `CambiosRsa` → el mismo campo en `CambiosEdicion` (solo cambia `urlsFinales`). */
 function campoDeRsa(clave: keyof CambiosRsa): keyof CambiosEdicion {
@@ -319,6 +371,9 @@ function planGoogle(
       nativo.inicio = c.inicio;
       campos.push("inicio");
       plan.diff.push({ campo: "inicio", etiqueta: "Inicio", antes: vacio(e.inicio), despues: c.inicio });
+      if (c.inicio && c.inicio < new Date().toISOString().slice(0, 10) && !(e.inicio && e.inicio <= new Date().toISOString().slice(0, 10))) {
+        problema("inicio", "La fecha de inicio ya pasó: elige hoy o una fecha futura.");
+      }
       if (e.inicio && e.inicio <= new Date().toISOString().slice(0, 10)) {
         problema("inicio", "Esta campaña ya empezó: Google no deja cambiar su fecha de inicio.", true);
       }
@@ -327,6 +382,7 @@ function planGoogle(
       nativo.fin = c.fin;
       campos.push("fin");
       plan.diff.push({ campo: "fin", etiqueta: "Fin", antes: e.fin ?? "Sin fin", despues: c.fin || "Sin fin" });
+      if (c.fin && c.fin < new Date().toISOString().slice(0, 10)) problema("fin", "La fecha de término ya pasó: elige hoy o una fecha futura.");
     }
     if (c.redes && e.redes && (c.redes.busqueda !== e.redes.busqueda || c.redes.asociadas !== e.redes.asociadas || c.redes.display !== e.redes.display)) {
       // Verificado con `validateOnly` contra Google: en una campaña de Display las redes de búsqueda no se pueden tocar.
@@ -369,6 +425,73 @@ function planGoogle(
       nativo.plantillaSeguimiento = c.plantillaSeguimiento;
       campos.push("plantillaSeguimiento");
       plan.diff.push({ campo: "plantillaSeguimiento", etiqueta: "Plantilla de seguimiento", antes: vacio(e.urlSeguimiento), despues: vacio(c.plantillaSeguimiento) });
+    }
+    if (c.extensiones !== undefined) {
+      if (e.objetivo !== "SEARCH") {
+        problema("extensiones", "Las extensiones de enlaces y textos destacados solo se editan en campañas de Búsqueda.");
+      } else if (e.extensiones === undefined) {
+        problema("extensiones", "No se pudieron leer las extensiones de esta campaña: conecta tu cuenta de Google en Integraciones.");
+      } else {
+        const mensajes = validarCambiosExtensiones(c.extensiones);
+        for (const m of mensajes) problema("extensiones", m);
+        const clave = (x: { texto: string; url: string; descripcion1: string; descripcion2: string }) => [x.texto, x.url, x.descripcion1, x.descripcion2].map((v) => v.trim().toLowerCase()).join("|");
+        const antesEnlaces = e.extensiones.sitelinks.map((x) => `${x.texto} → ${x.url}`);
+        const ahoraEnlaces = c.extensiones.sitelinks?.map((x) => `${x.texto.trim()} → ${x.url.trim()}`);
+        const hoyClaves = e.extensiones.sitelinks.map(clave).sort().join("\n");
+        const quedanClaves = c.extensiones.sitelinks ? c.extensiones.sitelinks.map(clave).sort().join("\n") : hoyClaves;
+        if (c.extensiones.sitelinks && hoyClaves !== quedanClaves) {
+          plan.diff.push({ campo: "sitelinks", etiqueta: "Enlaces de sitio", antes: antesEnlaces.join(" | ") || "—", despues: (ahoraEnlaces ?? []).join(" | ") || "Ninguno" });
+        }
+        const hoyDest = e.extensiones.destacados.map((x) => x.trim().toLowerCase()).sort().join("\n");
+        const quedanDest = c.extensiones.destacados ? c.extensiones.destacados.map((x) => x.trim().toLowerCase()).sort().join("\n") : hoyDest;
+        if (c.extensiones.destacados && hoyDest !== quedanDest) {
+          plan.diff.push({ campo: "destacados", etiqueta: "Textos destacados", antes: e.extensiones.destacados.join(" | ") || "—", despues: c.extensiones.destacados.map((x) => x.trim()).join(" | ") || "Ninguno" });
+        }
+        if (mensajes.length === 0 && (hoyClaves !== quedanClaves || hoyDest !== quedanDest)) {
+          plan.pasos.push({
+            via: "nativa", platform: "google", action: "ads:update_campaign_assets",
+            label: "Editar los enlaces de sitio y textos destacados de la campaña",
+            params: { campaign_id: e.id, cambios: c.extensiones }, campos: ["extensiones"],
+          });
+        }
+      }
+    }
+    if (c.grupoDeRecursos !== undefined) {
+      const { id: grupoId, ...pedido } = c.grupoDeRecursos;
+      const grupo = (e.gruposDeRecursos ?? []).find((g) => g.id === grupoId);
+      if (e.objetivo !== "PERFORMANCE_MAX") {
+        problema("grupoDeRecursos", "Los grupos de recursos son solo de las campañas de Performance Max.");
+      } else if (e.gruposDeRecursos === undefined) {
+        problema("grupoDeRecursos", "No se pudieron leer los grupos de recursos: conecta tu cuenta de Google en Integraciones.");
+      } else if (!grupo) {
+        problema("grupoDeRecursos", "Ese grupo de recursos no es de esta campaña. Usa el id que devuelve la consulta de la campaña.");
+      } else {
+        const mensajes = validarCambiosGrupoDeRecursos(pedido);
+        for (const m of mensajes) problema("grupoDeRecursos", m);
+        const textosDe = (campo: string) => grupo.recursos.filter((r) => r.campo === campo && r.texto).map((r) => r.texto as string);
+        const comparar = (clave: "titulares" | "titulosLargos" | "descripciones", campo: string, etiqueta: string) => {
+          const nuevos = pedido[clave];
+          if (!nuevos) return;
+          const hoy = textosDe(campo);
+          if (nuevos.map((t) => t.trim().toLowerCase()).sort().join("|") === hoy.map((t) => t.trim().toLowerCase()).sort().join("|")) return;
+          plan.diff.push({ campo: clave, etiqueta: `${etiqueta} (grupo «${grupo.nombre ?? grupo.id}»)`, antes: hoy.join(" | ") || "—", despues: nuevos.map((t) => t.trim()).join(" | ") });
+        };
+        comparar("titulares", "HEADLINE", "Titulares");
+        comparar("titulosLargos", "LONG_HEADLINE", "Títulos largos");
+        comparar("descripciones", "DESCRIPTION", "Descripciones");
+        if (pedido.urlsFinales && pedido.urlsFinales.join("\n") !== grupo.urlsFinales.join("\n")) {
+          plan.diff.push({ campo: "urlsFinales", etiqueta: "URL final del grupo", antes: vacio(grupo.urlsFinales.join(", ")), despues: pedido.urlsFinales.join(", ") });
+        }
+        if (pedido.path1 !== undefined && pedido.path1 !== (grupo.path1 ?? "")) plan.diff.push({ campo: "path1", etiqueta: "Ruta visible 1", antes: vacio(grupo.path1), despues: vacio(pedido.path1) });
+        if (pedido.path2 !== undefined && pedido.path2 !== (grupo.path2 ?? "")) plan.diff.push({ campo: "path2", etiqueta: "Ruta visible 2", antes: vacio(grupo.path2), despues: vacio(pedido.path2) });
+        if (mensajes.length === 0 && plan.diff.some((d) => ["titulares", "titulosLargos", "descripciones", "urlsFinales", "path1", "path2"].includes(d.campo))) {
+          plan.pasos.push({
+            via: "nativa", platform: "google", action: "ads:update_asset_group",
+            label: "Editar los textos y la URL del grupo de recursos (Performance Max)",
+            params: { asset_group_id: grupoId, cambios: pedido }, campos: ["grupoDeRecursos"],
+          });
+        }
+      }
     }
     if (campos.length > 0) {
       for (const mensaje of validarCambiosCampana(nativo)) problema("campana", mensaje);
@@ -726,6 +849,24 @@ function planMeta(
       }
     }
 
+    if (c.horario !== undefined) {
+      const malos = problemasDeHorario(c.horario);
+      if (malos.length > 0) {
+        for (const m of malos) problema("horario", m);
+      } else if (c.horario.length > 0 && (e.presupuesto.total === null || e.presupuesto.enLaCampana)) {
+        problema("horario", "Meta solo permite horario de entrega cuando el conjunto tiene presupuesto TOTAL (no diario) y fecha de término. Cambia el presupuesto a total primero.");
+      } else {
+        campos.extra_params = {
+          ...((campos.extra_params as Record<string, unknown> | undefined) ?? {}),
+          ...(c.horario.length === 0
+            ? { pacing_type: ["standard"], adset_schedule: [] } // Meta rechaza quitar solo el tipo de ritmo: hay que vaciar también las franjas (verificado en una cuenta real)
+            : { pacing_type: ["day_parting"], adset_schedule: horarioParaMeta(c.horario) }),
+        };
+        camposCubiertos.push("horario");
+        plan.diff.push({ campo: "horario", etiqueta: "Horario de entrega", antes: "—", despues: textoDeHorario(c.horario) });
+      }
+    }
+
     if (c.atribucion !== undefined) {
       const ventanas = {
         default: { etiqueta: "Predeterminada de Meta", spec: [{ event_type: "CLICK_THROUGH", window_days: 7 }, { event_type: "VIEW_THROUGH", window_days: 1 }] },
@@ -736,7 +877,7 @@ function planMeta(
       const v = ventanas[c.atribucion];
       if (!v) problema("atribucion", "Ventana de atribución no reconocida.");
       else {
-        campos.extra_params = { attribution_spec: v.spec };
+        campos.extra_params = { ...((campos.extra_params as Record<string, unknown> | undefined) ?? {}), attribution_spec: v.spec };
         camposCubiertos.push("atribucion");
         plan.diff.push({ campo: "atribucion", etiqueta: "Ventana de atribución", antes: "—", despues: v.etiqueta });
         problema("atribucion", "Meta solo admite algunas ventanas según lo que optimiza el conjunto (con tráfico, solo 1 día tras el clic): si no es compatible, rechazará el cambio.", false);
@@ -749,7 +890,7 @@ function planMeta(
     // (audiencias, posiciones, Advantage+, exclusiones…).
     const pideSegmentacion =
       c.edadMin !== undefined || c.edadMax !== undefined || c.paises !== undefined ||
-      c.generos !== undefined || c.plataformas !== undefined ||
+      c.generos !== undefined || c.plataformas !== undefined || c.formatos !== undefined || c.posiciones !== undefined ||
       c.interesesIds !== undefined || c.audienciasIncluir !== undefined || c.audienciasExcluir !== undefined;
     if (pideSegmentacion) {
       const base = e.segmentacionCruda;
@@ -822,6 +963,54 @@ function planMeta(
             });
           }
         }
+        if (c.formatos !== undefined) {
+          const redes = ((nuevo.publisher_platforms as string[] | undefined) ?? []).filter((r): r is "facebook" | "instagram" => r === "facebook" || r === "instagram");
+          const quedan = FORMATOS_META.filter((f) => c.formatos?.includes(f));
+          if (c.formatos.some((f) => !FORMATOS_META.includes(f))) {
+            problema("formatos", "Formato no reconocido: usa feed, historias o reels.");
+          } else if (redes.length === 0) {
+            problema("formatos", "Elige primero las redes (Facebook o Instagram): con redes automáticas Meta no admite formatos sueltos.");
+          } else {
+            const actuales = formatosDeSegmentacion(base);
+            if (quedan.join(",") !== actuales.join(",")) {
+              for (const red of redes) {
+                if (quedan.length === 0) delete nuevo[`${red}_positions`];
+                else nuevo[`${red}_positions`] = quedan.map((f) => META_SURFACES[f][red]);
+              }
+              tocada = true;
+              const nombres = (l: FormatoMeta[]) => l.map((f) => META_SURFACES[f].label).join(", ");
+              plan.diff.push({ campo: "formatos", etiqueta: "Formatos", antes: nombres(actuales) || "Automáticos", despues: nombres(quedan) || "Automáticos" });
+            }
+          }
+        }
+        if (c.posiciones !== undefined) {
+          for (const [red, crudas] of Object.entries(c.posiciones) as Array<[RedConPosiciones, string[] | undefined]>) {
+            if (!crudas) continue;
+            if (!REDES_CON_POSICIONES.includes(red)) {
+              problema("posiciones", `Red no reconocida: ${red}.`);
+              continue;
+            }
+            const pedidas = [...new Set(crudas)];
+            const malas = posicionesInvalidas(red, pedidas);
+            if (malas.length > 0) {
+              problema("posiciones", `Ubicación no válida en ${red}: ${malas.join(", ")}.`);
+              continue;
+            }
+            const redes = (nuevo.publisher_platforms as string[] | undefined) ?? [];
+            if (pedidas.length > 0 && !redes.includes(red)) {
+              problema("posiciones", `Elige primero la red ${red}: con redes automáticas o sin ella, Meta no admite ubicaciones sueltas.`);
+              continue;
+            }
+            const clave = `${red}_positions`;
+            const actuales = Array.isArray(nuevo[clave]) ? (nuevo[clave] as string[]) : [];
+            if (pedidas.slice().sort().join(",") === actuales.slice().sort().join(",")) continue;
+            if (pedidas.length === 0) delete nuevo[clave];
+            else nuevo[clave] = pedidas;
+            tocada = true;
+            const nombres = (l: string[]) => l.map((v) => POSICIONES_META[red].find((p) => p.valor === v)?.label ?? v).join(", ");
+            plan.diff.push({ campo: `posiciones_${red}`, etiqueta: `Ubicaciones de ${red}`, antes: nombres(actuales) || "Automáticas", despues: nombres(pedidas) || "Automáticas" });
+          }
+        }
         const idsDe = (lista: unknown): string[] => (Array.isArray(lista) ? lista : []).map((x) => String((x as { id?: unknown }).id ?? "")).filter(Boolean);
         const nombreDe = (lista: unknown, id: string): string => {
           const f = (Array.isArray(lista) ? lista : []).find((x) => String((x as { id?: unknown }).id) === id) as { name?: string } | undefined;
@@ -869,7 +1058,7 @@ function planMeta(
         if (tocada) {
           campos.targeting = nuevo;
           camposCubiertos.push(
-            ...(["edadMin", "edadMax", "paises", "generos", "plataformas", "interesesIds", "audienciasIncluir", "audienciasExcluir"] as const).filter((k) => c[k] !== undefined),
+            ...(["edadMin", "edadMax", "paises", "generos", "plataformas", "formatos", "posiciones", "interesesIds", "audienciasIncluir", "audienciasExcluir"] as const).filter((k) => c[k] !== undefined),
           );
         }
       }

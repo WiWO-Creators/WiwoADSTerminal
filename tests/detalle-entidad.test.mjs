@@ -62,7 +62,7 @@ test("Google: el anuncio de búsqueda responsivo es editable por la vía nativa;
   assert.equal(rsa.motivo, null);
   const video = detalleAnuncioGoogle(VIDEO).edicionDeContenido;
   assert.equal(video.editable, false);
-  assert.match(video.motivo, /VIDEO_RESPONSIVE_AD/);
+  assert.match(video.motivo, /anuncio de video.*no está añadida al sistema/);
 });
 
 test("Google: un anuncio de video no tiene titulares", () => {
@@ -316,7 +316,7 @@ test("GAQL: sin id no hay entidad, y un anuncio que no es RSA no tiene titulares
   assert.equal(detalleCampanaGaql({ campaign: {} }, "1"), null);
   const video = detalleAnuncioGaql({ adGroupAd: { ad: { id: "9", type: "VIDEO_RESPONSIVE_AD" } } }, "1");
   assert.deepEqual(video.contenido.titulares, []);
-  assert.match(video.edicionDeContenido.motivo, /VIDEO_RESPONSIVE_AD/);
+  assert.match(video.edicionDeContenido.motivo, /anuncio de video.*no está añadida al sistema/);
 });
 
 test("GAQL: la campaña convierte micros y no presenta un presupuesto ausente como cero", () => {

@@ -50,6 +50,15 @@ Leyenda de riesgo: 🔴 da acceso o permite actuar · 🟠 da acceso parcial o g
 
 Sin las dos primeras, la vía nativa queda apagada y LinkedIn sigue leyéndose por Windsor.
 
+## TikTok (preparado: todavía no hay código que las lea)
+
+| Variable | Qué hace | Dónde | Si se filtra |
+|---|---|---|---|
+| `TIKTOK_APP_ID` 🟢 | ID de la app «WiwoAds» de TikTok for Business (Marketing API). Aparece como «--» en el portal hasta que la aprueben. | futuro `lib/tiktok-nativo.ts` | Es público: sale en la URL de autorización. |
+| `TIKTOK_APP_SECRET` 🔴 | Secreto de esa app. Canjea el `auth_code` por el token del anunciante. | futuro `lib/tiktok-nativo.ts` | Permite **hacerse pasar por la app**. Regenerarlo en el portal de desarrolladores de TikTok. |
+
+Los tokens de anunciante de TikTok no vencen ni se renuevan: si se pierde uno, el anunciante debe cancelar y volver a autorizar. La URL de retorno registrada es `https://ads.wiwo.me/api/integrations/tiktok/callback`.
+
 ## Windsor
 
 | Variable | Qué hace | Dónde | Si se filtra |

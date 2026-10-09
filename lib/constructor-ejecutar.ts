@@ -6,6 +6,7 @@ import {
   type PlanStep,
 } from "@/lib/constructor";
 import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib/windsor";
+import { retirarPiezasMeta } from "@/lib/renovar-piezas";
 import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
 import { diferenciasConLoEsperado, planDeCampana, planDeGrupo, rutaDeEntidad, type DatosDeCampana } from "@/lib/linkedin-escritura-pura";
 import { enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
@@ -226,7 +227,7 @@ async function ejecutarPasoLinkedin(
     return {
       ok: false,
       error:
-        "Para crear en LinkedIn conecta tu cuenta de LinkedIn en Integraciones. En cuentas de clientes, además, la escritura debe estar habilitada (LINKEDIN_ESCRITURA_CLIENTES).",
+        "Para crear en LinkedIn hace falta la conexión de LinkedIn del equipo (un administrador la conecta una vez en Integraciones). En cuentas de clientes, además, la escritura debe estar habilitada (LINKEDIN_ESCRITURA_CLIENTES).",
       raw: null,
     };
   }
@@ -261,6 +262,13 @@ async function ejecutarPasoLinkedin(
   } catch (e) {
     return { ok: false, error: e instanceof ErrorDeLinkedin ? e.message : "No se pudo crear en LinkedIn.", raw: String(e) };
   }
+}
+
+/** Retira (pausa) un anuncio viejo de Meta con la conexión directa y lo lee de vuelta: solo es ok si Meta lo dejó pausado. */
+async function ejecutarPasoMeta(accion: string, params: Record<string, unknown>): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+  if (accion !== "meta:retirar_anuncio") return { ok: false, error: `Acción de Meta desconocida: ${accion}`, raw: null };
+  const [r] = await retirarPiezasMeta([{ id: String(params.ad_id ?? ""), nombre: String(params.nombre ?? params.ad_id ?? "") }]);
+  return { ok: r?.ok === true, error: r?.error ?? null, raw: r ?? null };
 }
 
 export async function ejecutarPasosDelPlan(
@@ -336,7 +344,9 @@ export async function ejecutarPasosDelPlan(
     const resultado =
       step.via === "nativa" && step.platform === "linkedin"
         ? await ejecutarPasoLinkedin(step.action, cuenta.externalId, params, credencialesLinkedin)
-        : step.via === "nativa"
+        : step.via === "nativa" && step.platform === "meta"
+          ? await ejecutarPasoMeta(step.action, params)
+          : step.via === "nativa"
           ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
           : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);
     realizados.push({

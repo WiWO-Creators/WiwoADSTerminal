@@ -1,3 +1,6 @@
+import { marcarContenidoRenovado } from "@/lib/contenido-renovado";
+import { paginaDeLaCuenta, paginaEInstagramDeLaCampana } from "@/lib/pagina-de-cuenta";
+import { retirarPiezasMeta } from "@/lib/renovar-piezas";
 /**
  * Solicitudes de publicación: guardado, aprobación y seguimiento. Las reglas puras (estados, mensajes) viven en
  * `solicitudes-pura.ts`.
@@ -170,6 +173,17 @@ export type ImpulsoDeInstagram = {
   nombre: string;
   /** La publicación es de Facebook (el anuncio se crea con la API directa, sin Windsor). */
   facebook?: boolean;
+  /** Instagram y Página que usa esa campaña (en clientes con varios países la ficha trae solo uno): mandan sobre los de la ficha. */
+  instagramId?: string;
+  paginaId?: string;
+  /** Para la auditoría: el link que pidieron, el texto y el formato de la publicación. */
+  enlace?: string;
+  texto?: string;
+  formato?: string;
+  /** Botón y destino del anuncio nuevo (WhatsApp o sitio web); sin esto el anuncio queda sin destino. */
+  destino?: { tipo: "whatsapp" | "web"; url?: string; cta?: string };
+  /** Renovar: anuncios viejos del mismo conjunto que se pausan al publicarse el nuevo, para no saturarlo. */
+  retirar?: Array<{ id: string; nombre: string }>;
   /** Regla propia que se crea sobre el anuncio al publicarse (copia la condición de una regla de Meta, que no se toca). */
   regla?: { nombre: string; reglaMetaId?: string; metrica: string; operador: string; umbral: number; periodo: string; accion: string; moneda: string | null };
 };
@@ -201,8 +215,8 @@ export async function crearSolicitudDeEdicion(
 ): Promise<Solicitud> {
   if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar cambios a revisión.", 403);
   const prep = await prepararEdicion({ actor, provider: e.provider as Platform, accountId: e.accountId, nivel: e.nivel, id: e.id, cambios: e.cambios });
-  const bloqueante = prep.plan.problemas.find((p) => p.bloqueante);
-  if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.mensaje}`, 422);
+  const bloqueantes = prep.plan.problemas.filter((p) => p.bloqueante);
+  if (bloqueantes.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${[...new Set(bloqueantes.map((p) => p.mensaje))].join(" · ")}`, 422);
   if (!hayAlgoQueAplicar(prep.plan)) throw new ErrorDeSolicitud("No hay ningún cambio que enviar.", 422);
   const cliente = (await listPortfolios()).find((p) => p.id === prep.portfolioId);
   if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
@@ -242,6 +256,8 @@ export type ContenidoNuevo = {
   adsetName: string;
   nombre: string;
   datos: DatosDeContenido;
+  /** Renovar: anuncios viejos del mismo conjunto que se pausan al publicarse lo nuevo. */
+  retirar?: Array<{ id: string; nombre: string }>;
 };
 
 /** Crea una solicitud de contenido nuevo (imágenes o carrusel) dentro de conjuntos existentes de Meta. */
@@ -259,8 +275,8 @@ export async function crearSolicitudDeContenido(actor: Actor, piezas: ContenidoN
     if (!duenio || duenio.id !== p.portfolioId) throw new ErrorDeSolicitud("Esa cuenta no pertenece a este cliente.", 403);
     if (!p.adsetId) throw new ErrorDeSolicitud("Falta el conjunto de destino.");
     const errores = validarContenido(p.datos);
-    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores[0]}`, 422);
-    if (!(cliente.accountPages[p.accountId] ?? cliente.pageId)) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
+    if (errores.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${errores.join(" · ")}`, 422);
+    if (!(await paginaDeLaCuenta(cliente, p.accountId))) throw new ErrorDeSolicitud("Este cliente no tiene una Página de Facebook asociada para esa cuenta.", 409);
   }
   const id = crypto.randomUUID();
   const titulo = piezas.length === 1 ? tituloDeContenido(piezas[0].datos) : `${piezas.length} piezas de contenido nuevo`;
@@ -284,7 +300,7 @@ export async function crearSolicitudDeInstagram(actor: Actor, impulsos: ImpulsoD
   if (!enAlcance(actor, primero.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
   const cliente = (await listPortfolios()).find((p) => p.id === primero.portfolioId);
   if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
-  if (!cliente.instagramId && impulsos.some((i) => !i.facebook)) throw new ErrorDeSolicitud("Este cliente no tiene su cuenta de Instagram declarada.", 409);
+  if (!cliente.instagramId && impulsos.some((i) => !i.facebook && !i.instagramId)) throw new ErrorDeSolicitud("Este cliente no tiene su cuenta de Instagram declarada.", 409);
   const indice = await accountIndex();
   for (const i of impulsos) {
     const duenio = indice.get(normalizeAccountId(i.accountId));
@@ -309,6 +325,10 @@ export async function crearSolicitud(actor: Actor, borradores: Array<Partial<Cam
   if (!puedeCrear(actor)) throw new ErrorDeSolicitud("Tu rol no puede enviar creaciones a revisión.", 403);
   if (borradores.length === 0 || borradores.length > 20) throw new ErrorDeSolicitud("Una solicitud lleva entre 1 y 20 piezas.");
 
+  // Un cliente que no existe se dice así, no como «no tiene ninguna cuenta».
+  for (const b of borradores) {
+    if (b.portfolioId && !(await listPortfolios()).some((p) => p.id === b.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no existe.", 404);
+  }
   const armados = [];
   for (const b of borradores) {
     try {
@@ -320,10 +340,8 @@ export async function crearSolicitud(actor: Actor, borradores: Array<Partial<Cam
   }
   const clienteId = armados[0].draft.portfolioId;
   if (armados.some((a) => a.draft.portfolioId !== clienteId)) throw new ErrorDeSolicitud("Todas las piezas deben ser del mismo cliente.");
-  for (const a of armados) {
-    const bloqueante = a.plan.issues.find((i) => i.blocking);
-    if (bloqueante) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${bloqueante.message}`, 422);
-  }
+  const faltas = [...new Set(armados.flatMap((a) => a.plan.issues.filter((i) => i.blocking).map((i) => i.message)))];
+  if (faltas.length > 0) throw new ErrorDeSolicitud(`Todavía no se puede enviar: ${faltas.join(" · ")}`, 422);
 
   const primero = armados[0].draft;
   const titulo = tituloDeSolicitud(primero, armados.length);
@@ -424,7 +442,9 @@ export async function listarSolicitudes(actor: Actor): Promise<{ porRevisar: Sol
     .prepare("SELECT * FROM solicitudes ORDER BY created_at DESC LIMIT 300")
     .all<Fila>();
   const filas = (results ?? []).filter((f) => puedeVer(actor, f));
-  const todas = filas.map((f) => aSolicitud(f, revisores, administradores));
+  // Ver directo en Meta Ads Manager o Google Ads: solo Directores y Administradores.
+  const verEnPlataforma = can(actor, "aprobar_presupuesto");
+  const todas = filas.map((f) => aSolicitud(f, revisores, administradores)).map((s) => (verEnPlataforma ? s : { ...s, enlaces: s.enlaces.filter((e) => !/^https:\/\/(adsmanager\.facebook\.com|business\.facebook\.com|ads\.google\.com)/i.test(e.url)) }));
   return {
     porRevisar: puedeRevisar(actor) ? todas.filter((s) => s.estado === "pendiente" && (!s.tocaPresupuesto || can(actor, "aprobar_presupuesto"))) : [],
     mias: todas.filter((s) => s.creador.email === actor.email),
@@ -484,9 +504,10 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const c = d as unknown as ContenidoNuevo;
       try {
         const cliente = (await listPortfolios()).find((p) => p.id === c.portfolioId);
-        const paginaId = cliente?.accountPages[c.accountId] ?? cliente?.pageId;
+        const deLaCampana = await paginaEInstagramDeLaCampana(c.campaignId);
+        const paginaId = (cliente ? await paginaDeLaCuenta(cliente, c.accountId) : null) ?? deLaCampana?.pageId ?? null;
         if (!paginaId) throw new Error("Este cliente no tiene una Página de Facebook asociada.");
-        const destinos = { paginaId, instagramUserId: cliente?.instagramId };
+        const destinos = { paginaId, instagramUserId: deLaCampana?.instagramId ?? cliente?.instagramId };
         const creativos =
           c.datos.formato === "carrusel"
             ? [{ nombre: c.nombre, creativo: creativoDeCarrusel(c.datos, destinos, c.nombre) }]
@@ -497,7 +518,13 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
         for (const pieza of creativos) {
           const r = await crearAnuncioConCreativo(c.accountId, { nombre: pieza.nombre, conjuntoId: c.adsetId, creativo: pieza.creativo });
           anuncios.push({ provider: "meta", accountId: c.accountId, id: r.anuncioId });
+          await marcarContenidoRenovado("meta", c.campaignId);
           pasosTotales.push({ platform: "meta", action: "ads:create_content", label: pieza.nombre, ok: true, error: null, raw: r } as PasoEjecutado);
+        }
+        if (c.retirar && c.retirar.length > 0) {
+          for (const r of await retirarPiezasMeta(c.retirar)) {
+            pasosTotales.push({ platform: "meta", action: "ads:retire_old", label: `Retirar (pausar) «${r.nombre}»`, ok: r.ok, error: r.error, raw: { id: r.id } } as PasoEjecutado);
+          }
         }
         await registrarAuditoria({
           categoria: "creacion",
@@ -509,7 +536,16 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           entidadTipo: "anuncio",
           entidadNombre: c.nombre,
           titulo: `Contenido aprobado por ${nombreDe(actor)}: ${tituloDeContenido(c.datos)} en «${c.adsetName}»`,
-          detalle: { solicitudId: id, formato: c.datos.formato, imagenes: c.datos.imagenes.length, destino: c.datos.enlace, mensaje: c.datos.mensaje },
+          detalle: {
+            solicitudId: id,
+            pidio: f.creador_nombre ?? f.creador_email,
+            reviso: nombreDe(actor),
+            formato: c.datos.formato,
+            imagenes: c.datos.imagenes.map((im) => im.url).join("\n"),
+            destino: `Conjunto «${c.adsetName}» (${c.adsetId}) · campaña «${c.campaignName}» (${c.campaignId}) · cuenta Meta ${c.accountId} · enlace del anuncio: ${c.datos.enlace}`,
+            mensaje: c.datos.mensaje,
+            enlaces: [{ etiqueta: "Revisar la campaña en Meta", url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}` }],
+          },
         });
         const url = `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}`;
         if (!enlaces.some((e) => e.url === url)) enlaces.push({ etiqueta: "Revisar la campaña en Meta", url });
@@ -573,16 +609,23 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const ig = d as unknown as ImpulsoDeInstagram;
       try {
         const cliente = (await listPortfolios()).find((p) => p.id === ig.portfolioId);
-        if (!cliente?.instagramId && !ig.facebook) throw new Error("Este cliente no tiene su cuenta de Instagram declarada.");
+        const instagramUserId = ig.instagramId ?? cliente?.instagramId;
+        if (!instagramUserId && !ig.facebook) throw new Error("Este cliente no tiene su cuenta de Instagram declarada.");
         const r = await crearAnuncioDesdeInstagram(ig.accountId, {
           nombre: ig.nombre,
           conjuntoId: ig.adsetId,
-          instagramUserId: cliente?.instagramId,
+          instagramUserId,
           mediaId: ig.mediaId,
           facebook: ig.facebook,
-          paginaId: cliente?.accountPages[ig.accountId] ?? cliente?.pageId,
+          destino: ig.destino ?? null,
+          paginaId: ig.paginaId ?? (cliente ? ((await paginaDeLaCuenta(cliente, ig.accountId)) ?? undefined) : undefined),
         });
         anuncios.push({ provider: "meta", accountId: ig.accountId, id: r.anuncioId });
+        await marcarContenidoRenovado("meta", ig.campaignId);
+        const retirados = ig.retirar && ig.retirar.length > 0 ? await retirarPiezasMeta(ig.retirar) : [];
+        for (const x of retirados) {
+          pasosTotales.push({ platform: "meta", action: "ads:retire_old", label: `Retirar (pausar) «${x.nombre}»`, ok: x.ok, error: x.error, raw: { id: x.id } } as PasoEjecutado);
+        }
         await registrarAuditoria({
           categoria: "creacion",
           accion: "publicada",
@@ -594,7 +637,24 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           entidadId: r.anuncioId,
           entidadNombre: ig.nombre,
           titulo: `Impulso aprobado por ${nombreDe(actor)}: «${ig.nombre}» en «${ig.adsetName}»`,
-          detalle: { solicitudId: id, conjuntoId: ig.adsetId, mediaId: ig.mediaId, anuncioId: r.anuncioId, regla: ig.regla?.nombre ?? null },
+          detalle: {
+            solicitudId: id,
+            pidio: f.creador_nombre ?? f.creador_email,
+            reviso: nombreDe(actor),
+            destino: `Conjunto «${ig.adsetName}» (${ig.adsetId}) · campaña «${ig.campaignName}» (${ig.campaignId}) · cuenta Meta ${ig.accountId}`,
+            publicacion: ig.enlace ?? null,
+            formato: ig.formato ?? null,
+            mensaje: ig.texto ?? null,
+            anuncio: `${r.anuncioId} · creado activo; Meta lo revisa antes de entregarlo`,
+            botonYDestino: ig.destino ? (ig.destino.tipo === "whatsapp" ? "Botón de WhatsApp" : `${ig.destino.cta ?? "Más información"} → ${ig.destino.url}`) : "El del conjunto (visita al perfil) o ninguno",
+            identidad: [ig.paginaId ? `Página ${ig.paginaId}` : null, ig.instagramId ? `Instagram ${ig.instagramId}` : null].filter(Boolean).join(" · ") || null,
+            conjuntoId: ig.adsetId,
+            mediaId: ig.mediaId,
+            anuncioId: r.anuncioId,
+            regla: ig.regla?.nombre ?? null,
+            retirados: retirados.length > 0 ? retirados.map((x) => `${x.ok ? "Pausado" : "No se pudo pausar"}: ${x.nombre} (${x.id})${x.error ? ` — ${x.error}` : ""}`).join("\n") : null,
+            enlaces: [{ etiqueta: "Ver el anuncio en Meta Ads Manager", url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${ig.accountId}&selected_ad_ids=${r.anuncioId}` }],
+          },
         });
         // Primero, la regla DENTRO de Meta (copia de la original, que no se toca): Meta la evalúa sola. Si no se puede, la propia.
         let reglaEnMeta = false;
@@ -637,6 +697,8 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const cuentaMeta = armado.draft.existingCampaign?.accountId ?? armado.cuentas.find((c) => c.provider === armado.draft.platforms[0])?.externalId ?? "";
       for (const a of idsDeAnunciosCreados(r.pasos, r.ids)) anuncios.push({ ...a, accountId: a.provider === armado.draft.existingCampaign?.platform ? armado.draft.existingCampaign.accountId : cuentaMeta });
       const campaignId = armado.draft.existingCampaign?.campaignId ?? r.ids.campaign ?? null;
+      // Un anuncio nuevo dentro de una campaña que ya existía la deja con contenido renovado.
+      if (r.ok && armado.draft.existingCampaign) await marcarContenidoRenovado(armado.draft.existingCampaign.platform, armado.draft.existingCampaign.campaignId);
       const enlace = enlaceDeCampana(armado.draft.platforms[0], cuentaMeta, campaignId);
       if (enlace && !enlaces.some((e) => e.url === enlace.url)) enlaces.push(enlace);
       if (!r.ok) {
@@ -649,6 +711,10 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
     }
   }
 
+  // El texto técnico queda en los pasos (resultado_json) y en la bitácora; quien creó la solicitud ve uno que entiende.
+  if (fallo && /WINDSOR_API_KEY|META_SYSTEM_USER_TOKEN|ANTHROPIC_API_KEY|Falta conectar|no está configurad/i.test(fallo)) {
+    fallo = "La conexión con la plataforma no está disponible ahora. Avisa a un administrador.";
+  }
   await getRawDb()
     .prepare("UPDATE solicitudes SET estado = ?, error_texto = ?, resultado_json = ?, enlaces_json = ?, publicada_at = ?, avisada = 0 WHERE id = ?")
     .bind(fallo ? "fallida" : "publicada", fallo, JSON.stringify({ pasos: pasosTotales.map((p) => ({ platform: p.platform, action: p.action, ok: p.ok, error: p.error })), anuncios }), JSON.stringify(enlaces), Date.now(), id)
@@ -662,6 +728,8 @@ export async function rechazarSolicitud(actor: Actor, id: string, nota: string):
   if (!f || !enAlcance(actor, f.portfolio_id)) throw new ErrorDeSolicitud("No encontré esa solicitud.", 404);
   if (!puedeRevisarEsta(actor, f)) throw new ErrorDeSolicitud("Los cambios de presupuesto los revisa un Director Digital o superior.", 403);
   if (!puedeTransicionar("rechazar", f.estado as EstadoDeSolicitud)) throw new ErrorDeSolicitud("Esa solicitud ya no está pendiente.", 409);
+  // Quien creó la solicitud necesita saber qué cambiar: sin motivo no se rechaza.
+  if (!nota.trim()) throw new ErrorDeSolicitud("Escribe el motivo del rechazo: quien la creó lo verá.", 400);
   await getRawDb()
     .prepare("UPDATE solicitudes SET estado = 'rechazada', revisor_email = ?, revisor_nombre = ?, nota_revision = ?, resuelta_at = ?, avisada = 0 WHERE id = ? AND estado = 'pendiente'")
     .bind(actor.email, nombreDe(actor), nota.trim().slice(0, 500) || null, Date.now(), id)

@@ -200,11 +200,11 @@ export async function copiarReglaMetaParaAnuncio(accountId: string, reglaId: str
 
 type FilaCruda = Record<string, unknown>;
 
-async function leerTodas(ruta: string, campos: string, limite: number, paginas: number): Promise<FilaCruda[]> {
+async function leerTodas(ruta: string, campos: string, limite: number, paginas: number, extra: Record<string, string> = {}): Promise<FilaCruda[]> {
   const salida: FilaCruda[] = [];
   let despues: string | undefined;
   for (let p = 0; p < paginas; p++) {
-    const j = await graph<{ data?: FilaCruda[]; paging?: { cursors?: { after?: string }; next?: string } }>(ruta, "GET", { fields: campos, limit: limite, after: despues });
+    const j = await graph<{ data?: FilaCruda[]; paging?: { cursors?: { after?: string }; next?: string } }>(ruta, "GET", { fields: campos, limit: limite, after: despues, ...extra });
     salida.push(...(j.data ?? []));
     despues = j.paging?.next ? j.paging.cursors?.after : undefined;
     if (!despues) break;
@@ -241,9 +241,45 @@ export async function leerEstructuraMeta(accountId: string, divisorMenor: number
 }
 
 /** Las campañas de una cuenta tal como están hoy en Meta (id → nombre y estado). Solo lectura. */
-export async function campanasVivasDeMeta(accountId: string): Promise<Map<string, { nombre: string | null; estado: string | null }>> {
-  const filas = await leerTodas(`${cuenta(accountId)}/campaigns`, "id,name,status", 200, 4);
-  return new Map(filas.map((c) => [String(c.id), { nombre: c.name ? String(c.name) : null, estado: c.status ? String(c.status) : null }]));
+export async function campanasVivasDeMeta(accountId: string): Promise<Map<string, { nombre: string | null; estado: string | null; conEntrega?: boolean; finalizada?: boolean }>> {
+  const filas = await leerTodas(`${cuenta(accountId)}/campaigns`, "id,name,status,stop_time", 200, 4);
+  // Fin de cada conjunto: una campaña cuyos conjuntos ya terminaron (o con fecha de término pasada) está finalizada, no «apagada».
+  const ahoraMs = Date.now();
+  const finDeConjuntos = new Map<string, number[]>();
+  try {
+    for (const a of await leerTodas(`${cuenta(accountId)}/adsets`, "campaign_id,end_time", 500, 4)) {
+      const t = a.end_time ? Date.parse(String(a.end_time)) : NaN;
+      const lista = finDeConjuntos.get(String(a.campaign_id)) ?? [];
+      lista.push(Number.isFinite(t) ? t : Infinity);
+      finDeConjuntos.set(String(a.campaign_id), lista);
+    }
+  } catch {
+    // sin conjuntos leídos solo cuenta la fecha de la campaña
+  }
+  // Entrega de los últimos 30 días por campaña, para no afirmar «no entrega» sobre algo que sí gastó. Si falla, queda sin dato.
+  let conEntrega: Set<string> | null = null;
+  try {
+    const ins = await leerTodas(`${cuenta(accountId)}/insights`, "campaign_id,spend,impressions", 200, 4, { level: "campaign", date_preset: "last_30d" });
+    conEntrega = new Set(ins.filter((i) => Number(i.spend ?? 0) > 0 || Number(i.impressions ?? 0) > 0).map((i) => String(i.campaign_id)));
+  } catch {
+    conEntrega = null;
+  }
+  return new Map(
+    filas.map((c) => [
+      String(c.id),
+      {
+        nombre: c.name ? String(c.name) : null,
+        estado: c.status ? String(c.status) : null,
+        ...(conEntrega ? { conEntrega: conEntrega.has(String(c.id)) } : {}),
+        finalizada: (() => {
+          const stop = c.stop_time ? Date.parse(String(c.stop_time)) : NaN;
+          if (Number.isFinite(stop) && stop < ahoraMs) return true;
+          const fines = finDeConjuntos.get(String(c.id)) ?? [];
+          return fines.length > 0 && fines.every((t) => t < ahoraMs);
+        })(),
+      },
+    ]),
+  );
 }
 
 /** Estado de una campaña, conjunto o anuncio tal como está hoy en Meta. Solo lectura. */
@@ -356,18 +392,59 @@ export async function colocacionesDeConjuntoMeta(conjuntoId: string): Promise<Co
  * Crea un anuncio a partir de una publicación de Instagram (o de Facebook) ya existente, dentro de un conjunto ya existente.
  * Queda activo: antes de llegar aquí ya pasó por las aprobaciones que corresponden. Las pruebas piden `estado: "PAUSED"`.
  */
+/** A dónde lleva el botón de un anuncio: WhatsApp o un sitio web (con el texto del botón de Meta, por ejemplo LEARN_MORE). */
+export type DestinoDeAnuncio = { tipo: "whatsapp" | "web"; url?: string; cta?: string };
+
+/** El botón de Meta para un destino: lo que se manda en `call_to_action` del creativo. */
+export function botonDeDestino(d: DestinoDeAnuncio): { type: string; value: Record<string, string> } | null {
+  if (d.tipo === "whatsapp") return { type: "WHATSAPP_MESSAGE", value: { app_destination: "WHATSAPP", link: "https://api.whatsapp.com/send" } };
+  if (d.tipo === "web" && d.url && /^https:\/\//i.test(d.url)) return { type: d.cta && /^[A-Z_]{3,40}$/.test(d.cta) ? d.cta : "LEARN_MORE", value: { link: d.url } };
+  return null;
+}
+
+/**
+ * El botón y el destino que ya usan los anuncios de un conjunto (el más frecuente), para que uno nuevo salga igual que los demás
+ * en vez de sin destino. Solo lectura; `null` si ninguno tiene botón con destino.
+ */
+export async function destinoDeLosAnunciosDelConjunto(conjuntoId: string): Promise<DestinoDeAnuncio | null> {
+  type Boton = { type?: string; value?: { link?: string } };
+  const j = await graph<{ data?: Array<{ creative?: { call_to_action_type?: string; object_story_spec?: { link_data?: { link?: string; call_to_action?: Boton }; video_data?: { call_to_action?: Boton } } } }> }>(
+    `${conjuntoId}/ads`,
+    "GET",
+    { fields: "creative{call_to_action_type,object_story_spec{link_data{link,call_to_action},video_data{call_to_action}}}", limit: 25 },
+  );
+  const cuenta = new Map<string, { n: number; destino: DestinoDeAnuncio }>();
+  for (const a of j.data ?? []) {
+    const spec = a.creative?.object_story_spec;
+    const boton = spec?.video_data?.call_to_action ?? spec?.link_data?.call_to_action;
+    const tipo = boton?.type ?? a.creative?.call_to_action_type;
+    if (!tipo || tipo === "NO_BUTTON") continue;
+    const destino: DestinoDeAnuncio | null =
+      tipo === "WHATSAPP_MESSAGE" ? { tipo: "whatsapp" } : boton?.value?.link || spec?.link_data?.link ? { tipo: "web", url: boton?.value?.link ?? spec?.link_data?.link, cta: tipo } : null;
+    if (!destino) continue;
+    const clave = `${destino.tipo}|${destino.url ?? ""}|${destino.cta ?? ""}`;
+    const previo = cuenta.get(clave);
+    cuenta.set(clave, { n: (previo?.n ?? 0) + 1, destino });
+  }
+  return [...cuenta.values()].sort((x, y) => y.n - x.n)[0]?.destino ?? null;
+}
+
 export async function crearAnuncioDesdeInstagram(
   accountId: string,
-  o: { nombre: string; conjuntoId: string; instagramUserId?: string | null; mediaId: string; paginaId?: string | null; facebook?: boolean; estado?: "ACTIVE" | "PAUSED" },
+  o: { nombre: string; conjuntoId: string; instagramUserId?: string | null; mediaId: string; paginaId?: string | null; facebook?: boolean; estado?: "ACTIVE" | "PAUSED"; destino?: DestinoDeAnuncio | null },
 ): Promise<AnuncioDeInstagram> {
   if (!o.facebook && !o.instagramUserId) throw new ErrorDeMeta("Falta la cuenta de Instagram del cliente.", 400);
   // Un conjunto de visitas al perfil exige el botón «Visitar perfil» con el enlace al perfil; sin él Meta rechaza el anuncio.
   const conjunto = await graph<{ destination_type?: string; optimization_goal?: string }>(o.conjuntoId, "GET", { fields: "destination_type,optimization_goal" });
-  let boton: { type: string; value: { link: string } } | undefined;
+  let boton: { type: string; value: Record<string, string> } | undefined;
   if (!o.facebook && (conjunto.destination_type === "INSTAGRAM_PROFILE" || conjunto.optimization_goal === "PROFILE_VISIT")) {
     const perfil = await graph<{ username?: string }>(o.instagramUserId!, "GET", { fields: "username" });
     if (!perfil.username) throw new ErrorDeMeta("No pude leer el usuario de Instagram para armar el botón de perfil.");
     boton = { type: "VISIT_PROFILE", value: { link: `https://www.instagram.com/${perfil.username}/` } };
+  } else if (!o.facebook && o.destino) {
+    // Fuera de las visitas al perfil, el anuncio lleva el mismo botón y destino que los demás del conjunto (o el que pidió la persona).
+    const b = botonDeDestino(o.destino);
+    if (b) boton = b as unknown as typeof boton;
   }
   const crear = (conPagina: boolean) =>
     graph<{ id?: string }>(`${cuenta(accountId)}/adcreatives`, "POST", {
@@ -393,6 +470,48 @@ export async function crearAnuncioDesdeInstagram(
   });
   if (!anuncio.id) throw new ErrorDeMeta("Meta no devolvió el anuncio.");
   return { creativeId: creativo.id, anuncioId: anuncio.id };
+}
+
+/**
+ * Elimina una campaña, un conjunto o un anuncio de Meta (estado DELETED: no se puede deshacer y desaparece de Ads Manager; lo que
+ * ya gastó queda en los reportes). Se lee de vuelta para confirmar. Quien llama ya pasó por la aprobación que corresponde.
+ */
+export async function eliminarEnMeta(entidadId: string): Promise<{ estado: string | null }> {
+  if (!/^\d+$/.test(entidadId)) throw new ErrorDeMeta("Identificador no válido.", 400);
+  await graph<{ success?: boolean }>(entidadId, "POST", { status: "DELETED" });
+  const despues = await graph<{ status?: string; effective_status?: string }>(entidadId, "GET", { fields: "status,effective_status" }).catch(() => null);
+  const estado = despues?.effective_status ?? despues?.status ?? null;
+  // Un objeto eliminado a veces ya no se puede leer: eso también confirma que no está.
+  if (estado && !["DELETED", "ARCHIVED"].includes(estado)) throw new ErrorDeMeta(`Meta no lo eliminó (sigue en estado ${estado}).`);
+  return { estado };
+}
+
+/** Formatos de vista previa de Meta que se ofrecen: cómo se ve el anuncio de verdad en cada lugar. */
+export const FORMATOS_DE_VISTA_PREVIA = {
+  MOBILE_FEED_STANDARD: "Feed de Facebook",
+  INSTAGRAM_STANDARD: "Feed de Instagram",
+  INSTAGRAM_STORY: "Historias de Instagram",
+  FACEBOOK_STORY_MOBILE: "Historias de Facebook",
+  INSTAGRAM_REELS: "Reels de Instagram",
+} as const;
+export type FormatoDeVistaPrevia = keyof typeof FORMATOS_DE_VISTA_PREVIA;
+
+/**
+ * La vista previa REAL de un anuncio de Meta (la misma de Ads Manager): una dirección de Meta para mostrar en un iframe. Solo lectura.
+ * Devuelve `null` si Meta no la entrega (por ejemplo, un anuncio eliminado).
+ */
+export async function vistaPreviaDeAnuncio(anuncioId: string, formato: FormatoDeVistaPrevia): Promise<{ url: string; ancho: number; alto: number } | null> {
+  if (!/^\d+$/.test(anuncioId)) throw new ErrorDeMeta("Identificador no válido.", 400);
+  const j = await graph<{ data?: Array<{ body?: string }> }>(`${anuncioId}/previews`, "GET", { ad_format: formato });
+  const cuerpo = j.data?.[0]?.body ?? "";
+  const m = /src="([^"]+)"/.exec(cuerpo);
+  if (!m) return null;
+  // Meta dice de qué tamaño es su vista previa: se respeta para que no salgan barras de desplazamiento.
+  const ancho = Number(/width="(\d+)"/.exec(cuerpo)?.[1] ?? 0) || 340;
+  const alto = Number(/height="(\d+)"/.exec(cuerpo)?.[1] ?? 0) || 560;
+  const url = m[1].replace(/&amp;/g, "&");
+  // Solo direcciones de Meta: el iframe nunca apunta a otro sitio.
+  return /^https:\/\/([a-z0-9-]+\.)?(facebook|instagram)\.com\//i.test(url) ? { url, ancho, alto } : null;
 }
 
 export type InteresMeta = { id: string; nombre: string; tamano: number | null; ruta: string | null };

@@ -19,6 +19,8 @@ export type DestinoDeCreacion = {
   campaignName: string;
   adsetId?: string;
   adsetName?: string;
+  /** Renovar: anuncios viejos del conjunto que ya vienen marcados para retirarse al publicar el nuevo. */
+  retirarAnuncios?: Array<{ id: string; nombre: string }>;
 };
 
 const campo = "mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm";
@@ -32,9 +34,12 @@ export function ElegirDondeCrear({
   clienteId,
   onCerrar,
   onElegir,
+  inicial,
 }: {
   nivel: "conjunto" | "anuncio" | null;
   clienteId: string;
+  /** Cuenta y campaña que ya vienen elegidas (por ejemplo, la de una decisión). */
+  inicial?: { accountId: string; campaignId: string };
   onCerrar: () => void;
   onElegir: (destino: DestinoDeCreacion) => void;
 }) {
@@ -54,12 +59,15 @@ export function ElegirDondeCrear({
         if (!vivo) return;
         const c = j.portfolios.find((p) => p.id === clienteId) ?? null;
         setCliente(c);
-        setCuenta(c?.accounts.find((a) => a.provider === "meta" || a.provider === "google")?.externalId ?? "");
+        const norm = (x: string) => x.replace(/^act_/, "").replace(/-/g, "");
+        const deLaDecision = inicial ? c?.accounts.find((a) => norm(a.externalId) === norm(inicial.accountId))?.externalId : undefined;
+        setCuenta(deLaDecision ?? c?.accounts.find((a) => a.provider === "meta" || a.provider === "google")?.externalId ?? "");
       })
       .catch(() => vivo && setError("No se pudo leer el cliente"));
     return () => {
       vivo = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `inicial` solo se lee al abrir
   }, [nivel, clienteId]);
 
   const cuentaActual = cliente?.accounts.find((a) => a.externalId === cuenta) ?? null;
@@ -74,7 +82,7 @@ export function ElegirDondeCrear({
         if (!r.ok) throw new Error(j.error ?? "No se pudieron leer las campañas");
         if (vivo) {
           setArbol({ campanas: j.campanas ?? [], conjuntos: j.conjuntos ?? [] });
-          setCampanaId("");
+          setCampanaId(inicial && (j.campanas ?? []).some((c) => c.id === inicial.campaignId) ? inicial.campaignId : "");
           setConjuntoId("");
           setError(null);
         }
@@ -83,11 +91,14 @@ export function ElegirDondeCrear({
     return () => {
       vivo = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `inicial` solo se lee al cargar el árbol
   }, [nivel, cliente, cuentaActual]);
 
   const campana = arbol?.campanas.find((c) => c.id === campanaId) ?? null;
   const conjuntos = useMemo(() => (arbol?.conjuntos ?? []).filter((c) => c.campaignId === campanaId), [arbol, campanaId]);
-  const conjunto = conjuntos.find((c) => c.id === conjuntoId) ?? null;
+  // Con un solo conjunto en la campaña, ya queda elegido.
+  const unicoConjunto = nivel === "anuncio" && conjuntos.length === 1 ? conjuntos[0] : null;
+  const conjunto = conjuntos.find((c) => c.id === conjuntoId) ?? unicoConjunto;
   const listo = Boolean(cliente && cuentaActual && campana && (nivel === "conjunto" || conjunto));
 
   return (
@@ -124,7 +135,7 @@ export function ElegirDondeCrear({
               {nivel === "anuncio" && (
                 <label className="block text-xs font-semibold text-foreground/70">
                   Conjunto
-                  <select className={campo} value={conjuntoId} disabled={!campanaId} onChange={(e) => setConjuntoId(e.target.value)}>
+                  <select className={campo} value={conjunto?.id ?? ""} disabled={!campanaId} onChange={(e) => setConjuntoId(e.target.value)}>
                     <option value="">{campanaId ? "Elige un conjunto…" : "Primero la campaña"}</option>
                     {conjuntos.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.estado ? ` · ${c.estado}` : ""}</option>)}
                   </select>

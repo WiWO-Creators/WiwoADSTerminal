@@ -1,3 +1,4 @@
+import { completarPaginasDeMeta } from "@/lib/pagina-de-cuenta";
 import type { Actor } from "@/lib/permisos";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { listPortfolios, type Portfolio } from "@/lib/portafolios-store";
@@ -180,6 +181,8 @@ export async function detalleClientes(
   };
   });
 
+  // Meta sin Página declarada: se usa la única que Meta deja promocionar a esa cuenta (si hay varias, no se adivina).
+  await completarPaginasDeMeta(clientes.flatMap((c) => c.accounts));
   return { clientes, sueltas };
 }
 

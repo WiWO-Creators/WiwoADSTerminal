@@ -6,6 +6,7 @@ import { CheckCircle2, ExternalLink, ShieldAlert, TriangleAlert } from "lucide-r
 import { TEXTO_SIN_GTM } from "@/lib/gtm";
 import type { ResultadoMedicion } from "@/lib/medicion";
 import { cn } from "@/lib/utils";
+import { PanelDeMedicion } from "./medicion-panel";
 import { Surface } from "./ui";
 
 type Respuesta = (
@@ -84,6 +85,7 @@ export function SaludDeMedicion({ portfolioId, puedeEditar }: { portfolioId: str
   return (
     <>
     {avisoGtm}
+    <PanelDeMedicion r={r} gtm={datos.gtm} propiedades={datos.propiedad.split(",").filter((p) => p.trim()).length} />
     <Surface className="mb-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">

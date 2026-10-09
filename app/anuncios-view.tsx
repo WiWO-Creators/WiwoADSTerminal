@@ -63,7 +63,7 @@ import { cambioDeColumna } from "@/lib/comparacion";
 import { DEFINICION_KPI, type KpiPrincipal } from "@/lib/kpis-cliente";
 import { rangoAnterior, resolverRango } from "@/lib/rangos";
 import { perteneceASegmento, type Segmento } from "@/lib/segmentos";
-import { DetalleEntidadSheet, type EntidadParaDetalle } from "./detalle-entidad";
+import { DetalleEntidadSheet, precalentarDetalle, type EntidadParaDetalle } from "./detalle-entidad";
 import { GestionarCampanaDialog, type CampanaGestionable } from "./gestionar-campana";
 import { OrbeDeBoton, Surface } from "./ui";
 
@@ -930,6 +930,19 @@ export function AnunciosView({
     marcasConjuntoParaFiltrar,
     orden,
   ]);
+
+  // Al ver la tabla se precarga, en segundo plano, la configuración de cada cuenta (una sola vez): abrir el editor es inmediato.
+  useEffect(() => {
+    const vistas = new Set<string>();
+    for (const fila of filas) {
+      const marca = `${fila.provider}:${fila.accountId}`;
+      if (vistas.has(marca) || vistas.size >= 4) continue;
+      const id = nivel === "campana" ? fila.campaignId : nivel === "conjunto" ? fila.adsetId : fila.adId;
+      if (!id) continue;
+      vistas.add(marca);
+      precalentarDetalle(fila.provider, fila.accountId, nivel, id);
+    }
+  }, [filas, nivel]);
 
   const sinActividad = filas.filter((fila) => !fila.conActividad).length;
 

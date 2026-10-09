@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { etiquetaDeCargo } from "@/lib/jerarquia-pura";
 import { matrizDeRoles, roleCan, ROLES, ROLE_DESCRIPTIONS, ROLE_LABELS, type Role } from "@/lib/permisos";
 import { PantallaDeCarga, Surface, OrbeDeBoton } from "./ui";
 
@@ -309,7 +310,7 @@ export function EquipoView({
                     <TableCell>
                       {member.foundingAdmin || !puedeModificar ? (
                         <span className="text-sm font-semibold text-foreground/74">
-                          {ROLE_LABELS[member.role]}
+                          {etiquetaDeCargo(member.role, member.cargo)}
                         </span>
                       ) : (
                         <Select

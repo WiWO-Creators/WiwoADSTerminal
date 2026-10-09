@@ -1,3 +1,5 @@
+import { marcarContenidoRenovado } from "@/lib/contenido-renovado";
+import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
 import { getSession } from "@/app/sesion";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { registrarAuditoria } from "@/lib/auditoria";
@@ -13,7 +15,7 @@ import { accountIndex, listPortfolios, normalizeAccountId } from "@/lib/portafol
  */
 export const dynamic = "force-dynamic";
 
-type Cuerpo = { portfolioId?: string; accountId?: string; conjuntoId?: string; mediaId?: string; /** Boostear un anuncio existente que no usa una publicación: se reutiliza su creativo. */ creativeId?: string; nombre?: string };
+type Cuerpo = { portfolioId?: string; accountId?: string; conjuntoId?: string; campaignId?: string; mediaId?: string; /** Boostear un anuncio existente que no usa una publicación: se reutiliza su creativo. */ creativeId?: string; nombre?: string };
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -38,8 +40,9 @@ export async function POST(request: Request) {
           conjuntoId: b.conjuntoId,
           instagramUserId: cliente!.instagramId,
           mediaId: b.mediaId!,
-          paginaId: cliente!.accountPages[accountId] ?? cliente!.pageId,
+          paginaId: (await paginaDeLaCuenta(cliente!, accountId)) ?? undefined,
         });
+    if (b.campaignId) await marcarContenidoRenovado("meta", b.campaignId);
     await registrarEjecucion(
       { portfolioId: b.portfolioId, name: nombre, platforms: ["meta"] },
       session.actor.email,

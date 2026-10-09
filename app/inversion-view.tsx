@@ -1,5 +1,6 @@
 "use client";
 
+import { enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
 import { summarizeObjectives } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { DistribucionDelGasto } from "./distribucion-gasto";
@@ -58,7 +59,10 @@ export function InversionView({
   }
 
   const cuentas = new Set(cliente.accounts.map((a) => a.id));
-  const campanas = performance.campaigns.filter((c) => cuentas.has(c.accountKey));
+  const delCliente = performance.campaigns.filter((c) => cuentas.has(c.accountKey));
+  // Grupo Valor: la cuenta trae proyectos de otros equipos; la distribución solo cuenta los que llevamos.
+  const campanas = delCliente.filter((c) => enProyectosAsignados(cliente.id, cliente.segmentos ?? [], [c.name]));
+  const ocultas = delCliente.length - campanas.length;
   const objetivos = summarizeObjectives(campanas).filter((o) => o.result !== null && o.result > 0);
 
   return (
@@ -68,6 +72,11 @@ export function InversionView({
         <p className="mt-1 text-sm text-muted-foreground">Presupuesto del mes y adónde se fue el gasto de {periodo}.</p>
       </div>
       <PresupuestoDelMes key={`presupuesto-${cliente.id}`} portfolioId={cliente.id} />
+      {ocultas > 0 && (
+        <p className="rounded-xl border border-foreground/10 bg-foreground/4 px-4 py-2.5 text-xs leading-5 text-foreground/65">
+          Esta distribución cuenta solo los proyectos que llevamos ({nombresDeProyectos(cliente.segmentos ?? [])}); {ocultas} {ocultas === 1 ? "campaña de otro proyecto de la cuenta no se incluye" : "campañas de otros proyectos de la cuenta no se incluyen"}.
+        </p>
+      )}
       <DistribucionDelGasto campanas={campanas} objetivos={objetivos} periodo={periodo} />
     </div>
   );

@@ -40,6 +40,15 @@ const worker = {
       }, allowedWidths);
     }
 
+    // «Ver como»: mientras un administrador ve la app como otra persona, nada se puede cambiar (solo lectura).
+    const metodo = request.method.toUpperCase();
+    if (metodo !== "GET" && metodo !== "HEAD" && metodo !== "OPTIONS" && url.pathname !== "/api/ver-como" && /(?:^|;\s*)wiwo_ver_como=/.test(request.headers.get("cookie") ?? "")) {
+      return new Response(JSON.stringify({ error: "Estás viendo la app como otra persona: es solo lectura. Vuelve a tu vista para hacer cambios." }), {
+        status: 403,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
+
     return handler.fetch(request, env, ctx);
   },
 };

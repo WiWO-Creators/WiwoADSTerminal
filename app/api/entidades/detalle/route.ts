@@ -2,11 +2,12 @@ import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import {
   entidadConAncestros,
-  fetchDetalleDeCuenta,
+  leerDetalleParaMostrar,
   VENTANA_DETALLE_DIAS,
 } from "@/lib/detalle-entidad-store";
 import { accesoNativoGoogle } from "@/lib/integration-store";
-import { enAlcance } from "@/lib/permisos";
+import { accesoNativoLinkedin } from "@/lib/linkedin-conexion";
+import { can, enAlcance } from "@/lib/permisos";
 import { puedeAdministrar } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 import { WindsorError } from "@/lib/windsor";
@@ -51,7 +52,10 @@ export async function GET(request: Request) {
   try {
     const credencialesGoogle =
       provider === "google" ? await accesoNativoGoogle(session.actor, accountId) : null;
-    const detalle = await fetchDetalleDeCuenta(provider, accountId, { credencialesGoogle });
+    const credencialesLinkedin = provider === "linkedin" ? await accesoNativoLinkedin(session.actor, accountId) : null;
+    // Para mostrar: lo ya leído sale al instante (marcado `obsoleto`) y se renueva por detrás; `fresco=1` fuerza una lectura nueva.
+    const lectura = leerDetalleParaMostrar(provider, accountId, { credencialesGoogle, credencialesLinkedin, permitirViejo: true, fresco: url.searchParams.get("fresco") === "1" });
+    const detalle = await lectura.datos;
     const entidad = entidadConAncestros(detalle, nivel as (typeof NIVELES)[number], id);
     const encontrada = entidad[nivel as (typeof NIVELES)[number]] !== null;
     return Response.json(
@@ -60,8 +64,13 @@ export async function GET(request: Request) {
         // "No encontrada" solo dice "sin actividad en esta ventana", no que no exista.
         ventanaDias: VENTANA_DETALLE_DIAS,
         fuente: detalle.fuente,
+        obsoleto: lectura.obsoleto,
+        // Ver directo en la plataforma: solo Directores y Administradores.
+        verEnPlataforma: can(session.actor, "aprobar_presupuesto"),
         avisos: detalle.avisos,
         ...entidad,
+        // Performance Max: el contenido vive en los grupos de recursos de la campaña (solo con la cuenta de Google conectada).
+        ...(nivel === "campana" && detalle.gruposDeRecursos ? { gruposDeRecursos: detalle.gruposDeRecursos.filter((g) => g.campaignId === id) } : {}),
       },
       { headers: NO_STORE },
     );

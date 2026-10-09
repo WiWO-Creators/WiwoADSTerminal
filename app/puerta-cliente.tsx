@@ -19,9 +19,12 @@ import { agruparPorEmpresa } from "@/lib/empresas";
 export function PuertaDeCliente({
   clientes,
   onElegir,
+  onTodos,
 }: {
   clientes: PortfolioSummary[];
   onElegir: (portfolioId: string) => void;
+  /** Entrar sin cliente, para ver lo de todos (por ejemplo, las decisiones pendientes). */
+  onTodos?: () => void;
 }) {
   const [busqueda, setBusqueda] = useState("");
   const filtrados = clientes.filter((c) =>
@@ -99,6 +102,17 @@ export function PuertaDeCliente({
             ))
           )}
         </div>
+        {onTodos && (
+          <div className="border-t border-border p-2">
+            <button
+              type="button"
+              onClick={onTodos}
+              className="w-full rounded-xl px-3 py-2.5 text-center text-sm font-semibold text-primary transition-colors hover:bg-sidebar-accent"
+            >
+              Ver todos los clientes
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

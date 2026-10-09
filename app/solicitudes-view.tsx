@@ -164,11 +164,11 @@ export function SolicitudesView() {
                     onChange={(e) => setNota(e.target.value)}
                     maxLength={500}
                     rows={2}
-                    placeholder="Motivo (opcional): qué debería cambiar"
+                    placeholder="Motivo (obligatorio): qué debería cambiar"
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                   />
                   <div className="flex gap-2">
-                    <Button type="button" size="sm" variant="destructive" disabled={ocupada === s.id} onClick={() => void accion(s.id, "rechazar", { nota })}>
+                    <Button type="button" size="sm" variant="destructive" disabled={ocupada === s.id || !nota.trim()} onClick={() => void accion(s.id, "rechazar", { nota })}>
                       Confirmar rechazo
                     </Button>
                     <Button type="button" size="sm" variant="ghost" onClick={() => setRechazando(null)}>

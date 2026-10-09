@@ -878,7 +878,8 @@ export function fusionarConCatalogo<T extends { conActividad: boolean }>(
 }
 
 export function claveCampana(c: WindsorCampaign): string {
-  return `${c.provider}::${c.accountId}::${c.name}`;
+  // Por id cuando lo hay: si la campaña se renombró, el catálogo (nombre viejo) y las métricas (nombre nuevo) son la misma y no deben quedar como dos.
+  return `${c.provider}::${c.accountId}::${c.campaignId ?? c.name}`;
 }
 
 export function claveAnuncio(a: WindsorAd): string {

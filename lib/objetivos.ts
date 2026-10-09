@@ -149,6 +149,11 @@ function metaResult(
   return null;
 }
 
+/** El resultado propio del objetivo para UNA campaña: Meta lo reporta directo; Google, por categorías de conversión. */
+export function resultadoDeCampana(campaign: CampaignSummary, objetivo: Objetivo): number | null {
+  return campaign.provider === "google" ? valorPorObjetivo(campaign.conversionBreakdown, objetivo) : metaResult(campaign, objetivo);
+}
+
 /**
  * Agrupa las campañas por objetivo y calcula el resultado propio de cada uno.
  *
@@ -192,10 +197,7 @@ export function summarizeObjectives(campaigns: CampaignSummary[]): ObjectiveTota
 
       let result: number | null = null;
       for (const item of items) {
-        const valor =
-          item.provider === "google"
-            ? valorPorObjetivo(item.conversionBreakdown, objetivo)
-            : metaResult(item, objetivo);
+        const valor = resultadoDeCampana(item, objetivo);
         if (valor === null) continue;
         result = (result ?? 0) + valor;
       }

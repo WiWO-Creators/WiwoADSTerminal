@@ -178,6 +178,20 @@ export async function resolveActor(
   };
 }
 
+/** El actor de un miembro activo, leído sin escribir nada (para «Ver como»). `null` si no existe o está desactivado. */
+export async function actorDeMiembro(email: string): Promise<{ actor: Actor; nombre: string; cargo: string | null } | null> {
+  const row = await getRawDb()
+    .prepare("SELECT id, email, display_name, role, is_active, cargo FROM users WHERE lower(email) = lower(?) LIMIT 1")
+    .bind(email.trim())
+    .first<{ id: string; email: string; display_name: string; role: string; is_active: number; cargo: string | null }>();
+  if (!row || !row.is_active) return null;
+  return {
+    actor: { id: row.id, email: row.email.toLowerCase(), role: normalizeRole(row.role), portfolioIds: await portfoliosOf(row.id), isActive: true },
+    nombre: row.display_name,
+    cargo: row.cargo ?? null,
+  };
+}
+
 async function portfoliosOf(userId: string): Promise<string[]> {
   const result = await getRawDb()
     .prepare("SELECT portfolio_id FROM user_portfolios WHERE user_id = ?")

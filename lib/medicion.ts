@@ -37,7 +37,16 @@ export type ResultadoMedicion = {
   };
   /** Sin hallazgos de severidad alta. */
   sano: boolean;
+  /** Los eventos de GA4 de los últimos 30 días (los de más volumen), para el panel visual. Ausente en lecturas guardadas antes de este campo. */
+  eventos?: EventoGa4[];
+  /** Los de los últimos 7 días, si se pudieron leer. */
+  eventos7?: EventoGa4[] | null;
 };
+
+/** Los eventos de más volumen: lo que el panel dibuja (no hace falta guardar los cientos que suele tener una propiedad). */
+export const MAXIMO_DE_EVENTOS_GUARDADOS = 60;
+export const principalesEventos = (eventos: EventoGa4[]): EventoGa4[] =>
+  [...eventos].filter((e) => e.eventos > 0).sort((a, b) => b.eventos - a.eventos).slice(0, MAXIMO_DE_EVENTOS_GUARDADOS);
 
 /** Eventos automáticos o de navegación: nunca son una conversión. */
 export const EVENTOS_NO_CONVERSION = new Set([
@@ -51,7 +60,7 @@ export const EVENTOS_NO_CONVERSION = new Set([
 ]);
 
 /** Eventos de interacción que rara vez son un lead: conviene revisarlos si son clave. */
-const INTERACCION = /^(file_download|video_|menu_|banner_|notice_|outbound|view_search_results)/i;
+export const INTERACCION = /^(file_download|video_|menu_|banner_|notice_|outbound|view_search_results)/i;
 
 /** Nombres que suelen ser un lead (formulario, contacto, cotización…). */
 const PISTAS_DE_LEAD = /(lead|contact|formul|form_submit|form-submit|submit|cotiz|solicit|whatsapp|agend|reserv|suscrip|convers)/i;
@@ -173,5 +182,7 @@ export function evaluarMedicion(ultimos30: EventoGa4[], ultimos7: EventoGa4[] | 
       leadsMarcadosComoClave: leadsClave.length,
     },
     sano: !hallazgos.some((h) => h.severidad === "alta"),
+    eventos: principalesEventos(ultimos30),
+    eventos7: ultimos7 ? principalesEventos(ultimos7) : null,
   };
 }

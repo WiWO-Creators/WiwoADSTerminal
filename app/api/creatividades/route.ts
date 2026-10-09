@@ -1,3 +1,4 @@
+import { paginaDeLaCuenta, paginaEInstagramDeLaCampana } from "@/lib/pagina-de-cuenta";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     }
     // La página propia de la cuenta si la tiene; si no, la del cliente — el
     // mismo orden que ya usa el resto del Constructor.
-    const pageId = cliente.accountPages[idCuenta] ?? cliente.pageId;
+    const pageId = await paginaDeLaCuenta(cliente, idCuenta);
     if (!pageId) {
       return Response.json(
         {
@@ -82,7 +83,10 @@ export async function GET(request: Request) {
 
     // Sin cuenta de Instagram declarada se busca entre las que Windsor tiene conectadas, por el nombre del cliente
     // (solo si coincide una). Si se encuentra, se guarda en la ficha para no volver a buscarla.
-    let instagramId = cliente.instagramId;
+    // En clientes con varios países (SQM) el Instagram de la ficha puede ser de otra cuenta: manda el que ya usan los anuncios de ESTA
+    // cuenta con esta misma Página.
+    const usadoPorLaCuenta = await paginaEInstagramDeLaCampana("act_" + idCuenta.replace(/^act_/, ""));
+    let instagramId = usadoPorLaCuenta?.pageId === pageId && usadoPorLaCuenta.instagramId ? usadoPorLaCuenta.instagramId : cliente.instagramId;
     let instagramAutomatico = false;
     if (!instagramId) {
       try {
@@ -99,8 +103,14 @@ export async function GET(request: Request) {
       }
     }
 
+    // Que Facebook falle (la Página puede no estar conectada a Windsor) no esconde lo de Instagram.
+    let avisoDeFacebook: string | null = null;
     const [posts, instagram] = await Promise.all([
-      fetchFacebookPosts(pageId, desde, hasta),
+      fetchFacebookPosts(pageId, desde, hasta).catch((error: unknown) => {
+        console.error("WiWO.ADS creatividades: Facebook", error instanceof Error ? error.message : error);
+        avisoDeFacebook = "No se pudieron leer las publicaciones de Facebook de esta Página (Windsor no la entrega).";
+        return [] as OrganicPost[];
+      }),
       instagramId ? instagramRapido(instagramId, desde, hasta) : Promise.resolve<OrganicPost[]>([]),
     ]);
     // Recién después: `fetchIdentidadMeta` solo lee lo que las dos llamadas
@@ -114,17 +124,18 @@ export async function GET(request: Request) {
 
     // El enlace público de cada publicación no se usa en el selector y en un
     // año de contenido pesaba decenas de KB de más.
-    const liviano = todo.map((post) => ({ ...post, permalink: undefined }));
+    // Se conserva el enlace: sirve para pedirle al Orb que use esa publicación (impulso con vista previa).
+    const liviano = todo;
 
     return Response.json(
       {
         posts: liviano,
         identidad,
-        aviso: instagramId
+        aviso: avisoDeFacebook ?? (instagramId
           ? instagramAutomatico
             ? "Se encontró la cuenta de Instagram de este cliente por su nombre. Revisa que sea la correcta (Clientes → ficha del cliente → Instagram)."
             : null
-          : "Este cliente no tiene su cuenta de Instagram declarada, así que solo se muestra Facebook. Declárala en Clientes → ficha del cliente → Instagram para ver también sus publicaciones y reels.",
+          : "Este cliente no tiene su cuenta de Instagram declarada, así que solo se muestra Facebook. Declárala en Clientes → ficha del cliente → Instagram para ver también sus publicaciones y reels."),
       },
       { headers: NO_STORE },
     );

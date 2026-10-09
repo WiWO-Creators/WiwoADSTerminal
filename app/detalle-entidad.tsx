@@ -3,7 +3,7 @@
 import { fetchConReintento } from "@/lib/fetch-reintento";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, ChevronRight, ExternalLink, ImageOff, Search, Settings2, X } from "lucide-react";
+import { ArrowRight, ChevronRight, ExternalLink, ImageOff, MoreVertical, Search, Settings2, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -16,6 +16,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { enlaceDeCampana } from "@/lib/enlaces";
 import type {
   DetalleAnuncio,
   DetalleCampana,
@@ -27,10 +36,12 @@ import type {
 import type { AdSummary } from "@/lib/performance-store";
 import { nombreDeNivel, platformLabel, type NivelEntidad, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
+import { dominioDe, piezaDeAnuncioGoogle, piezaDeGrupoDeRecursos } from "@/lib/vista-previa-google-pura";
 import { DesgloseEntidad } from "./desglose-entidad";
 import { EditarEntidad, type AccionesEditor } from "./editar-entidad";
 import { GestionarCampanaDialog } from "./gestionar-campana";
 import { OrbeDeBoton } from "./ui";
+import { VistaPreviaGoogle } from "./vista-previa-google";
 
 export type EntidadParaDetalle = {
   provider: string;
@@ -45,13 +56,17 @@ export type EntidadParaDetalle = {
   rango?: string;
   /** Cambio ya cargado en el formulario (viene de una sugerencia aprobada). Se
    * revisa y se aplica como cualquier otro: no se ejecuta solo. */
-  sugerido?: { presupuestoMonto?: string };
+  sugerido?: Record<string, string>;
+  /** Google Performance Max: el grupo de recursos elegido en el árbol (su vista previa se muestra al costado de la campaña). */
+  grupoDeRecursosId?: string;
 };
 
 type Respuesta = {
   encontrada: boolean;
   ventanaDias: number;
   fuente: "windsor" | "nativa";
+  /** Directores y Administradores pueden abrir la campaña en la plataforma. */
+  verEnPlataforma?: boolean;
   avisos: string[];
   campana: DetalleCampana | null;
   conjunto: DetalleConjunto | null;
@@ -69,6 +84,8 @@ type Nodo = {
   nombre: string;
   status: string | null;
   hijos: Nodo[];
+  /** Grupo de recursos de Performance Max: se abre en su campaña. */
+  campaignId?: string;
 };
 
 const esActivo = (status: string | null) => (status ?? "").toUpperCase() === "ACTIVE" || (status ?? "").toUpperCase() === "ENABLED";
@@ -148,7 +165,110 @@ function filtrarArbol(arbol: Nodo[], texto: string): Nodo[] {
   return resultado;
 }
 
+type RespuestaDeArbol = {
+  gruposDeRecursos?: Array<{ id: string; nombre: string | null; estado: string | null; campaignId: string }>;
+  campanas: Array<{ id: string; nombre: string | null; estado: string | null }>;
+  conjuntos: Array<{ id: string; nombre: string | null; estado: string | null; campaignId: string | null }>;
+  anuncios?: Array<{ id: string; nombre: string | null; estado: string | null; campaignId: string | null; conjuntoId: string | null }>;
+};
+
+/** El árbol completo de la cuenta leído de la plataforma (también lo pausado o recién creado), no solo lo que tuvo actividad. */
+function armarArbolNativo(r: RespuestaDeArbol): Nodo[] {
+  const conjuntos = new Map<string, Nodo>();
+  const campanas = r.campanas.map<Nodo>((c) => ({ clave: `campana:${c.id}`, nivel: "campana", id: c.id, nombre: c.nombre ?? c.id, status: c.estado, hijos: [] }));
+  const porCampana = new Map(campanas.map((c) => [c.id, c]));
+  for (const c of r.conjuntos) {
+    const nodo: Nodo = { clave: `conjunto:${c.id}`, nivel: "conjunto", id: c.id, nombre: c.nombre ?? c.id, status: c.estado, hijos: [] };
+    conjuntos.set(c.id, nodo);
+    porCampana.get(c.campaignId ?? "")?.hijos.push(nodo);
+  }
+  for (const g of r.gruposDeRecursos ?? []) {
+    porCampana.get(g.campaignId)?.hijos.push({ clave: `grupo:${g.id}`, nivel: "conjunto", id: g.id, nombre: g.nombre ?? g.id, status: g.estado, hijos: [], campaignId: g.campaignId });
+  }
+  for (const a of r.anuncios ?? []) {
+    const padre = conjuntos.get(a.conjuntoId ?? "");
+    if (!padre) continue;
+    padre.hijos.push({ clave: `anuncio:${a.id}`, nivel: "anuncio", id: a.id, nombre: a.nombre ? primerTitulo(a.nombre) : a.id, status: a.estado, hijos: [] });
+  }
+  return campanas.sort((x, y) => x.nombre.localeCompare(y.nombre, "es"));
+}
+
 const ICONO: Record<NivelEntidad, string> = { campana: "📣", conjunto: "🗂️", anuncio: "🖼️" };
+
+type AccionDeNodo = "editar" | "pausar" | "activar" | "eliminar" | "copiar-id" | "orb";
+
+/** Lo que cada plataforma NO deja hacer desde aquí (duplicar, eliminar, crear): se muestra bloqueado, con el motivo. */
+function bloqueadasDeNodo(provider: string, nivel: NivelEntidad): string[] {
+  if (provider === "linkedin") return nivel === "anuncio" ? ["Duplicar", "Eliminar", "Editar el contenido"] : ["Duplicar", "Eliminar"];
+  return ["Duplicar", nivel === "anuncio" ? "Crear anuncio" : nivel === "conjunto" ? "Crear anuncio" : "Crear conjunto"];
+}
+
+/** Menú «⋯» de cada nodo del árbol, como el de la plataforma: lo que se puede hacer desde WiWO.ADS y lo que se hace allá. */
+function MenuDeNodo({
+  nodo,
+  provider,
+  accountId,
+  onAccion,
+  verEnPlataforma,
+}: {
+  nodo: Nodo;
+  provider: string;
+  accountId: string;
+  onAccion: (nodo: Nodo, accion: AccionDeNodo) => void;
+  verEnPlataforma: boolean;
+}) {
+  const activo = esActivo(nodo.status);
+  const enlace = verEnPlataforma && nodo.nivel === "campana" ? enlaceDeCampana(provider, accountId, nodo.id) : null;
+  const bloqueadas = bloqueadasDeNodo(provider, nodo.nivel);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Acciones de ${nodo.nombre}`}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          className="shrink-0 rounded-md p-1 text-foreground/40 opacity-60 hover:bg-foreground/8 hover:text-foreground group-hover/fila:opacity-100 data-[state=open]:opacity-100"
+        >
+          <MoreVertical className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuLabel className="text-xs text-foreground/50">
+          Acciones para {nodo.nivel === "campana" ? "esta campaña" : nodo.nivel === "conjunto" ? "este conjunto" : "este anuncio"}
+        </DropdownMenuLabel>
+        <DropdownMenuItem onSelect={() => onAccion(nodo, "editar")}>Editar</DropdownMenuItem>
+        {activo ? (
+          <DropdownMenuItem onSelect={() => onAccion(nodo, "pausar")}>Pausar</DropdownMenuItem>
+        ) : (
+          provider !== "linkedin" && <DropdownMenuItem onSelect={() => onAccion(nodo, "activar")}>Activar</DropdownMenuItem>
+        )}
+        <DropdownMenuItem onSelect={() => onAccion(nodo, "orb")}>Pedirle una revisión al Thinking Orb</DropdownMenuItem>
+        {enlace && (
+          <DropdownMenuItem asChild>
+            <a href={enlace.url} target="_blank" rel="noreferrer">{enlace.etiqueta}</a>
+          </DropdownMenuItem>
+        )}
+        {provider !== "linkedin" && (
+          <DropdownMenuItem className="text-danger focus:text-danger" onSelect={() => onAccion(nodo, "eliminar")}>
+            Eliminar…
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuSeparator />
+        {bloqueadas.map((b) => (
+          <DropdownMenuItem key={b} disabled title="Se hace en la plataforma">
+            {b} <span className="ml-auto text-[0.65rem] text-foreground/40">en la plataforma</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => onAccion(nodo, "copiar-id")}>
+          <span className="truncate">Copiar identificador</span>
+          <span className="ml-auto max-w-[7rem] truncate text-[0.65rem] text-foreground/40">{nodo.id}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function FilaArbol({
   nodo,
@@ -158,6 +278,10 @@ function FilaArbol({
   seleccionada,
   onAlternar,
   onElegir,
+  onAccion,
+  provider,
+  accountId,
+  verEnPlataforma,
 }: {
   nodo: Nodo;
   profundidad: number;
@@ -166,6 +290,10 @@ function FilaArbol({
   seleccionada: string;
   onAlternar: (clave: string) => void;
   onElegir: (nodo: Nodo) => void;
+  onAccion: (nodo: Nodo, accion: AccionDeNodo) => void;
+  provider: string;
+  accountId: string;
+  verEnPlataforma: boolean;
 }) {
   const abierto = forzarAbierto || abiertos.has(nodo.clave);
   const tieneHijos = nodo.hijos.length > 0;
@@ -179,7 +307,7 @@ function FilaArbol({
           if (e.key === "Enter" || e.key === " ") onElegir(nodo);
         }}
         className={cn(
-          "flex cursor-pointer items-center gap-1.5 rounded-lg py-2 pr-2 text-sm transition-colors hover:bg-foreground/5",
+          "group/fila flex cursor-pointer items-center gap-1.5 rounded-lg py-2 pr-1 text-sm transition-colors hover:bg-foreground/5",
           seleccionada === nodo.clave ? "bg-brand/12 font-semibold text-brand" : "text-foreground/75",
         )}
         style={{ paddingLeft: `${profundidad * 16 + 8}px` }}
@@ -206,6 +334,7 @@ function FilaArbol({
         <span aria-hidden className="shrink-0 text-xs">{ICONO[nodo.nivel]}</span>
         <span className="min-w-0 flex-1 truncate" title={nodo.nombre}>{nodo.nombre}</span>
         {tieneHijos && <span className="shrink-0 text-[0.65rem] text-foreground/35">{nodo.hijos.length}</span>}
+        <MenuDeNodo nodo={nodo} provider={provider} accountId={accountId} onAccion={onAccion} verEnPlataforma={verEnPlataforma} />
       </div>
       {abierto &&
         nodo.hijos.map((h) => (
@@ -218,6 +347,10 @@ function FilaArbol({
             seleccionada={seleccionada}
             onAlternar={onAlternar}
             onElegir={onElegir}
+            onAccion={onAccion}
+            provider={provider}
+            accountId={accountId}
+            verEnPlataforma={verEnPlataforma}
           />
         ))}
     </div>
@@ -237,6 +370,22 @@ type Modo = "editar" | "desglose";
  * mismo lugar, los campos que se pueden cambiar. Cerrar con cambios sin
  * aplicar pregunta antes; nada se escribe sin "Revisar" y "Aplicar".
  */
+/** Lo ya leído de cada entidad, para abrirla al instante (y la precarga al pasar por la tabla). */
+const CACHE_DE_DETALLE = new Map<string, { at: number; datos: Respuesta }>();
+const PRECARGADAS = new Set<string>();
+
+/**
+ * Pide en segundo plano la configuración de UNA entidad de la cuenta: el servidor lee la cuenta entera y la recuerda, así abrir
+ * cualquier otra de esa cuenta también es inmediato. Se hace una sola vez por cuenta y sesión.
+ */
+export function precalentarDetalle(provider: string, accountId: string, nivel: string, id: string): void {
+  const marca = `${provider}:${accountId}`;
+  if (PRECARGADAS.has(marca) || !id) return;
+  PRECARGADAS.add(marca);
+  const params = new URLSearchParams({ provider, accountId, nivel, id });
+  void fetch(`/api/entidades/detalle?${params}`, { cache: "no-store" }).catch(() => PRECARGADAS.delete(marca));
+}
+
 export function DetalleEntidadSheet({
   entidad,
   ads,
@@ -311,11 +460,28 @@ export function DetalleEntidadSheet({
       nivel: actual.nivel,
       id: actual.id,
     });
-    fetchConReintento(`/api/entidades/detalle?${params}`, { signal: control.signal }, 3, 45_000)
-      .then(async (respuesta) => {
+    // Lo que ya se leyó (o se precargó al pasar por la tabla) sale al instante; mientras, se revalida por detrás.
+    const guardada = CACHE_DE_DETALLE.get(clave);
+    if (guardada && Date.now() - guardada.at < 10 * 60_000) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- muestra al instante lo ya leído
+      setResultado({ clave, datos: guardada.datos, error: null });
+    }
+    const leer = (extra = "") =>
+      fetchConReintento(`/api/entidades/detalle?${params}${extra}`, { signal: control.signal }, 3, 45_000).then(async (respuesta) => {
         const cuerpo = await respuesta.json().catch(() => null);
         if (!respuesta.ok) throw new Error(cuerpo?.error ?? "No se pudo leer la configuración");
-        setResultado({ clave, datos: cuerpo as Respuesta, error: null });
+        return cuerpo as Respuesta & { obsoleto?: boolean };
+      });
+    leer()
+      .then(async (cuerpo) => {
+        CACHE_DE_DETALLE.set(clave, { at: Date.now(), datos: cuerpo });
+        setResultado({ clave, datos: cuerpo, error: null });
+        // Si el servidor entregó algo guardado, se pide enseguida la lectura al día y se actualiza en silencio.
+        if (cuerpo.obsoleto) {
+          const nuevo = await leer("&fresco=1");
+          CACHE_DE_DETALLE.set(clave, { at: Date.now(), datos: nuevo });
+          setResultado({ clave, datos: nuevo, error: null });
+        }
       })
       .catch((e: unknown) => {
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -328,11 +494,38 @@ export function DetalleEntidadSheet({
     return () => control.abort();
   }, [actual, clave]);
 
-  const arbol = useMemo(
-    () => (actual ? armarArbol(ads, actual.provider, actual.accountId) : []),
-    [ads, actual],
-  );
-  const claveNodo = actual ? `${actual.nivel}:${actual.id}` : "";
+  // Árbol de la cuenta: con la lectura directa de la plataforma (Google y Meta) sale completo; si no se puede, el de la tabla.
+  const [arbolDePlataforma, setArbolDePlataforma] = useState<{ cuenta: string; nodos: Nodo[] } | null>(null);
+  const cuentaDelArbol = actual && (actual.provider === "google" || actual.provider === "meta") ? `${actual.provider}:${actual.accountId}` : null;
+  useEffect(() => {
+    if (!cuentaDelArbol || !actual) return;
+    if (arbolDePlataforma?.cuenta === cuentaDelArbol) return;
+    let vivo = true;
+    const { provider, accountId } = actual;
+    fetch(`/api/entidades/cliente-de-cuenta?accountId=${encodeURIComponent(accountId)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: { portfolioId?: string } | null) =>
+        c?.portfolioId
+          ? fetch(`/api/entidades/arbol?portfolioId=${encodeURIComponent(c.portfolioId)}&accountId=${encodeURIComponent(accountId)}&provider=${provider}&anuncios=1`, { cache: "no-store" })
+          : null,
+      )
+      .then((r) => (r && r.ok ? (r.json() as Promise<RespuestaDeArbol>) : null))
+      .then((j) => {
+        if (vivo && j && j.campanas.length > 0) setArbolDePlataforma({ cuenta: cuentaDelArbol, nodos: armarArbolNativo(j) });
+      })
+      .catch(() => {
+        // Sin el árbol de la plataforma queda el de la tabla.
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [cuentaDelArbol, actual, arbolDePlataforma]);
+  const arbol = useMemo(() => {
+    if (!actual) return [];
+    if (arbolDePlataforma && arbolDePlataforma.cuenta === cuentaDelArbol) return arbolDePlataforma.nodos;
+    return armarArbol(ads, actual.provider, actual.accountId);
+  }, [ads, actual, arbolDePlataforma, cuentaDelArbol]);
+  const claveNodo = actual ? (actual.grupoDeRecursosId ? `grupo:${actual.grupoDeRecursosId}` : `${actual.nivel}:${actual.id}`) : "";
   const camino = useMemo(() => caminoA(arbol, claveNodo), [arbol, claveNodo]);
   const visibles = useMemo(() => filtrarArbol(arbol, busqueda), [arbol, busqueda]);
 
@@ -382,9 +575,15 @@ export function DetalleEntidadSheet({
     }
     setNavegando({ base: entidad, actual: destino });
   }
-  function elegirNodo(nodo: Nodo) {
-    if (!actual || nodo.clave === claveNodo) return;
+  function elegirNodo(nodo: Nodo, sugerido?: Record<string, string>) {
+    if (!actual || (nodo.clave === claveNodo && !sugerido)) return;
+    if (nodo.campaignId) {
+      // Un grupo de recursos de Performance Max se edita desde su campaña; el árbol lo marca y la vista previa es la suya.
+      irA({ sugerido, provider: actual.provider, accountId: actual.accountId, nivel: "campana", id: nodo.campaignId, nombre: camino[0]?.nombre ?? nodo.nombre, currency: actual.currency, rango: actual.rango, grupoDeRecursosId: nodo.id });
+      return;
+    }
     irA({
+      sugerido,
       provider: actual.provider,
       accountId: actual.accountId,
       nivel: nodo.nivel,
@@ -393,6 +592,30 @@ export function DetalleEntidadSheet({
       currency: actual.currency,
       rango: actual.rango,
     });
+  }
+
+  function accionDeNodo(nodo: Nodo, accion: AccionDeNodo) {
+    if (!actual) return;
+    if (accion === "editar") elegirNodo(nodo);
+    else if (accion === "eliminar") {
+      // Queda marcado en el formulario del nodo: se revisa (con la advertencia) y se aplica o se envía a revisión.
+      elegirNodo(nodo, { estadoPedido: "eliminar" });
+    } else if (accion === "pausar" || accion === "activar") {
+      // El estado queda elegido en el formulario del nodo: se revisa y se aplica como cualquier otro cambio.
+      elegirNodo(nodo, { estadoPedido: accion });
+    } else if (accion === "copiar-id") {
+      void navigator.clipboard?.writeText(nodo.id).catch(() => {});
+    } else if (accion === "orb") {
+      const que = nodo.nivel === "campana" ? "la campaña" : nodo.nivel === "conjunto" ? "el conjunto" : "el anuncio";
+      window.dispatchEvent(
+        new CustomEvent("wiwo:orb-pedir", {
+          detail: {
+            decisionId: "",
+            texto: `Revisa ${que} «${nodo.nombre}» (${platformLabel(actual.provider)}, cuenta ${actual.accountId}, id ${nodo.id}) y dime en pocas líneas qué conviene cambiar. No apliques nada.`,
+          },
+        }),
+      );
+    }
   }
 
   function descartarYContinuar() {
@@ -460,7 +683,11 @@ export function DetalleEntidadSheet({
                     return s;
                   })
                 }
-                onElegir={elegirNodo}
+                onElegir={(n) => elegirNodo(n)}
+                onAccion={accionDeNodo}
+                provider={actual.provider}
+                accountId={actual.accountId}
+                verEnPlataforma={datos?.verEnPlataforma === true}
               />
             ))
           )}
@@ -579,6 +806,27 @@ export function DetalleEntidadSheet({
                       anuncio={datos.anuncio}
                       puedeAprobar={puedeAprobar}
                       valoresIniciales={conSugerido ? actual.sugerido : undefined}
+                      puedeAprobarPresupuesto={datos.verEnPlataforma === true}
+                      crearVersion={
+                        puedeAprobar && onCrearVersion && actual.nivel === "anuncio" && actual.provider === "meta" && datos.anuncio && datos.conjunto && datos.campana && !datos.anuncio.edicionDeContenido.editable
+                          ? (imagenUrl) => {
+                              const a = datos.anuncio!;
+                              onCrearVersion({
+                                nombre: a.nombre ?? actual.nombre,
+                                accountId: actual.accountId,
+                                campaignId: datos.campana!.id,
+                                campaignName: datos.campana!.nombre ?? "",
+                                adsetId: datos.conjunto!.id,
+                                adsetName: datos.conjunto!.nombre ?? "",
+                                textoPrincipal: a.contenido.textoPrincipal,
+                                titulo: a.contenido.titulo,
+                                urlDestino: a.contenido.urlDestino,
+                                cta: a.contenido.cta,
+                                imagenUrl: imagenUrl ?? a.contenido.imagenUrl ?? a.contenido.miniaturaUrl,
+                              });
+                            }
+                          : undefined
+                      }
                       onSucio={(valor) => clave && setSucio({ clave, valor })}
                       onAplicado={() => {
                         setVersion((v) => v + 1);
@@ -663,6 +911,9 @@ export function DetalleEntidadSheet({
               {datos?.encontrada && actual.nivel === "anuncio" && anuncioActual && (
                 <VistaPrevia d={anuncioActual} />
               )}
+              {datos?.encontrada && actual.nivel === "campana" && actual.provider === "google" && (datos.campana?.gruposDeRecursos?.length ?? 0) > 0 && (
+                <VistaDeGrupoDeRecursos campana={datos.campana!} grupoId={actual.grupoDeRecursosId} />
+              )}
               {datos?.encontrada && actual.nivel !== "anuncio" && (
                 <ResumenLateral
                   campana={datos.campana}
@@ -733,15 +984,143 @@ function Bloque({ titulo, subtitulo, children }: { titulo: string; subtitulo?: s
   );
 }
 
+const FORMATOS_VISTA: Array<[string, string]> = [
+  ["MOBILE_FEED_STANDARD", "Feed Facebook"],
+  ["INSTAGRAM_STANDARD", "Feed Instagram"],
+  ["INSTAGRAM_STORY", "Historias IG"],
+  ["INSTAGRAM_REELS", "Reels"],
+];
+
+/** La vista previa real de Meta (la misma de Ads Manager), por formato. Si Meta no la entrega, queda la aproximación de abajo. */
+function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string; anuncioId: string; alFallar: () => void }) {
+  const [formato, setFormato] = useState("MOBILE_FEED_STANDARD");
+  const [url, setUrl] = useState<string | null | undefined>(undefined);
+  const [medidas, setMedidas] = useState<{ ancho: number; alto: number }>({ ancho: 340, alto: 560 });
+  const [disponible, setDisponible] = useState(0);
+  const caja = useRef<HTMLDivElement>(null);
+  // Se mide el espacio del panel para escalar la vista previa de Meta a su ancho (sin barras de desplazamiento).
+  useEffect(() => {
+    const el = caja.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setDisponible(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    let vivo = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a pedir la vista previa al cambiar de formato o de anuncio
+    setUrl(undefined);
+    fetch(`/api/entidades/vista-previa?accountId=${encodeURIComponent(accountId)}&id=${encodeURIComponent(anuncioId)}&formato=${formato}`)
+      .then((r) => r.json().catch(() => null))
+      .then((j: { url?: string | null; ancho?: number | null; alto?: number | null } | null) => {
+        if (!vivo) return;
+        // Meta declara 450 de alto para el feed aunque un carrusel o un video con texto largo necesita más: se deja holgura para que no se corte.
+        if (j?.ancho && j?.alto) setMedidas({ ancho: j.ancho, alto: formato.includes("STORY") || formato.includes("REELS") ? Math.max(j.alto, 640) : Math.max(j.alto, 600) });
+        setUrl(j?.url ?? null);
+        if (!j?.url) alFallar();
+      })
+      .catch(() => {
+        if (!vivo) return;
+        setUrl(null);
+        alFallar();
+      });
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- alFallar solo avisa; no debe volver a pedir
+  }, [accountId, anuncioId, formato]);
+  return (
+    <div className="space-y-2 p-3">
+      <div className="flex flex-wrap gap-1 text-[0.7rem]">
+        {FORMATOS_VISTA.map(([clave, etiqueta]) => (
+          <button
+            key={clave}
+            type="button"
+            onClick={() => setFormato(clave)}
+            className={cn("rounded-full px-2.5 py-1 font-semibold", formato === clave ? "bg-brand/15 text-brand" : "text-foreground/55 hover:bg-foreground/6")}
+          >
+            {etiqueta}
+          </button>
+        ))}
+      </div>
+      <div ref={caja} className="w-full">
+        {url === undefined ? (
+          <div className="flex h-72 items-center justify-center text-xs text-foreground/45">Cargando la vista previa de Meta…</div>
+        ) : url ? (
+          (() => {
+            const escala = disponible > 0 ? Math.min(1, disponible / medidas.ancho) : 1;
+            return (
+              // El marco recorta con esquinas redondeadas: la vista previa de Meta se ve limpia, sin barras ni bordes cuadrados.
+              <div
+                className="mx-auto overflow-hidden rounded-3xl bg-white shadow-sm"
+                style={{ width: medidas.ancho * escala, height: medidas.alto * escala }}
+              >
+                <iframe
+                  key={url}
+                  src={url}
+                  title="Vista previa del anuncio en Meta"
+                  scrolling="no"
+                  sandbox="allow-scripts allow-same-origin allow-popups"
+                  className="block border-0 bg-white"
+                  style={{ width: medidas.ancho, height: medidas.alto, transform: `scale(${escala})`, transformOrigin: "top left" }}
+                />
+              </div>
+            );
+          })()
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** Nombre del negocio cuando el anuncio no lo trae: el dominio del destino (sqm.com → «Sqm»). */
+function negocioDeDominio(url: string | null): string {
+  const base = dominioDe(url).split(".")[0] ?? "";
+  return base ? base.charAt(0).toUpperCase() + base.slice(1) : "Tu negocio";
+}
+
+/** Performance Max: el contenido vive en el grupo de recursos; se elige uno y se ve en todas las superficies de Google. */
+function VistaDeGrupoDeRecursos({ campana, grupoId }: { campana: DetalleCampana; grupoId?: string }) {
+  const grupos = campana.gruposDeRecursos ?? [];
+  const [propio, setPropio] = useState<string | null>(null);
+  const elegido = grupos.find((g) => g.id === (propio ?? grupoId)) ?? grupos[0];
+  if (!elegido) return null;
+  return (
+    <div className="space-y-2">
+      {grupos.length > 1 && (
+        <select
+          value={elegido.id}
+          onChange={(e) => setPropio(e.target.value)}
+          className="w-full rounded-lg border border-foreground/15 bg-card px-3 py-2 text-xs"
+          aria-label="Grupo de recursos"
+        >
+          {grupos.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.nombre ?? g.id}
+            </option>
+          ))}
+        </select>
+      )}
+      <VistaPreviaGoogle key={elegido.id} pieza={piezaDeGrupoDeRecursos(elegido, negocioDeDominio(elegido.urlsFinales[0] ?? null))} />
+    </div>
+  );
+}
+
 function VistaPrevia({ d }: { d: DetalleAnuncio }) {
+  const [sinReal, setSinReal] = useState(false);
   const c = d.contenido;
   const imagen = c.imagenUrl ?? c.miniaturaUrl;
+  if (d.provider === "google") {
+    return <VistaPreviaGoogle key={d.id} pieza={piezaDeAnuncioGoogle(d, negocioDeDominio(c.urlDestino))} />;
+  }
   return (
     <div className="overflow-hidden rounded-2xl border border-foreground/10 bg-card/40">
       <p className="border-b border-foreground/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-foreground/45">
-        Vista previa · así está hoy
+        Vista previa · así se ve en {platformLabel(d.provider)}
       </p>
-      {d.provider === "meta" ? (
+      {d.provider === "meta" && !sinReal ? (
+        <VistaRealDeMeta accountId={d.accountId} anuncioId={d.id} alFallar={() => setSinReal(true)} />
+      ) : (
         <div className="space-y-2 p-3 text-sm">
           {c.textoPrincipal && <p className="line-clamp-4 whitespace-pre-wrap">{c.textoPrincipal}</p>}
           {imagen ? (
@@ -759,18 +1138,6 @@ function VistaPrevia({ d }: { d: DetalleAnuncio }) {
               {c.cta && <Badge variant="outline">{c.cta}</Badge>}
             </div>
           )}
-        </div>
-      ) : (
-        <div className="space-y-1 p-4 text-sm">
-          <p className="text-xs text-foreground/50">
-            Anuncio · {c.urlDestino ? new URL(c.urlDestino, "https://x.invalid").host.replace("x.invalid", "") : "tu sitio"}
-          </p>
-          <p className="font-medium text-brand">
-            {c.titulares.slice(0, 3).map((t) => t.texto).join(" | ") || "Sin titulares"}
-          </p>
-          <p className="text-foreground/70">
-            {c.descripciones.slice(0, 2).map((t) => t.texto).join(" ") || "Sin descripciones"}
-          </p>
         </div>
       )}
     </div>
@@ -881,6 +1248,9 @@ function monto(valor: number | null, moneda: string | null): string | null {
 
 function fecha(valor: string | null): string | null {
   if (!valor) return null;
+  // Una fecha sin hora (LinkedIn, Google) es un día de calendario: no se pasa por la zona horaria, que la correría al día anterior.
+  const solaFecha = /^(\d{4})-(\d{2})-(\d{2})$/.exec(valor);
+  if (solaFecha) return new Date(Number(solaFecha[1]), Number(solaFecha[2]) - 1, Number(solaFecha[3])).toLocaleDateString("es-CL", { dateStyle: "medium" });
   const d = new Date(valor);
   return Number.isNaN(d.getTime())
     ? valor
