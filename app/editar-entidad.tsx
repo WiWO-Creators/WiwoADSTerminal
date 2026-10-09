@@ -1,6 +1,7 @@
 "use client";
 
 import { EditorAnuncioGoogle } from "./editar-anuncio-google";
+import { ContenidoDeGoogleSoloLectura } from "./contenido-google-solo-lectura";
 import { useImperativeHandle, useMemo, useState, type ReactNode, type Ref } from "react";
 import { toast } from "sonner";
 
@@ -8,20 +9,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { CTA_COMUNES, CTA_CODIGOS, CTA_CON_DESTINO, CTA_ETIQUETAS, etiquetaCta } from "@/lib/cta";
 import type {
   DetalleAnuncio,
   DetalleCampana,
   DetalleConjunto,
 } from "@/lib/detalle-entidad";
 import type { CambiosEdicion, CambioVisible, Problema, Verificacion } from "@/lib/edicion-plan";
+import { limitesDeGoogle, seccionesDeGoogle } from "@/lib/google-secciones-pura";
 import { formatearPalabraClave } from "@/lib/palabras-clave";
-import { DIAS_DE_LA_SEMANA } from "@/lib/horario-meta-pura";
-import { FORMATOS_META, formatosDeSegmentacion, META_SURFACES, POSICIONES_META, REDES_CON_POSICIONES, type FormatoMeta, type RedConPosiciones } from "@/lib/formatos-meta-pura";
+import { aFechaDeMeta, partesDeFechaMeta } from "@/lib/fecha-meta-pura";
+import { formatosDeSegmentacion, REDES_CON_POSICIONES, type FormatoMeta } from "@/lib/formatos-meta-pura";
 import type { NivelEntidad } from "@/lib/plataformas";
-import { atribucionesAdmitidas } from "@/lib/constructor";
 import { OrbeDeBoton } from "./ui";
-import { SegmentacionMeta } from "./segmentacion-meta";
+import { EditorMetaAnuncio, EditorMetaCampana, EditorMetaConjunto } from "./editor-meta";
 
 type Simulacion = {
   plan: {
@@ -50,6 +50,10 @@ type Props = {
   ref?: Ref<AccionesEditor>;
   /** Valores que ya vienen cambiados (por ejemplo, desde una sugerencia). */
   valoresIniciales?: Record<string, string>;
+  /** Directores y Administradores aplican un cambio de presupuesto sin aprobación; los demás lo envían a revisión. */
+  puedeAprobarPresupuesto?: boolean;
+  /** Meta, anuncio hecho desde una publicación: abre el Creador con una versión nueva (con otra imagen, si se da). */
+  crearVersion?: (imagenUrl: string | null) => void;
   /** Avisa si hay algo cambiado sin aplicar, para preguntar antes de cerrar. */
   onSucio?: (sucio: boolean) => void;
   provider: string;
@@ -136,8 +140,14 @@ function inicial(p: Props): Record<string, string> {
       v.audExcluir = ids(cruda.excluded_custom_audiences).join(",");
       v.atribucion = "";
     }
-    // LinkedIn muestra la fecha de término actual (aaaa-mm-dd); Meta parte vacío.
-    v.fin = p.provider === "linkedin" ? (c.fin ?? "") : "";
+    // LinkedIn muestra la fecha de término actual (aaaa-mm-dd); Meta, la hora de la cuenta, como Ads Manager.
+    if (p.provider === "meta") {
+      const f = partesDeFechaMeta(c.fin);
+      v.fin = f?.local ?? "";
+      v.finOffset = f?.offset ?? "";
+    } else {
+      v.fin = p.provider === "linkedin" ? (c.fin ?? "") : "";
+    }
   }
   if (p.nivel === "anuncio" && p.anuncio) {
     const c = p.anuncio.contenido;
@@ -163,7 +173,6 @@ function inicial(p: Props): Record<string, string> {
   return v;
 }
 
-const csvDe = (t: string | undefined): string[] => (t ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 
 /** Nombres de los intereses y audiencias que ya tiene el conjunto, para mostrarlos legibles. */
 function nombresDeSegmentacion(cruda: Record<string, unknown> | null): Record<string, string> {
@@ -195,6 +204,7 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   if (cambio("nombre")) c.nombre = ahora.nombre;
   if (ahora.estadoPedido === "pausar") c.pausar = true;
   if (ahora.estadoPedido === "activar") c.activar = true;
+  if (ahora.estadoPedido === "eliminar") return { eliminar: true };
 
   if (cambio("presupuestoMonto") || cambio("presupuestoTipo")) {
     const monto = num(ahora.presupuestoMonto ?? "");
@@ -287,7 +297,7 @@ function armarCambios(p: Props, ahora: Record<string, string>, antes: Record<str
   if (cambio("edadMin")) c.edadMin = num(ahora.edadMin ?? "");
   if (cambio("edadMax")) c.edadMax = num(ahora.edadMax ?? "");
   if (cambio("paises")) c.paises = (ahora.paises ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  if (cambio("fin") && ahora.fin) c.fin = p.provider === "linkedin" ? ahora.fin : new Date(ahora.fin).toISOString();
+  if (cambio("fin") && ahora.fin) c.fin = p.provider === "linkedin" ? ahora.fin : p.provider === "meta" ? aFechaDeMeta(ahora.fin, ahora.finOffset ?? "") : new Date(ahora.fin).toISOString();
 
   if (cambio("textoPrincipal")) c.textoPrincipal = ahora.textoPrincipal;
   if (cambio("titulo")) c.titulo = ahora.titulo;
@@ -427,14 +437,32 @@ export function EditarEntidad(props: Props) {
   // Meta no deja cambiar el contenido de un anuncio que usa una publicación existente (nombre y UTM sí).
   const contenidoBloqueado =
     provider === "meta" && nivel === "anuncio" && props.anuncio?.edicionDeContenido.editable === false;
+  // Google: cada tipo de campaña tiene sus propios campos (como en Google Ads): las redes solo se editan en Búsqueda, las extensiones
+  // de campaña también, y una estrategia que aquí no se edita (por ejemplo, CPV objetivo en Video) se muestra, sin inventar un valor.
+  // La campaña (el tipo) está disponible en los tres niveles: el grupo y el anuncio también cambian según el tipo de su campaña.
+  const tipoGoogle = provider === "google" ? (props.campana?.objetivo ?? "") : "";
+  const seccionesG = seccionesDeGoogle(tipoGoogle, nivel);
+  const esBusqueda = seccionesG.has("redes");
+  const conRotacion = seccionesG.has("rotacion");
+  const limiteG = provider === "google" ? limitesDeGoogle(tipoGoogle, nivel) : null;
+  // Un anuncio responsivo de búsqueda se edita; los demás tipos se muestran tal cual (lo dice su propio tipo, que manda sobre el de la campaña).
+  const esRsa = nivel === "anuncio" && provider === "google" && (props.anuncio?.tipo ? props.anuncio.tipo === "RESPONSIVE_SEARCH_AD" : seccionesG.has("contenidoRsa"));
+  const estrategiaGoogle = props.campana?.puja.estrategia ?? null;
+  const estrategiaSoloLectura = Boolean(estrategiaGoogle) && !valores.pujaTipo;
+  const presupuestoTotalGoogle = provider === "google" && nivel === "campana" && props.campana?.presupuesto.total != null ? props.campana.presupuesto.total : null;
+  // Hoy (en la zona del navegador): ninguna fecha de inicio o término nueva puede ser anterior.
+  const [hoyIso] = useState(() => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10));
   const bloqueantes = simulacion?.plan.problemas.filter((p) => p.bloqueante) ?? [];
   const puedeAplicar0 =
     simulacion !== null &&
     bloqueantes.length === 0 &&
     (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
     simulacion.validacionGoogle?.ok !== false;
+  // Un cambio de presupuesto lo puede proponer cualquiera, pero solo Directores y Administradores lo aplican directo.
+  const tocaPresu = simulacion?.plan.diff.some((d) => d.campo === "presupuesto" || d.campo === "limiteGasto") === true;
+  const aplicaDirecto = puedeAprobar && (!tocaPresu || props.puedeAprobarPresupuesto === true);
   const puedeAplicar =
-    puedeAprobar &&
+    aplicaDirecto &&
     simulacion !== null &&
     bloqueantes.length === 0 &&
     (simulacion.plan.pasos.length > 0 || simulacion.plan.pausaPedida === true || simulacion.plan.activacionPedida === true) &&
@@ -443,13 +471,46 @@ export function EditarEntidad(props: Props) {
   return (
     <div className="space-y-4">
       <div className="space-y-3">
-        {provider === "linkedin" && nivel === "anuncio" ? (
+        {provider === "meta" && nivel === "campana" && <EditorMetaCampana campana={props.campana} valores={valores} poner={poner} moneda={props.currency} />}
+        {provider === "meta" && nivel === "conjunto" && (
+          <EditorMetaConjunto
+            conjunto={props.conjunto}
+            campana={props.campana}
+            valores={valores}
+            poner={poner}
+            moneda={props.currency}
+            accountId={props.accountId}
+            nombresIniciales={nombresDeSegmentacion(props.conjunto?.segmentacionCruda ?? null)}
+          />
+        )}
+        {provider === "meta" && nivel === "anuncio" && <EditorMetaAnuncio anuncio={props.anuncio} valores={valores} poner={poner} contenidoBloqueado={contenidoBloqueado} accountId={props.accountId} crearVersion={props.crearVersion} />}
+        {provider === "meta" ? null : provider === "linkedin" && nivel === "anuncio" ? (
           <p className="rounded-xl border border-foreground/10 bg-foreground/4 p-3 text-sm leading-6 text-foreground/65">
             LinkedIn no permite editar un anuncio desde WiWO.ADS: se arma desde una publicación existente. Desde la tabla
             se puede pausar o activar.
           </p>
         ) : (
           <>
+          {provider === "google" ? (
+            <Campo etiqueta={`Estado ${nivel === "campana" ? "de la campaña" : nivel === "conjunto" ? "del grupo de anuncios" : "del anuncio"}`} ayuda="Pausar detiene la entrega; habilitar la reanuda.">
+              <select
+                className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
+                value={valores.estadoPedido ?? ""}
+                onChange={(e) => poner("estadoPedido")(e.target.value)}
+              >
+                {(() => {
+                  const entidad = nivel === "campana" ? props.campana : nivel === "conjunto" ? props.conjunto : props.anuncio;
+                  const habilitada = ["ENABLED", "ACTIVE"].includes((entidad?.estado ?? "").toUpperCase());
+                  return (
+                    <>
+                      <option value="">{habilitada ? "Habilitada" : "Pausada"}</option>
+                      <option value={habilitada ? "pausar" : "activar"}>{habilitada ? "Pausada" : "Habilitada"}</option>
+                    </>
+                  );
+                })()}
+              </select>
+            </Campo>
+          ) : (
           <Campo etiqueta="Estado" ayuda="Pausar detiene la entrega; activar la reanuda. Si no eliges nada, el estado no cambia.">
             <select
               className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm"
@@ -461,26 +522,28 @@ export function EditarEntidad(props: Props) {
               {provider !== "linkedin" && <option value="activar">Activar {nivel === "campana" ? "esta campaña" : nivel === "conjunto" ? "este conjunto" : "este anuncio"}</option>}
             </select>
           </Campo>
+          )}
+          {!(provider === "google" && nivel === "anuncio") && (
           <Campo
             etiqueta="Nombre"
-            ayuda={provider === "linkedin" && nivel === "campana" ? "LinkedIn no permite renombrar un grupo de campañas desde Windsor." : undefined}
+            ayuda={provider === "linkedin" && nivel === "campana" ? "Renombrar requiere la conexión directa de LinkedIn (Integraciones); sin ella, se hace en LinkedIn." : undefined}
           >
             <Input
               value={valores.nombre ?? ""}
-              disabled={provider === "linkedin" && nivel === "campana"}
               onChange={(e) => poner("nombre")(e.target.value)}
             />
           </Campo>
+          )}
           </>
         )}
 
-        {!(provider === "linkedin" && nivel === "anuncio") &&
-          (nivel === "campana" || (nivel === "conjunto" && (provider === "meta" || provider === "linkedin"))) && (
+        {provider !== "meta" && !(provider === "linkedin" && nivel === "anuncio") &&
+          (nivel === "campana" || (nivel === "conjunto" && provider === "linkedin")) && (
           <Campo
             etiqueta={provider === "linkedin" && nivel === "campana" ? "Presupuesto total del grupo" : "Presupuesto"}
             ayuda={
               provider === "google"
-                ? "Google usa presupuesto diario."
+                ? presupuestoTotalGoogle !== null ? undefined : "Google usa presupuesto diario."
                 : provider === "linkedin"
                   ? "Un presupuesto total exige que la campaña (o el grupo) tenga fecha de término."
                   : undefined
@@ -500,10 +563,16 @@ export function EditarEntidad(props: Props) {
               <Input
                 inputMode="decimal"
                 placeholder="Monto"
+                disabled={presupuestoTotalGoogle !== null}
                 value={valores.presupuestoMonto ?? ""}
                 onChange={(e) => poner("presupuestoMonto")(e.target.value)}
               />
             </div>
+            {presupuestoTotalGoogle !== null && (
+              <p className="text-[0.7rem] leading-4 text-foreground/45">
+                Esta campaña usa un presupuesto TOTAL por el período de la campaña. Google no deja cambiarlo desde aquí: se edita en Google Ads.
+              </p>
+            )}
           </Campo>
         )}
 
@@ -511,12 +580,13 @@ export function EditarEntidad(props: Props) {
           <>
             <div className="grid grid-cols-2 gap-3">
               <Campo etiqueta="Inicio" ayuda="Google no deja cambiarlo si la campaña ya empezó.">
-                <Input type="date" value={valores.inicio ?? ""} onChange={(e) => poner("inicio")(e.target.value)} />
+                <Input type="date" min={hoyIso} disabled={Boolean(props.campana?.inicio) && (props.campana?.inicio ?? "") <= hoyIso} value={valores.inicio ?? ""} onChange={(e) => poner("inicio")(e.target.value)} />
               </Campo>
               <Campo etiqueta="Fin" ayuda="Vacío = sin fecha de fin.">
-                <Input type="date" value={valores.finCampana ?? ""} onChange={(e) => poner("finCampana")(e.target.value)} />
+                <Input type="date" min={hoyIso} value={valores.finCampana ?? ""} onChange={(e) => poner("finCampana")(e.target.value)} />
               </Campo>
             </div>
+            {esBusqueda && (
             <Campo etiqueta="Redes" ayuda="Dónde se muestran los anuncios. La Búsqueda de Google no se puede quitar. Requiere tu cuenta de Google conectada.">
               <div className="flex flex-wrap gap-4 text-sm">
                 {([["redBusqueda", "Búsqueda de Google", true], ["redAsociadas", "Socios de búsqueda", false], ["redDisplay", "Red de Display", false]] as const).map(
@@ -534,6 +604,8 @@ export function EditarEntidad(props: Props) {
                 )}
               </div>
             </Campo>
+            )}
+            {conRotacion && (
             <Campo etiqueta="Rotación de anuncios">
               <NativeSelect value={valores.rotacion ?? ""} onChange={(e) => poner("rotacion")(e.target.value)}>
                 {!valores.rotacion && <NativeSelectOption value="">Sin leer</NativeSelectOption>}
@@ -541,6 +613,15 @@ export function EditarEntidad(props: Props) {
                 <NativeSelectOption value="ROTATE_INDEFINITELY">Rotar sin optimizar</NativeSelectOption>
               </NativeSelect>
             </Campo>
+            )}
+            {estrategiaSoloLectura && (
+              <Campo etiqueta="Estrategia de puja" ayuda="Esta estrategia no se edita desde WiWO.ADS: se cambia en Google Ads.">
+                <p className="rounded-xl border border-foreground/10 bg-foreground/[0.04] px-3 py-2 text-sm">
+                  {({ TARGET_CPV: "CPV objetivo (costo por visualización)", TARGET_CPM: "CPM objetivo", MANUAL_CPM: "CPM manual", MANUAL_CPV: "CPV manual", TARGET_CPA: "CPA objetivo", TARGET_ROAS: "ROAS objetivo", TARGET_SPEND: "Maximizar clics", MAXIMIZE_CONVERSIONS: "Maximizar conversiones", MAXIMIZE_CONVERSION_VALUE: "Maximizar el valor de conversión", MANUAL_CPC: "CPC manual", TARGET_IMPRESSION_SHARE: "Cuota de impresiones objetivo" } as Record<string, string>)[estrategiaGoogle ?? ""] ?? estrategiaGoogle}
+                </p>
+              </Campo>
+            )}
+            {!estrategiaSoloLectura && (
             <Campo etiqueta="Estrategia de puja" ayuda="Cambiarla pausa la campaña para que alguien la revise. Los importes son opcionales y en la moneda de la cuenta.">
               <NativeSelect value={valores.pujaTipo ?? ""} onChange={(e) => poner("pujaTipo")(e.target.value)}>
                 {!valores.pujaTipo && <NativeSelectOption value="">Sin leer</NativeSelectOption>}
@@ -551,6 +632,7 @@ export function EditarEntidad(props: Props) {
                 <NativeSelectOption value="cuota_impresiones">Cuota de impresiones objetivo</NativeSelectOption>
               </NativeSelect>
             </Campo>
+            )}
             {(valores.pujaTipo === "clics" || valores.pujaTipo === "cuota_impresiones") && (
               <Campo etiqueta={valores.pujaTipo === "cuota_impresiones" ? "CPC máximo (obligatorio)" : "CPC máximo (opcional)"}>
                 <Input inputMode="decimal" value={valores.pujaCpc ?? ""} onChange={(e) => poner("pujaCpc")(e.target.value)} />
@@ -596,7 +678,7 @@ export function EditarEntidad(props: Props) {
             <Campo etiqueta="Plantilla de URL de seguimiento" ayuda="Vacía, se quita la que tenga.">
               <Input value={valores.plantillaSeguimiento ?? ""} onChange={(e) => poner("plantillaSeguimiento")(e.target.value)} placeholder="{lpurl}?utm_source=google" />
             </Campo>
-            {props.campana?.extensiones && (
+            {esBusqueda && props.campana?.extensiones && (
               <fieldset className="space-y-3 rounded-xl border border-foreground/10 p-3">
                 <legend className="px-1 text-xs font-bold text-foreground/70">Extensiones de la campaña</legend>
                 <Campo etiqueta="Enlaces de sitio" ayuda="Uno por línea: texto | URL | descripción 1 | descripción 2. El texto admite 25 caracteres; las dos descripciones (35) van juntas o ninguna. Hasta 20.">
@@ -639,42 +721,17 @@ export function EditarEntidad(props: Props) {
           </>
         )}
 
-        {nivel === "campana" && provider === "meta" && (
-          <Campo etiqueta="Límite de gasto de la campaña" ayuda="Tope total que la campaña no superará. Para quitarlo, hazlo en Meta.">
-            <Input inputMode="decimal" value={valores.limiteGasto ?? ""} onChange={(e) => poner("limiteGasto")(e.target.value)} />
-          </Campo>
+        {nivel === "conjunto" && provider === "google" && limiteG && (
+          <p className="rounded-xl border border-foreground/10 bg-foreground/4 p-3 text-sm leading-6 text-foreground/65">{limiteG}</p>
         )}
 
-        {nivel === "campana" && provider === "meta" && props.campana?.presupuesto.enLaCampana && (
-          <Campo etiqueta="Estrategia de puja" ayuda="Las estrategias con tope se eligen en el conjunto, junto con el monto de la puja.">
-            <NativeSelect value={valores.estrategiaPuja ?? ""} onChange={(e) => poner("estrategiaPuja")(e.target.value)}>
-              {!valores.estrategiaPuja && <NativeSelectOption value="">Sin leer</NativeSelectOption>}
-              <NativeSelectOption value="LOWEST_COST_WITHOUT_CAP">Mayor volumen (sin tope)</NativeSelectOption>
-              <NativeSelectOption value="LOWEST_COST_WITH_BID_CAP" disabled>Tope de puja (en el conjunto)</NativeSelectOption>
-              <NativeSelectOption value="COST_CAP" disabled>Costo objetivo (en el conjunto)</NativeSelectOption>
-            </NativeSelect>
-          </Campo>
-        )}
-
-        {nivel === "campana" && provider === "meta" && (
-          <Campo etiqueta="Categoría especial de anuncios" ayuda="Obligatoria si los anuncios son de vivienda, empleo, crédito o temas sociales/políticos; limita la segmentación.">
-            <NativeSelect value={valores.categoriaEspecial ?? ""} onChange={(e) => poner("categoriaEspecial")(e.target.value)}>
-              <NativeSelectOption value="">Ninguna</NativeSelectOption>
-              <NativeSelectOption value="HOUSING">Vivienda</NativeSelectOption>
-              <NativeSelectOption value="EMPLOYMENT">Empleo</NativeSelectOption>
-              <NativeSelectOption value="CREDIT">Crédito</NativeSelectOption>
-              <NativeSelectOption value="ISSUES_ELECTIONS_POLITICS">Temas sociales, electorales o políticos</NativeSelectOption>
-            </NativeSelect>
-          </Campo>
-        )}
-
-        {nivel === "conjunto" && provider !== "linkedin" && (
-          <Campo etiqueta={provider === "google" ? "CPC máximo" : "Puja"}>
+        {nivel === "conjunto" && provider === "google" && seccionesG.has("cpcMaximo") && (
+          <Campo etiqueta="CPC máximo">
             <Input inputMode="decimal" value={valores.puja ?? ""} onChange={(e) => poner("puja")(e.target.value)} />
           </Campo>
         )}
 
-        {nivel === "conjunto" && provider === "google" && (
+        {nivel === "conjunto" && provider === "google" && seccionesG.has("palabrasClave") && (
           <Campo
             etiqueta="Palabras clave"
             ayuda="Escribe las nuevas una por línea: [exacta], «frase» entre comillas, o amplia sin nada."
@@ -729,255 +786,18 @@ export function EditarEntidad(props: Props) {
             etiqueta="Fecha de término"
             ayuda="LinkedIn detiene la campaña al empezar ese día. Cámbiala o déjala igual."
           >
-            <Input type="date" value={valores.fin ?? ""} onChange={(e) => poner("fin")(e.target.value)} />
+            <Input type="date" min={hoyIso} value={valores.fin ?? ""} onChange={(e) => poner("fin")(e.target.value)} />
           </Campo>
         )}
 
-        {nivel === "conjunto" && provider === "meta" && (
-          <>
-            {!props.conjunto?.presupuesto.enLaCampana && (
-              <Campo etiqueta="Estrategia de puja" ayuda="Con tope de puja o costo objetivo, escribe también el monto en «Puja».">
-                <NativeSelect value={valores.estrategiaPuja ?? ""} onChange={(e) => poner("estrategiaPuja")(e.target.value)}>
-                  {!valores.estrategiaPuja && <NativeSelectOption value="">Sin leer</NativeSelectOption>}
-                  <NativeSelectOption value="LOWEST_COST_WITHOUT_CAP">Mayor volumen (sin tope)</NativeSelectOption>
-                  <NativeSelectOption value="LOWEST_COST_WITH_BID_CAP">Tope de puja</NativeSelectOption>
-                  <NativeSelectOption value="COST_CAP">Costo objetivo</NativeSelectOption>
-                </NativeSelect>
-              </Campo>
-            )}
-            <Campo etiqueta="Meta de optimización" ayuda="Debe ser compatible con el objetivo de la campaña; si no, Meta lo rechaza.">
-              <NativeSelect value={valores.optimizacion ?? ""} onChange={(e) => poner("optimizacion")(e.target.value)}>
-                {!valores.optimizacion && <NativeSelectOption value="">Sin leer</NativeSelectOption>}
-                {[
-                  ["LINK_CLICKS", "Clics en el enlace"],
-                  ["LANDING_PAGE_VIEWS", "Vistas de la página de destino"],
-                  ["REACH", "Alcance"],
-                  ["IMPRESSIONS", "Impresiones"],
-                  ["THRUPLAY", "ThruPlay (video)"],
-                  ["POST_ENGAGEMENT", "Interacción con la publicación"],
-                  ["PROFILE_AND_PAGE_ENGAGEMENT", "Interacción con el perfil o la página"],
-                  ["LEAD_GENERATION", "Leads (formulario)"],
-                  ["OFFSITE_CONVERSIONS", "Conversiones en el sitio"],
-                  ["CONVERSATIONS", "Conversaciones"],
-                ].map(([valor, texto]) => (
-                  <NativeSelectOption key={valor} value={valor}>{texto}</NativeSelectOption>
-                ))}
-                {valores.optimizacion && !["LINK_CLICKS","LANDING_PAGE_VIEWS","REACH","IMPRESSIONS","THRUPLAY","POST_ENGAGEMENT","PROFILE_AND_PAGE_ENGAGEMENT","LEAD_GENERATION","OFFSITE_CONVERSIONS","CONVERSATIONS"].includes(valores.optimizacion) && (
-                  <NativeSelectOption value={valores.optimizacion}>{valores.optimizacion}</NativeSelectOption>
-                )}
-              </NativeSelect>
-            </Campo>
-            <Campo etiqueta="Fecha y hora de término" ayuda="Menos de un año adelante. Vacío no cambia nada.">
-              <Input type="datetime-local" value={valores.fin ?? ""} onChange={(e) => poner("fin")(e.target.value)} />
-            </Campo>
-            <div className="grid grid-cols-2 gap-3">
-              <Campo etiqueta="Edad mínima">
-                <Input inputMode="numeric" value={valores.edadMin ?? ""} onChange={(e) => poner("edadMin")(e.target.value)} />
-              </Campo>
-              <Campo etiqueta="Edad máxima">
-                <Input inputMode="numeric" value={valores.edadMax ?? ""} onChange={(e) => poner("edadMax")(e.target.value)} />
-              </Campo>
-            </div>
-            <Campo etiqueta="Género">
-              <NativeSelect value={valores.generos ?? "todos"} onChange={(e) => poner("generos")(e.target.value)}>
-                <NativeSelectOption value="todos">Todos</NativeSelectOption>
-                <NativeSelectOption value="hombres">Hombres</NativeSelectOption>
-                <NativeSelectOption value="mujeres">Mujeres</NativeSelectOption>
-              </NativeSelect>
-            </Campo>
-            <SegmentacionMeta
-              accountId={props.accountId}
-              nombresIniciales={nombresDeSegmentacion(props.conjunto?.segmentacionCruda ?? null)}
-              intereses={csvDe(valores.interesesIds)}
-              incluidas={csvDe(valores.audIncluir)}
-              excluidas={csvDe(valores.audExcluir)}
-              onChange={(cambios) => {
-                if (cambios.metaInterests) poner("interesesIds")(cambios.metaInterests.join(","));
-                if (cambios.metaCustomAudiences) poner("audIncluir")(cambios.metaCustomAudiences.join(","));
-                if (cambios.metaExcludedAudiences) poner("audExcluir")(cambios.metaExcludedAudiences.join(","));
-              }}
-            />
-            <Campo etiqueta="Ventana de atribución" ayuda="Meta solo admite algunas ventanas según lo que optimiza el conjunto. Vacío no cambia nada.">
-              <NativeSelect value={valores.atribucion ?? ""} onChange={(e) => poner("atribucion")(e.target.value)}>
-                <NativeSelectOption value="">Sin cambios</NativeSelectOption>
-                {atribucionesAdmitidas("ventas").map((id) => (
-                  <NativeSelectOption key={id} value={id}>
-                    {{ default: "Predeterminada de Meta", click_1d: "1 día tras el clic", click_7d: "7 días tras el clic", click_1d_view_1d: "1 día tras el clic o la vista" }[id]}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Campo>
-            <Campo etiqueta="Redes" ayuda="Sin marcar ninguna, Meta elige las redes automáticamente.">
-              <div className="flex flex-wrap gap-3 text-sm">
-                {(["facebook", "instagram", "audience_network", "messenger"] as const).map((red) => {
-                  const marcadas = (valores.plataformas ?? "").split(",").filter(Boolean);
-                  return (
-                    <label key={red} className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={marcadas.includes(red)}
-                        onChange={(e) =>
-                          poner("plataformas")(
-                            (e.target.checked ? [...marcadas, red] : marcadas.filter((x) => x !== red)).join(","),
-                          )
-                        }
-                      />
-                      {red === "audience_network" ? "Audience Network" : red.charAt(0).toUpperCase() + red.slice(1)}
-                    </label>
-                  );
-                })}
-              </div>
-            </Campo>
-            <Campo etiqueta="Formatos" ayuda="Dónde se muestra dentro de Facebook e Instagram. Sin marcar ninguno, son automáticos. Exige haber marcado Facebook o Instagram en Redes.">
-              <div className="flex flex-wrap gap-3 text-sm">
-                {FORMATOS_META.map((f) => {
-                  const marcados = (valores.formatos ?? "").split(",").filter(Boolean);
-                  return (
-                    <label key={f} className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={marcados.includes(f)}
-                        onChange={(e) => poner("formatos")((e.target.checked ? [...marcados, f] : marcados.filter((x) => x !== f)).join(","))}
-                      />
-                      {META_SURFACES[f].label}
-                    </label>
-                  );
-                })}
-              </div>
-            </Campo>
-            <Campo etiqueta="Horario de entrega" ayuda="Solo con presupuesto TOTAL del conjunto y fecha de término (Meta lo exige). Para varios tramos distintos, pídeselo al Thinking Orb.">
-              <div className="space-y-2">
-                <NativeSelect value={valores.horModo ?? ""} onChange={(e) => poner("horModo")(e.target.value)}>
-                  <NativeSelectOption value="">Sin cambios</NativeSelectOption>
-                  <NativeSelectOption value="todo">Todo el día, todos los días</NativeSelectOption>
-                  <NativeSelectOption value="tramo">Solo en estos días y horas</NativeSelectOption>
-                </NativeSelect>
-                {valores.horModo === "tramo" && (
-                  <>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                      {DIAS_DE_LA_SEMANA.map((nombre, d) => {
-                        const marcados = (valores.horDias ?? "").split(",").filter(Boolean);
-                        return (
-                          <label key={nombre} className="flex items-center gap-1.5">
-                            <input
-                              type="checkbox"
-                              checked={marcados.includes(String(d))}
-                              onChange={(e) => poner("horDias")((e.target.checked ? [...marcados, String(d)] : marcados.filter((x) => x !== String(d))).join(","))}
-                            />
-                            {nombre.slice(0, 3)}
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      Desde
-                      <Input className="w-20" type="number" min={0} max={23} value={valores.horDesde ?? "9"} onChange={(e) => poner("horDesde")(e.target.value)} />
-                      hasta
-                      <Input className="w-20" type="number" min={1} max={24} value={valores.horHasta ?? "18"} onChange={(e) => poner("horHasta")(e.target.value)} />
-                      h
-                    </div>
-                  </>
-                )}
-              </div>
-            </Campo>
-            <Campo etiqueta="Todas las ubicaciones" ayuda="Elige cada ubicación por red. Sin marcar ninguna en una red, Meta las reparte sola en esa red. La red debe estar marcada arriba en Redes.">
-              <details className="rounded-xl border border-foreground/10 p-3">
-                <summary className="cursor-pointer text-sm font-semibold text-foreground/80">Ver y elegir ubicaciones</summary>
-                <div className="mt-3 space-y-3">
-                  {REDES_CON_POSICIONES.map((red: RedConPosiciones) => {
-                    const marcadas = (valores[`pos:${red}`] ?? "").split(",").filter(Boolean);
-                    return (
-                      <div key={red}>
-                        <p className="font-micro mb-1 text-[0.6rem] text-foreground/50">{red === "audience_network" ? "AUDIENCE NETWORK" : red.toUpperCase()}</p>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
-                          {POSICIONES_META[red].map((p) => (
-                            <label key={p.valor} className="flex items-center gap-1.5">
-                              <input
-                                type="checkbox"
-                                checked={marcadas.includes(p.valor)}
-                                onChange={(e) => poner(`pos:${red}`)((e.target.checked ? [...marcadas, p.valor] : marcadas.filter((x) => x !== p.valor)).join(","))}
-                              />
-                              {p.label}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </details>
-            </Campo>
-            <Campo etiqueta="Países" ayuda="Códigos de 2 letras separados por coma: CL, PE.">
-              <Input value={valores.paises ?? ""} onChange={(e) => poner("paises")(e.target.value)} />
-            </Campo>
-            <Campo etiqueta="Nueva fecha de término" ayuda="Déjalo vacío para no cambiarla.">
-              <Input type="datetime-local" value={valores.fin ?? ""} onChange={(e) => poner("fin")(e.target.value)} />
-            </Campo>
-          </>
+        {nivel === "anuncio" && provider === "google" && !esRsa && (
+          <ContenidoDeGoogleSoloLectura
+            anuncio={props.anuncio}
+            aviso={props.anuncio?.edicionDeContenido.motivo ?? limiteG ?? "Este anuncio no se edita desde aquí."}
+          />
         )}
 
-        {nivel === "anuncio" && provider === "meta" && contenidoBloqueado && (
-          <p className="rounded-xl border border-warn/25 bg-warn/8 p-3 text-sm leading-6 text-foreground/70">
-            El texto, el título, el destino, el botón y la imagen de este anuncio vienen de una publicación existente: Meta no los deja
-            cambiar desde el anuncio. Aquí se pueden cambiar el nombre y los parámetros de URL (UTM). Para cambiar el contenido, usa «Crear
-            una versión nueva con cambios» o edita la publicación original.
-          </p>
-        )}
-
-        {nivel === "anuncio" && provider === "meta" && (
-          <>
-            <fieldset disabled={contenidoBloqueado} className={contenidoBloqueado ? "space-y-3 opacity-50" : "space-y-3"}>
-            <Campo etiqueta="Texto principal">
-              <Textarea rows={5} value={valores.textoPrincipal ?? ""} onChange={(e) => poner("textoPrincipal")(e.target.value)} />
-            </Campo>
-            <Campo etiqueta="Título">
-              <Input value={valores.titulo ?? ""} onChange={(e) => poner("titulo")(e.target.value)} />
-            </Campo>
-            <Campo etiqueta="Descripción" ayuda="Vacío = no cambiar.">
-              <Input value={valores.descripcion ?? ""} onChange={(e) => poner("descripcion")(e.target.value)} />
-            </Campo>
-            <Campo etiqueta="URL de destino">
-              <Input value={valores.urlDestino ?? ""} onChange={(e) => poner("urlDestino")(e.target.value)} />
-            </Campo>
-            <Campo
-              etiqueta="Botón (CTA)"
-              ayuda={
-                valores.cta && CTA_CON_DESTINO.has(valores.cta)
-                  ? "Este botón exige un destino compatible (llamada, WhatsApp, app, evento…). Si el anuncio no lo tiene, Meta rechaza el cambio."
-                  : `Hoy: ${etiquetaCta(antes.cta || null)}. Deja «Sin cambios» para no tocarlo.`
-              }
-            >
-              <NativeSelect value={valores.cta ?? ""} onChange={(e) => poner("cta")(e.target.value)}>
-                <NativeSelectOption value="">Sin cambios</NativeSelectOption>
-                <optgroup label="Más usados">
-                  {CTA_COMUNES.map((clave) => (
-                    <NativeSelectOption key={clave} value={clave}>{CTA_ETIQUETAS[clave]}</NativeSelectOption>
-                  ))}
-                </optgroup>
-                <optgroup label="Todos los demás">
-                  {CTA_CODIGOS.filter((c) => !(CTA_COMUNES as readonly string[]).includes(c)).map((clave) => (
-                    <NativeSelectOption key={clave} value={clave}>{CTA_ETIQUETAS[clave]}</NativeSelectOption>
-                  ))}
-                </optgroup>
-              </NativeSelect>
-            </Campo>
-            <Campo etiqueta="Imagen nueva" ayuda="URL pública de la imagen. Vacío = no cambiar. Las URLs de imagen de Meta caducan, por eso no se precarga la actual.">
-              <Input value={valores.imagenUrl ?? ""} onChange={(e) => poner("imagenUrl")(e.target.value)} />
-            </Campo>
-            </fieldset>
-            <Campo etiqueta="Parámetros de URL (UTM)">
-              <Input value={valores.urlTags ?? ""} onChange={(e) => poner("urlTags")(e.target.value)} />
-            </Campo>
-            <Campo etiqueta="Dominio de conversión" ayuda="Para la atribución: el dominio al que lleva el anuncio, sin https:// (ejemplo.com). Vacío no cambia nada.">
-              <Input value={valores.dominioConversion ?? ""} onChange={(e) => poner("dominioConversion")(e.target.value)} placeholder="ejemplo.com" />
-            </Campo>
-            <Campo etiqueta="Mensaje de bienvenida" ayuda="Solo anuncios de mensajes (Messenger o Instagram Direct): el saludo automático al abrir la conversación. Vacío no cambia nada.">
-              <Textarea rows={2} value={valores.mensajeBienvenida ?? ""} onChange={(e) => poner("mensajeBienvenida")(e.target.value)} />
-            </Campo>
-          </>
-        )}
-
-        {nivel === "anuncio" && provider === "google" && (
+        {nivel === "anuncio" && provider === "google" && esRsa && (
           <EditorAnuncioGoogle
             valores={valores}
             poner={poner}
@@ -989,6 +809,24 @@ export function EditarEntidad(props: Props) {
 
       {error && (
         <p className="rounded-xl border border-danger/25 bg-danger/8 p-3 text-sm text-danger">{error}</p>
+      )}
+
+      {provider !== "linkedin" && (
+        <div className="space-y-2 rounded-xl border border-danger/25 bg-danger/5 p-3">
+          <p className="text-sm font-semibold text-danger">Eliminar {nivel === "campana" ? "la campaña" : nivel === "conjunto" ? (provider === "google" ? "el grupo de anuncios" : "el conjunto") : "el anuncio"}</p>
+          <p className="text-xs leading-5 text-foreground/60">
+            No se puede deshacer{nivel === "anuncio" ? "" : nivel === "conjunto" ? " y se eliminan también sus anuncios" : " y se eliminan también sus conjuntos y anuncios"}. Si solo quieres detener la entrega, pausa. {puedeAprobar ? "" : "Tu rol lo propone y lo aprueba un Digital Lead o superior."}
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={valores.estadoPedido === "eliminar"}
+              onChange={(e) => poner("estadoPedido")(e.target.checked ? "eliminar" : "")}
+              className="size-4 accent-[var(--danger,#dc2626)]"
+            />
+            Quiero eliminarlo (el resto del formulario se ignora)
+          </label>
+        </div>
       )}
 
       {simulacion && (
@@ -1026,7 +864,7 @@ export function EditarEntidad(props: Props) {
               Al aplicarlo, esto queda pausado: no entregará hasta que lo actives de nuevo en la plataforma.
             </p>
           )}
-          {puedeAprobar ? (
+          {aplicaDirecto ? (
             <Button type="button" disabled={!puedeAplicar || trabajando !== null} onClick={aplicar}>
               {trabajando === "aplicar" ? <OrbeDeBoton className="mx-3" /> : "Aplicar en la plataforma"}
             </Button>
@@ -1034,7 +872,7 @@ export function EditarEntidad(props: Props) {
             <p className="rounded-xl border border-foreground/10 p-3 text-sm text-foreground">{enviado}</p>
           ) : (
             <div className="space-y-2">
-              <p className="text-xs text-foreground/55">Tu rol arma el cambio pero no lo aplica: se envía a revisión y no se modifica nada hasta que lo aprueben. Si lo rechazan, todo queda como estaba.</p>
+              <p className="text-xs text-foreground/55">{puedeAprobar && tocaPresu ? "Un cambio de presupuesto lo aprueba un Director o un Administrador: se envía a revisión y no se modifica nada hasta que lo aprueben." : "Tu rol arma el cambio pero no lo aplica: se envía a revisión y no se modifica nada hasta que lo aprueben."} Si lo rechazan, todo queda como estaba.</p>
               <Button type="button" disabled={!puedeAplicar0 || trabajando !== null} onClick={solicitar}>
                 {trabajando === "solicitar" ? <OrbeDeBoton className="mx-3" /> : "Enviar a revisión"}
               </Button>

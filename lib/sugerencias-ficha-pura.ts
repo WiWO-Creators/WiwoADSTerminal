@@ -12,6 +12,8 @@ export type EntradaDeFicha = {
   instagramId: string | null;
   kpiPrincipal: string | null;
   presupuestoMensual: boolean;
+  /** Qué cuentas y campañas tiene hoy el cliente y cuánto gastaron (para que la decisión diga de qué se trata). */
+  resumenDeCuentas?: string | null;
   metaDeCpaORoas: boolean;
   ga4: boolean;
   gtmEstado: string | null;
@@ -40,7 +42,7 @@ function huecosDe(e: EntradaDeFicha): Hueco[] {
       severity: "medium",
       plataforma: "Cliente",
       title: "El cliente no tiene presupuesto mensual",
-      diagnosis: "Sin presupuesto del mes no se puede saber si el gasto va bien ni avisar cuando se excede o queda corto.",
+      diagnosis: `Sin presupuesto del mes no se puede saber si el gasto va bien ni avisar cuando se excede o queda corto.${e.resumenDeCuentas ? ` Hoy gasta así (últimos 30 días): ${e.resumenDeCuentas}.` : ""} El presupuesto se registra por cliente; si cada cuenta o campaña tiene el suyo, se cambia en el editor de esa campaña (cualquiera puede proponerlo; Directores y Administradores lo aplican sin aprobación).`,
       proposedAction: `Registrar el presupuesto mensual acordado en ${DONDE}`,
       impact: "Activa las alertas de ritmo de gasto y la vista de Inversión.",
       before: "Sin presupuesto",

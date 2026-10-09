@@ -12,6 +12,7 @@ import {
   type CuentaCliente,
 } from "@/lib/constructor";
 import { cargarCompatibilidadBoost } from "@/lib/boost-compat-store";
+import { cargarRetiradas } from "@/lib/renovar-piezas";
 import { nombresDeCampanasRecientes } from "@/lib/constructor-ejecutar";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { puedeArmarCampanas, enAlcance } from "@/lib/permisos";
@@ -112,6 +113,7 @@ export async function POST(request: Request) {
     const compatBoost = await cargarCompatibilidadBoost(draft);
     const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto, compatBoost, {
       sinConversionesMedidas: cliente?.gtmEstado === "no_tiene",
+      retirar: await cargarRetiradas(draft, cuentas),
     });
     // Display con imagen: se descargan las imágenes y se comprueba tamaño y proporción antes de publicar
     // (no toca ninguna cuenta). Un error de Google por una imagen mal cortada aparecería recién al publicar.

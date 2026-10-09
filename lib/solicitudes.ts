@@ -1,5 +1,6 @@
 import { marcarContenidoRenovado } from "@/lib/contenido-renovado";
-import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
+import { paginaDeLaCuenta, paginaEInstagramDeLaCampana } from "@/lib/pagina-de-cuenta";
+import { retirarPiezasMeta } from "@/lib/renovar-piezas";
 /**
  * Solicitudes de publicación: guardado, aprobación y seguimiento. Las reglas puras (estados, mensajes) viven en
  * `solicitudes-pura.ts`.
@@ -172,6 +173,17 @@ export type ImpulsoDeInstagram = {
   nombre: string;
   /** La publicación es de Facebook (el anuncio se crea con la API directa, sin Windsor). */
   facebook?: boolean;
+  /** Instagram y Página que usa esa campaña (en clientes con varios países la ficha trae solo uno): mandan sobre los de la ficha. */
+  instagramId?: string;
+  paginaId?: string;
+  /** Para la auditoría: el link que pidieron, el texto y el formato de la publicación. */
+  enlace?: string;
+  texto?: string;
+  formato?: string;
+  /** Botón y destino del anuncio nuevo (WhatsApp o sitio web); sin esto el anuncio queda sin destino. */
+  destino?: { tipo: "whatsapp" | "web"; url?: string; cta?: string };
+  /** Renovar: anuncios viejos del mismo conjunto que se pausan al publicarse el nuevo, para no saturarlo. */
+  retirar?: Array<{ id: string; nombre: string }>;
   /** Regla propia que se crea sobre el anuncio al publicarse (copia la condición de una regla de Meta, que no se toca). */
   regla?: { nombre: string; reglaMetaId?: string; metrica: string; operador: string; umbral: number; periodo: string; accion: string; moneda: string | null };
 };
@@ -244,6 +256,8 @@ export type ContenidoNuevo = {
   adsetName: string;
   nombre: string;
   datos: DatosDeContenido;
+  /** Renovar: anuncios viejos del mismo conjunto que se pausan al publicarse lo nuevo. */
+  retirar?: Array<{ id: string; nombre: string }>;
 };
 
 /** Crea una solicitud de contenido nuevo (imágenes o carrusel) dentro de conjuntos existentes de Meta. */
@@ -286,7 +300,7 @@ export async function crearSolicitudDeInstagram(actor: Actor, impulsos: ImpulsoD
   if (!enAlcance(actor, primero.portfolioId)) throw new ErrorDeSolicitud("Ese cliente no está en tu alcance.", 403);
   const cliente = (await listPortfolios()).find((p) => p.id === primero.portfolioId);
   if (!cliente) throw new ErrorDeSolicitud("Cliente no encontrado.", 404);
-  if (!cliente.instagramId && impulsos.some((i) => !i.facebook)) throw new ErrorDeSolicitud("Este cliente no tiene su cuenta de Instagram declarada.", 409);
+  if (!cliente.instagramId && impulsos.some((i) => !i.facebook && !i.instagramId)) throw new ErrorDeSolicitud("Este cliente no tiene su cuenta de Instagram declarada.", 409);
   const indice = await accountIndex();
   for (const i of impulsos) {
     const duenio = indice.get(normalizeAccountId(i.accountId));
@@ -428,7 +442,9 @@ export async function listarSolicitudes(actor: Actor): Promise<{ porRevisar: Sol
     .prepare("SELECT * FROM solicitudes ORDER BY created_at DESC LIMIT 300")
     .all<Fila>();
   const filas = (results ?? []).filter((f) => puedeVer(actor, f));
-  const todas = filas.map((f) => aSolicitud(f, revisores, administradores));
+  // Ver directo en Meta Ads Manager o Google Ads: solo Directores y Administradores.
+  const verEnPlataforma = can(actor, "aprobar_presupuesto");
+  const todas = filas.map((f) => aSolicitud(f, revisores, administradores)).map((s) => (verEnPlataforma ? s : { ...s, enlaces: s.enlaces.filter((e) => !/^https:\/\/(adsmanager\.facebook\.com|business\.facebook\.com|ads\.google\.com)/i.test(e.url)) }));
   return {
     porRevisar: puedeRevisar(actor) ? todas.filter((s) => s.estado === "pendiente" && (!s.tocaPresupuesto || can(actor, "aprobar_presupuesto"))) : [],
     mias: todas.filter((s) => s.creador.email === actor.email),
@@ -488,9 +504,10 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const c = d as unknown as ContenidoNuevo;
       try {
         const cliente = (await listPortfolios()).find((p) => p.id === c.portfolioId);
-        const paginaId = cliente ? await paginaDeLaCuenta(cliente, c.accountId) : null;
+        const deLaCampana = await paginaEInstagramDeLaCampana(c.campaignId);
+        const paginaId = (cliente ? await paginaDeLaCuenta(cliente, c.accountId) : null) ?? deLaCampana?.pageId ?? null;
         if (!paginaId) throw new Error("Este cliente no tiene una Página de Facebook asociada.");
-        const destinos = { paginaId, instagramUserId: cliente?.instagramId };
+        const destinos = { paginaId, instagramUserId: deLaCampana?.instagramId ?? cliente?.instagramId };
         const creativos =
           c.datos.formato === "carrusel"
             ? [{ nombre: c.nombre, creativo: creativoDeCarrusel(c.datos, destinos, c.nombre) }]
@@ -504,6 +521,11 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           await marcarContenidoRenovado("meta", c.campaignId);
           pasosTotales.push({ platform: "meta", action: "ads:create_content", label: pieza.nombre, ok: true, error: null, raw: r } as PasoEjecutado);
         }
+        if (c.retirar && c.retirar.length > 0) {
+          for (const r of await retirarPiezasMeta(c.retirar)) {
+            pasosTotales.push({ platform: "meta", action: "ads:retire_old", label: `Retirar (pausar) «${r.nombre}»`, ok: r.ok, error: r.error, raw: { id: r.id } } as PasoEjecutado);
+          }
+        }
         await registrarAuditoria({
           categoria: "creacion",
           accion: "publicada",
@@ -514,7 +536,16 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           entidadTipo: "anuncio",
           entidadNombre: c.nombre,
           titulo: `Contenido aprobado por ${nombreDe(actor)}: ${tituloDeContenido(c.datos)} en «${c.adsetName}»`,
-          detalle: { solicitudId: id, formato: c.datos.formato, imagenes: c.datos.imagenes.length, destino: c.datos.enlace, mensaje: c.datos.mensaje },
+          detalle: {
+            solicitudId: id,
+            pidio: f.creador_nombre ?? f.creador_email,
+            reviso: nombreDe(actor),
+            formato: c.datos.formato,
+            imagenes: c.datos.imagenes.map((im) => im.url).join("\n"),
+            destino: `Conjunto «${c.adsetName}» (${c.adsetId}) · campaña «${c.campaignName}» (${c.campaignId}) · cuenta Meta ${c.accountId} · enlace del anuncio: ${c.datos.enlace}`,
+            mensaje: c.datos.mensaje,
+            enlaces: [{ etiqueta: "Revisar la campaña en Meta", url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}` }],
+          },
         });
         const url = `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${c.accountId}&selected_campaign_ids=${c.campaignId}`;
         if (!enlaces.some((e) => e.url === url)) enlaces.push({ etiqueta: "Revisar la campaña en Meta", url });
@@ -578,17 +609,23 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
       const ig = d as unknown as ImpulsoDeInstagram;
       try {
         const cliente = (await listPortfolios()).find((p) => p.id === ig.portfolioId);
-        if (!cliente?.instagramId && !ig.facebook) throw new Error("Este cliente no tiene su cuenta de Instagram declarada.");
+        const instagramUserId = ig.instagramId ?? cliente?.instagramId;
+        if (!instagramUserId && !ig.facebook) throw new Error("Este cliente no tiene su cuenta de Instagram declarada.");
         const r = await crearAnuncioDesdeInstagram(ig.accountId, {
           nombre: ig.nombre,
           conjuntoId: ig.adsetId,
-          instagramUserId: cliente?.instagramId,
+          instagramUserId,
           mediaId: ig.mediaId,
           facebook: ig.facebook,
-          paginaId: cliente ? ((await paginaDeLaCuenta(cliente, ig.accountId)) ?? undefined) : undefined,
+          destino: ig.destino ?? null,
+          paginaId: ig.paginaId ?? (cliente ? ((await paginaDeLaCuenta(cliente, ig.accountId)) ?? undefined) : undefined),
         });
         anuncios.push({ provider: "meta", accountId: ig.accountId, id: r.anuncioId });
         await marcarContenidoRenovado("meta", ig.campaignId);
+        const retirados = ig.retirar && ig.retirar.length > 0 ? await retirarPiezasMeta(ig.retirar) : [];
+        for (const x of retirados) {
+          pasosTotales.push({ platform: "meta", action: "ads:retire_old", label: `Retirar (pausar) «${x.nombre}»`, ok: x.ok, error: x.error, raw: { id: x.id } } as PasoEjecutado);
+        }
         await registrarAuditoria({
           categoria: "creacion",
           accion: "publicada",
@@ -600,7 +637,24 @@ export async function aprobarSolicitud(actor: Actor, id: string): Promise<Solici
           entidadId: r.anuncioId,
           entidadNombre: ig.nombre,
           titulo: `Impulso aprobado por ${nombreDe(actor)}: «${ig.nombre}» en «${ig.adsetName}»`,
-          detalle: { solicitudId: id, conjuntoId: ig.adsetId, mediaId: ig.mediaId, anuncioId: r.anuncioId, regla: ig.regla?.nombre ?? null },
+          detalle: {
+            solicitudId: id,
+            pidio: f.creador_nombre ?? f.creador_email,
+            reviso: nombreDe(actor),
+            destino: `Conjunto «${ig.adsetName}» (${ig.adsetId}) · campaña «${ig.campaignName}» (${ig.campaignId}) · cuenta Meta ${ig.accountId}`,
+            publicacion: ig.enlace ?? null,
+            formato: ig.formato ?? null,
+            mensaje: ig.texto ?? null,
+            anuncio: `${r.anuncioId} · creado activo; Meta lo revisa antes de entregarlo`,
+            botonYDestino: ig.destino ? (ig.destino.tipo === "whatsapp" ? "Botón de WhatsApp" : `${ig.destino.cta ?? "Más información"} → ${ig.destino.url}`) : "El del conjunto (visita al perfil) o ninguno",
+            identidad: [ig.paginaId ? `Página ${ig.paginaId}` : null, ig.instagramId ? `Instagram ${ig.instagramId}` : null].filter(Boolean).join(" · ") || null,
+            conjuntoId: ig.adsetId,
+            mediaId: ig.mediaId,
+            anuncioId: r.anuncioId,
+            regla: ig.regla?.nombre ?? null,
+            retirados: retirados.length > 0 ? retirados.map((x) => `${x.ok ? "Pausado" : "No se pudo pausar"}: ${x.nombre} (${x.id})${x.error ? ` — ${x.error}` : ""}`).join("\n") : null,
+            enlaces: [{ etiqueta: "Ver el anuncio en Meta Ads Manager", url: `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${ig.accountId}&selected_ad_ids=${r.anuncioId}` }],
+          },
         });
         // Primero, la regla DENTRO de Meta (copia de la original, que no se toca): Meta la evalúa sola. Si no se puede, la propia.
         let reglaEnMeta = false;

@@ -63,7 +63,15 @@ function Detalle({ e, onConversacion }: { e: Evento; onConversacion?: (id: strin
   if (texto(d.error)) filas.push(["Error", d.error as string]);
   if (texto(d.destino)) filas.push(["Destino", d.destino as string]);
   if (texto(d.recomendacion)) filas.push(["Recomendación", d.recomendacion as string]);
+  if (texto(d.publicacion)) filas.push(["Publicación impulsada", d.publicacion as string]);
+  if (texto(d.formato)) filas.push(["Formato", d.formato as string]);
   if (texto(d.mensaje)) filas.push(["Texto del anuncio", d.mensaje as string]);
+  if (texto(d.imagenes)) filas.push(["Piezas", d.imagenes as string]);
+  if (texto(d.identidad)) filas.push(["Publica desde", d.identidad as string]);
+  if (texto(d.anuncio)) filas.push(["Anuncio creado", d.anuncio as string]);
+  if (texto(d.botonYDestino)) filas.push(["Botón y destino", d.botonYDestino as string]);
+  if (texto(d.regla)) filas.push(["Regla asignada", d.regla as string]);
+  if (texto(d.retirados)) filas.push(["Piezas retiradas (renovación)", d.retirados as string]);
   const enlaces = (Array.isArray(d.enlaces) ? d.enlaces : []) as Array<{ etiqueta?: string; url?: string }>;
   return (
     <div className="mt-3 space-y-2 border-t border-border pt-3 text-xs">

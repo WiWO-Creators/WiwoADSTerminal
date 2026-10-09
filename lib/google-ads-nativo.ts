@@ -152,7 +152,7 @@ export async function consultarGaql(
 /** Todo lo de un tipo salvo lo eliminado, con o sin actividad. */
 export const GAQL_CAMPANAS = [
   "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type,",
-  "campaign.bidding_strategy_type, campaign_budget.amount_micros,",
+  "campaign.bidding_strategy_type, campaign_budget.amount_micros, campaign_budget.total_amount_micros, campaign_budget.period,",
   "campaign.target_cpa.target_cpa_micros, campaign.maximize_conversions.target_cpa_micros,",
   "campaign.target_roas.target_roas, campaign.network_settings.target_google_search,",
   "campaign.network_settings.target_search_network, campaign.network_settings.target_content_network,",
@@ -200,6 +200,63 @@ export const GAQL_ANUNCIOS = [
   "ad_group_ad.policy_summary.approval_status, ad_group.id, campaign.id",
   "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED'",
 ].join(" ");
+
+/**
+ * Lo visual de los anuncios que no son de búsqueda. Una consulta por familia: si Google cambia o no reconoce un campo en
+ * una cuenta, solo falla esa familia y el resto del detalle se lee igual.
+ */
+const ANUNCIO_VISUAL = "ad_group_ad.ad.id, ad_group_ad.ad.type";
+export const GAQL_ANUNCIOS_VISUALES = [
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.responsive_display_ad.headlines, ad_group_ad.ad.responsive_display_ad.long_headline,",
+    "ad_group_ad.ad.responsive_display_ad.descriptions, ad_group_ad.ad.responsive_display_ad.business_name,",
+    "ad_group_ad.ad.responsive_display_ad.marketing_images, ad_group_ad.ad.responsive_display_ad.square_marketing_images,",
+    "ad_group_ad.ad.responsive_display_ad.logo_images, ad_group_ad.ad.responsive_display_ad.square_logo_images,",
+    "ad_group_ad.ad.responsive_display_ad.youtube_videos, ad_group_ad.ad.responsive_display_ad.call_to_action_text",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'RESPONSIVE_DISPLAY_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.video_responsive_ad.headlines, ad_group_ad.ad.video_responsive_ad.long_headlines,",
+    "ad_group_ad.ad.video_responsive_ad.descriptions, ad_group_ad.ad.video_responsive_ad.videos,",
+    "ad_group_ad.ad.video_responsive_ad.call_to_actions",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'VIDEO_RESPONSIVE_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.headlines, ad_group_ad.ad.demand_gen_multi_asset_ad.descriptions,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.business_name, ad_group_ad.ad.demand_gen_multi_asset_ad.call_to_action_text,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.square_marketing_images,",
+    "ad_group_ad.ad.demand_gen_multi_asset_ad.portrait_marketing_images, ad_group_ad.ad.demand_gen_multi_asset_ad.logo_images",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'DEMAND_GEN_MULTI_ASSET_AD'",
+  ].join(" "),
+  [
+    `SELECT ${ANUNCIO_VISUAL},`,
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.headlines, ad_group_ad.ad.demand_gen_video_responsive_ad.long_headlines,",
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.descriptions, ad_group_ad.ad.demand_gen_video_responsive_ad.business_name,",
+    "ad_group_ad.ad.demand_gen_video_responsive_ad.videos, ad_group_ad.ad.demand_gen_video_responsive_ad.logo_images",
+    "FROM ad_group_ad WHERE ad_group_ad.status != 'REMOVED' AND ad_group_ad.ad.type = 'DEMAND_GEN_VIDEO_RESPONSIVE_AD'",
+  ].join(" "),
+] as const;
+
+/** Imágenes y videos de YouTube por nombre de recurso. Se piden de a 100 para no pasarse del tamaño de la consulta. */
+export function gaqlDeRecursos(nombres: string[]): string[] {
+  const consultas: string[] = [];
+  for (let i = 0; i < nombres.length; i += 100) {
+    const lista = nombres
+      .slice(i, i + 100)
+      .filter((n) => /^customers\/\d+\/assets\/\d+$/.test(n))
+      .map((n) => `'${n}'`)
+      .join(", ");
+    if (lista) {
+      consultas.push(
+        `SELECT asset.resource_name, asset.image_asset.full_size.url, asset.youtube_video_asset.youtube_video_id FROM asset WHERE asset.resource_name IN (${lista})`,
+      );
+    }
+  }
+  return consultas;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Escritura: editar un anuncio de búsqueda responsivo                        */
@@ -723,6 +780,40 @@ export function armarMutacionCampana(
     ruta: `customers/${cliente}/campaigns:mutate`,
     cuerpo: { operations: [{ updateMask: mascara.join(","), update }], validateOnly, partialFailure: false },
   };
+}
+
+/** Elimina (REMOVED, irreversible) una campaña, un grupo de anuncios o un anuncio de Google Ads. */
+export async function eliminarEnGoogle(
+  cred: CredencialesGoogle,
+  customerId: string,
+  nivel: "campana" | "conjunto" | "anuncio",
+  id: string,
+  grupoId: string | null,
+  { validateOnly = false }: { validateOnly?: boolean } = {},
+): Promise<ResultadoMutacion> {
+  const cliente = idNumerico(customerId);
+  if (!/^\d+$/.test(id)) throw new GoogleAdsNativoError("Identificador no válido.", 400);
+  let ruta: string;
+  let recurso: string;
+  if (nivel === "campana") {
+    ruta = `customers/${cliente}/campaigns:mutate`;
+    recurso = `customers/${cliente}/campaigns/${id}`;
+  } else if (nivel === "conjunto") {
+    ruta = `customers/${cliente}/adGroups:mutate`;
+    recurso = `customers/${cliente}/adGroups/${id}`;
+  } else {
+    if (!grupoId || !/^\d+$/.test(grupoId)) throw new GoogleAdsNativoError("Falta el grupo de anuncios del anuncio.", 400);
+    ruta = `customers/${cliente}/adGroupAds:mutate`;
+    recurso = `customers/${cliente}/adGroupAds/${grupoId}~${id}`;
+  }
+  if (!validateOnly) registrarEscritura();
+  let respuesta: { results?: Array<{ resourceName?: string }> };
+  try {
+    respuesta = await llamar<{ results?: Array<{ resourceName?: string }> }>(cred, ruta, { operations: [{ remove: recurso }], validateOnly, partialFailure: false });
+  } finally {
+    if (!validateOnly) registrarEscritura();
+  }
+  return { soloValidado: validateOnly, resourceName: respuesta.results?.[0]?.resourceName ?? null };
 }
 
 /** Edita la campaña (conserva su id). Con `validateOnly`, Google valida contra la cuenta real sin aplicar nada. */

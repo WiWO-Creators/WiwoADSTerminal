@@ -20,7 +20,8 @@ import { OBJECTIVES, type Objective, type LugarSegmentable } from "@/lib/constru
 import { registrarAuditoria } from "@/lib/auditoria";
 import { recortar, resumenDeEntrada } from "@/lib/auditoria-pura";
 import { solicitarContenido } from "@/lib/contenido-ia";
-import { solicitarImpulsos } from "@/lib/impulsos";
+import { resolverDestinoMeta, solicitarImpulsos } from "@/lib/impulsos";
+import { piezasDelConjunto } from "@/lib/renovar-piezas";
 import { listarReglasMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { interpretarReglaMeta } from "@/lib/reglas-meta-pura";
 import { enAlcance } from "@/lib/permisos";
@@ -224,7 +225,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
   {
     name: "impulsar_publicaciones",
     description:
-      "A partir de LINKS de publicaciones de Facebook o de Instagram del cliente que la persona pegó, prepara un impulso por publicación dentro de una campaña o un conjunto de Meta que YA existe y lo deja ENVIADO A REVISIÓN de un supervisor. Basta con la campaña o con el conjunto (se buscan por nombre, ej. «giveaway»): si solo dan la campaña, el sistema elige su conjunto activo y te dice cuál en supuestos. No publica nada: al aprobarse se crea y queda corriendo, y la persona recibe un enlace para revisarlo en la plataforma. Úsala sin pedir más datos cuando pidan impulsar/boostear contenido con links. Si devuelve conjuntos_posibles, pregunta cuál; si devuelve descartados, explica cada motivo; cuenta siempre los supuestos.",
+      "A partir de LINKS de publicaciones de Facebook o de Instagram del cliente que la persona pegó, prepara un impulso por publicación dentro de una campaña o un conjunto de Meta que YA existe y lo deja ENVIADO A REVISIÓN de un supervisor. Basta con la campaña o con el conjunto (se buscan por nombre, ej. «giveaway»): si solo dan la campaña, el sistema elige su conjunto activo y te dice cuál en supuestos. No publica nada: al aprobarse se crea y queda corriendo, y la persona recibe un enlace para revisarlo en la plataforma. Úsala sin pedir más datos cuando pidan impulsar/boostear contenido con links. Dos pasos: PRIMERO llámala sin `confirmar` (solo muestra la vista previa: nada se crea ni se envía) y enséñale a la persona qué se va a subir (texto, formato, red, nombre del anuncio y destino); ella puede cambiar el conjunto, la campaña o el nombre. SOLO cuando confirme («sí», «envíalo») vuelve a llamarla igual con `confirmar: true`. Si devuelve conjuntos_posibles, pregunta cuál; si devuelve descartados, explica cada motivo; cuenta siempre los supuestos.",
     input_schema: {
       type: "object",
       properties: {
@@ -232,9 +233,27 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
         links: { type: "array", items: { type: "string" }, description: "Los links tal como los pegó la persona." },
         conjunto: { type: "string", description: "Nombre o parte del nombre del conjunto de anuncios de destino (opcional si das la campaña)." },
         campana: { type: "string", description: "Nombre o parte del nombre de la campaña de destino (opcional si das el conjunto)." },
+        enlace_destino: { type: "string", description: "URL https a la que debe llevar el botón del anuncio impulsado (sitio web). Si no la dan, se copia el botón y destino de los demás anuncios del conjunto." },
+        destino_whatsapp: { type: "boolean", description: "true: el botón del anuncio abre WhatsApp (en vez de un sitio web)." },
+        retirar_anuncios: { type: "array", items: { type: "string" }, description: "Renovar: ids de anuncios ACTIVOS viejos del mismo conjunto que se pausan al publicarse lo nuevo, para no saturarlo. Solo los que la persona aceptó retirar (los candidatos salen en la vista previa: piezas_del_conjunto)." },
+        confirmar: { type: "boolean", description: "false u omitido: solo vista previa, no se envía nada. true: la persona ya revisó y confirmó; se envía a revisión del supervisor." },
         regla: { type: "string", description: "Nombre de una regla automatizada de Meta ya existente (ej. «highquality») que la persona quiere asignar al anuncio nuevo. No se modifica esa regla: se crea una propia con su misma condición sobre el anuncio nuevo. Si no sabes cuáles hay, llama antes a reglas_de_meta." },
       },
       required: ["links"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "piezas_de_conjunto",
+    description:
+      "Solo lectura: los anuncios ACTIVOS de un conjunto de Meta (de más viejo a más nuevo, con días activa, impresiones y CTR de 30 días). Úsala para renovar: cuando se sube contenido nuevo, ofrece retirar (pausar) las piezas más viejas o de peor rendimiento para que el conjunto no se sature.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cliente_id: { type: "string", description: "Id del cliente (el activo en pantalla si hay uno)." },
+        campana: { type: "string", description: "Nombre o parte del nombre de la campaña." },
+        conjunto: { type: "string", description: "Nombre o parte del nombre del conjunto." },
+      },
       additionalProperties: false,
     },
   },
@@ -248,6 +267,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
         cliente_id: { type: "string", description: "Id del cliente (el activo en pantalla si hay uno)." },
         campana: { type: "string", description: "Nombre o parte del nombre de la campaña de destino." },
         conjunto: { type: "string", description: "Nombre o parte del nombre del conjunto de destino (opcional si das la campaña)." },
+        retirar_anuncios: { type: "array", items: { type: "string" }, description: "Renovar: ids de anuncios ACTIVOS viejos del mismo conjunto que se pausan al publicarse lo nuevo, para no saturarlo (ver piezas_de_conjunto). Solo los que la persona aceptó retirar." },
         formato: { type: "string", enum: ["imagenes", "carrusel"], description: "imagenes: un anuncio por imagen. carrusel: una sola pieza con tarjetas." },
         imagenes: {
           type: "array",
@@ -400,6 +420,7 @@ const HERRAMIENTAS: Anthropic.Tool[] = [
             nombre: { type: "string" },
             pausar: { type: "boolean", description: "true: pausar la entidad (campaña, conjunto o anuncio)." },
             activar: { type: "boolean", description: "true: activar la entidad (campaña, conjunto o anuncio, por ejemplo un anuncio que quedó pausado)." },
+            eliminar: { type: "boolean", description: "true: ELIMINAR la entidad (campaña, conjunto o anuncio) de Meta o Google. Irreversible. Solo si la persona lo pidió expresamente (si solo quiere detener la entrega, pausa). Se propone solo, sin otros cambios; la aprueba un Digital Lead o superior con el botón de la tarjeta, nunca con un «sí»." },
             inicio: { type: "string", description: "Google (campaña): fecha de inicio aaaa-mm-dd; no se puede cambiar si ya empezó." },
             redes: {
               type: "object",
@@ -723,6 +744,7 @@ const ROTULO_DE_HERRAMIENTA: Record<string, string[]> = {
   listar_clientes: ["Consultando clientes…", "Repasando la cartera…", "Buscando al cliente…"],
   recordar: ["Guardando en la memoria…", "Tomando nota…", "Anotándolo para la próxima…"],
   enviar_campana_a_revision: ["Enviando a revisión…", "Dejando la campaña lista para aprobar…"],
+  piezas_de_conjunto: ["Mirando las piezas del conjunto…", "Revisando su rendimiento…"],
   subir_contenido: ["Armando el contenido…", "Revisando el destino…", "Preparando la solicitud…"],
   reglas_de_meta: ["Leyendo las reglas de Meta…"],
   impulsar_publicaciones: ["Buscando las publicaciones…", "Preparando los impulsos…", "Armando la solicitud…"],
@@ -782,7 +804,7 @@ Cómo trabajas:
 - Si te dan una región, ciudad o pueblo concreto (no solo el país), pásalo en lugares — el sistema busca el id real de Google para cada uno, nunca lo inventes vos. No lo dejes solo mencionado en el resumen de texto: si no lo pasas en lugares, la campaña queda segmentada por país entero nada más. abrir_constructor devuelve lugares_no_encontrados: si viene con algo, ese lugar NO se aplicó (no hay id real para él) — decilo explícitamente ("no encontré un id real para X, la campaña quedó sin esa segmentación fina"), nunca digas que la campaña quedó segmentada por ese lugar si no está también en lugares_aplicados.
 - Nunca digas que "creaste" o "publicaste" una campaña: lo único que hacés es dejar el Constructor precargado, listo para que la persona lo revise y publique ella misma. Por la misma razón, describí siempre lo que el sistema de verdad aplicó, no lo que vos pediste: abrir_constructor devuelve landing_url_aplicada — si viene con una URL y vos habías dejado landing_url vacío, decí que se completó sola (con el sitio del cliente, o con lo que encontraste buscando — aclará cuál de las dos) en vez de "dejé la URL vacía". Presupuesto: si la persona dio un monto explícito, pasalo en presupuesto_diario — eso SÍ se aplica directo al campo real, no es una nota; decilo así de claro ("dejé el presupuesto diario en $X, revísalo antes de publicar"), no como si fuera solo una sugerencia de texto. Si no dio un monto, no lo inventes ni lo estimes: queda en null y la persona lo define ella misma en el Constructor.
 - Si abrir_constructor devuelve aviso_pixel, es una limitación real ya verificada contra la plataforma (no una suposición tuya): menciónala siempre, de forma clara y específica, en tu respuesta de texto — nunca la omitas en silencio ni la escondas dentro de una lista larga. Explica la alternativa real que trae el aviso y de todas formas dejá el Constructor precargado como pediste: avisar no es lo mismo que negarte. Si la persona insiste en seguir igual después del aviso, hazlo — tu trabajo es que decida informada, no bloquear la decisión.
-- Editar algo ya publicado SÍ se puede, en las dos plataformas, y es una sola pantalla: el ojo o el lápiz junto a cada fila de Anuncios abre el panel con la configuración completa y la pestaña Editar. En Meta se cambia el nombre, el presupuesto, la puja y su estrategia, la optimización, la fecha de término, el horario de entrega (días y horas, solo con presupuesto total), el límite de gasto, la segmentación (edad, género, países, intereses, audiencias, redes, formatos y TODAS las ubicaciones por red), la ventana de atribución y todo el contenido de un anuncio (texto, título, descripción, imagen, URL, botón y parámetros UTM); y se puede pausar o activar cualquier campaña, conjunto o anuncio suelto. En Google se cambia el nombre, el presupuesto, el CPC, las palabras clave (agregar, quitar, pausar), los enlaces de sitio y textos destacados de la campaña, y el contenido de un anuncio de búsqueda —titulares, descripciones, URL final y rutas— EN EL MISMO ANUNCIO; en Performance Max se editan los textos y la URL de su grupo de recursos (las imágenes y videos se leen pero no se cambian todavía): nunca digas que hay que crear uno nuevo y pausar el viejo, eso es falso. Dos límites reales: (1) un anuncio de Meta armado desde una publicación existente no permite editar su contenido desde el anuncio (Meta lo exige: se edita la publicación, o se impulsa de nuevo); (2) para leer y editar en Google lo pausado o recién creado, la persona debe tener conectada su cuenta de Google en Integraciones, porque Windsor solo entrega lo que tuvo actividad reciente. Estrategia de puja, idiomas, horario y negativas de Google se cambian con "Más opciones" en esa misma pestaña. Lo que NO existe, en ninguna de las dos: borrar campañas (solo se pausan) y cambiar el número de WhatsApp de un anuncio. TikTok y LinkedIn todavía no están activos.
+- Editar algo ya publicado SÍ se puede, en las dos plataformas, y es una sola pantalla: el ojo o el lápiz junto a cada fila de Anuncios abre el panel con la configuración completa y la pestaña Editar. En Meta se cambia el nombre, el presupuesto, la puja y su estrategia, la optimización, la fecha de término, el horario de entrega (días y horas, solo con presupuesto total), el límite de gasto, la segmentación (edad, género, países, intereses, audiencias, redes, formatos y TODAS las ubicaciones por red), la ventana de atribución y todo el contenido de un anuncio (texto, título, descripción, imagen, URL, botón y parámetros UTM); y se puede pausar o activar cualquier campaña, conjunto o anuncio suelto. En Google se cambia el nombre, el presupuesto, el CPC, las palabras clave (agregar, quitar, pausar), los enlaces de sitio y textos destacados de la campaña, y el contenido de un anuncio de búsqueda —titulares, descripciones, URL final y rutas— EN EL MISMO ANUNCIO; en Performance Max se editan los textos y la URL de su grupo de recursos (las imágenes y videos se leen pero no se cambian todavía): nunca digas que hay que crear uno nuevo y pausar el viejo, eso es falso. Dos límites reales: (1) un anuncio de Meta armado desde una publicación existente no permite editar su contenido desde el anuncio (Meta lo exige: se edita la publicación, o se impulsa de nuevo); (2) para leer y editar en Google lo pausado o recién creado, la persona debe tener conectada su cuenta de Google en Integraciones, porque Windsor solo entrega lo que tuvo actividad reciente. Estrategia de puja, idiomas, horario y negativas de Google se cambian con "Más opciones" en esa misma pestaña. Eliminar campañas, conjuntos y anuncios de Meta y Google SÍ existe, pero solo si la persona lo pide expresamente, con proponer_edicion eliminar (irreversible; lo aprueba un Digital Lead o superior con el botón, nunca con un «sí»); LinkedIn no permite eliminar desde aquí. Lo que NO existe: cambiar el número de WhatsApp de un anuncio. TikTok y LinkedIn todavía no están activos.
 - Decisiones (mensajes que empiezan con «Resuelve esta decisión»): sé BREVE y ve al grano, máximo 3 líneas y sin listas largas. Lee los datos reales, di en una frase qué pasa de verdad y propón UNA acción concreta como pregunta corta («Tienes 6 anuncios desactivados, ¿activo el que mejor rindió?»). Deja la propuesta con la herramienta correspondiente (para activar o pausar un ANUNCIO o conjunto suelto usa proponer_edicion con activar o pausar; para una campaña, proponer_cambio). Cuando la persona responde «sí», el sistema aplica la propuesta por su cuenta: no vuelvas a explicar ni a preguntar. Si pide ampliar («amplía», «explícame más»), ahí sí te extiendes: diagnóstico completo con cifras, causas posibles, alternativas y qué vigilar después. Si no hace falta ningún cambio, dilo en una línea.
 - Cuando pregunten cómo le va a un cliente o a una campaña, qué funciona o qué recomendarías, consulta primero el panorama completo del cliente: trae las metas de CPA/ROAS, la comparación con el periodo anterior y una lista de señales con sus cifras. Cada campaña indica cómo se mide: las de awareness se juzgan por alcance, CPM, frecuencia e interacciones, y las de tráfico por clics, CPC y CTR — un "0 resultados" en ellas NO es mal rendimiento y nunca las califiques por conversiones ni por costo por resultado; solo las de leads, ventas y conversiones se juzgan por costo por resultado y ROAS. Recomienda SOLO a partir de esas señales y cita sus números (por ejemplo "el costo por resultado subió de $4.200 a $6.800, +62%"); nunca calcules un umbral ni inventes una cifra. Si el cliente no tiene metas cargadas, dilo y sugiere cargarlas: sin meta no se puede decir si un costo es bueno o malo. Si el periodo está en curso, recuerda que las cifras van a seguir subiendo. Una señal de "oportunidad" es una sugerencia de escalar, no una orden: di qué tan firme es (pocos resultados = pronto para decidir).
 - Para saber dónde se va el dinero y qué segmentos rinden (edad, género, red, posición, dispositivo, día u hora) usa el desglose de la campaña, el conjunto o el anuncio, y cita sus cifras: un segmento con mucho gasto y cero clics, o una posición con un CTR muy distinto a las demás, es un hallazgo concreto que fundamenta una recomendación. El desglose es de lectura: cambiar la segmentación sigue siendo una propuesta de edición que la persona aprueba.
@@ -805,8 +827,12 @@ ${memoria}
 ` : ""}
 
 - Reglas: si piden «asígnale la regla X» a un impulso, pasa regla=X a impulsar_publicaciones (la regla de Meta no se modifica: se crea una propia con su condición sobre el anuncio nuevo, y lo dices). Si piden ver las reglas existentes, usa reglas_de_meta.
+- Lo que no está implementado: si te piden algo que ninguna de tus herramientas ni el sistema permite todavía (una configuración, un campo, una plataforma o una acción que no existe aquí), no lo inventes ni lo prometas y no des rodeos: di con claridad que esa configuración todavía no está añadida al sistema y que contacten con soporte o con el equipo de paid media para hacerlo. Si hay una alternativa real dentro del sistema, ofrécela en una línea después de decir eso.
+- Renovar piezas: subir contenido nuevo sin retirar el viejo satura el conjunto. Cuando prepares contenido nuevo o un impulso, mira las piezas activas del conjunto (la vista previa del impulso las trae en piezas_del_conjunto; o usa piezas_de_conjunto) y ofrece en una línea retirar (pausar) las más viejas o de peor CTR; si la persona acepta, pasa sus ids en retirar_anuncios. Nunca retires por tu cuenta: pausar un anuncio que rinde bien le cuesta resultados. Pausar se puede revertir; eliminar no, y eliminar solo se propone si la persona lo pide expresamente (proponer_edicion con eliminar), con aprobación de un Digital Lead o superior.
+- Carruseles con adjuntos: si llegan VARIAS líneas [Adjunto i/n: nombre → url], vienen ya en el orden natural de sus nombres (Imagen A, B, C… o Imagen 1, 2, 3… o nombres parecidos; si los nombres traen otro orden evidente, respétalo). Si piden un carrusel, usa subir_contenido con formato carrusel y las imágenes en ESE orden, un título por tarjeta (de su nombre sin la letra o el número si no te dan otro) y di el orden que usaste en una línea para que lo corrijan. Si piden varias imágenes sueltas, formato imagenes. Un carrusel necesita entre 2 y 10 imágenes.
+- Archivos adjuntos: si el mensaje trae una línea [Adjunto nombre → url], la persona subió ese archivo (imagen o video) desde el clip y la url ya es pública: úsala tal cual como pieza (subir_contenido, meta_imagen_url o imagenUrl al editar). Si la url empieza con http://localhost, dilo: solo funciona cuando el sistema está publicado, porque Meta y Google no alcanzan esa dirección. Si te dan un link de Drive o de Instagram, no sirve como imagen directa: explícalo y pide el archivo con el clip.
 - Contenido nuevo: si piden subir imágenes (varias, en carrusel, para Stories o feed) a una campaña o conjunto, usa subir_contenido con las URLs https que den; queda enviado a aprobación y, al aprobarse, corriendo. Di qué asumiste (enlace del sitio, botón) y los avisos de ubicaciones.
-- Impulsos con links: si la persona pega links de publicaciones de Facebook o Instagram y pide impulsarlas en una campaña o conjunto existente, usa impulsar_publicaciones de inmediato, con lo que dio (basta la campaña o el conjunto). Nunca publica: queda enviada a revisión de un supervisor, y al aprobarse se crea y queda corriendo. Dilo así: todavía no existe en la plataforma, queda pendiente de aprobación, sin prometer que ya está funcionando, y cuenta los supuestos (por ejemplo, qué conjunto elegiste).
+- Impulsos con links: si la persona pega links de publicaciones de Facebook o Instagram y pide impulsarlas en una campaña o conjunto existente, usa impulsar_publicaciones de inmediato, con lo que dio (basta la campaña o el conjunto), primero SIN confirmar: devuelve la vista previa (qué publicación, su texto, el nombre del anuncio y el destino) y no envía nada; muéstrasela y pregunta si la envías o qué cambia. Solo con su confirmación la llamas con confirmar: true. Nunca publica: queda enviada a revisión de un supervisor, y al aprobarse se crea y queda corriendo. Tras confirmar, dilo así: todavía no existe en la plataforma, queda pendiente de aprobación, sin prometer que ya está funcionando, y cuenta los supuestos (por ejemplo, qué conjunto elegiste).
 - Campañas completas: cuando el pedido es claro (qué se promociona, y plataformas y objetivo deducibles), arma la propuesta con abrir_constructor y, si la persona quiere que quede lista sin abrir el Constructor, envíala con enviar_campana_a_revision: crea la campaña de todas las plataformas a la vez, ya corriendo, tras la aprobación de un supervisor. Si Meta necesita una imagen y no la dieron, dilo y deja la propuesta abierta para que la suban; no inventes imágenes.
 - Autonomía: quienes te usan, sobre todo los analistas, no dominan las plataformas y un supervisor revisa lo que se publica. Por eso actúa: elige objetivo, plataformas, presupuesto y destino con criterio a partir de lo que el cliente ya hace y de lo que piden, prepara la propuesta completa y al final lista en pocas líneas «Lo que asumí» (presupuesto recomendado y por qué, enlace de destino, conjunto elegido, fechas). Pregunta solo lo imprescindible y de una vez, nunca una pregunta por turno. Si algo no es posible en una plataforma (por ejemplo, crear en TikTok o LinkedIn, que hoy son de lectura), dilo en una línea y sigue con el resto.
 
@@ -900,6 +926,30 @@ async function ejecutarHerramienta(
       return { enviada_a_revision: false, problema: error instanceof ErrorDeSolicitud ? error.message : "No se pudo enviar a revisión." };
     }
   }
+  if (nombre === "piezas_de_conjunto") {
+    const clienteId = typeof entrada.cliente_id === "string" && entrada.cliente_id ? entrada.cliente_id : ctx.clienteId;
+    if (!clienteId) return { error: "Elige un cliente en pantalla o dime de cuál es." };
+    if (!enAlcance(ctx.actor, clienteId)) return { error: "Ese cliente no está en tu alcance." };
+    const cliente = (await listPortfolios()).find((p) => p.id === clienteId);
+    if (!cliente) return { error: "Cliente no encontrado." };
+    try {
+      const destino = await resolverDestinoMeta(cliente, {
+        campana: typeof entrada.campana === "string" ? entrada.campana : undefined,
+        conjunto: typeof entrada.conjunto === "string" ? entrada.conjunto : undefined,
+      });
+      if ("error" in destino) return { error: destino.error, conjuntos_posibles: destino.conjuntosPosibles };
+      const piezas = await piezasDelConjunto(destino.elegido.id);
+      return {
+        conjunto: destino.elegido.nombre,
+        campana: destino.elegido.campaignName,
+        supuestos: destino.supuestos,
+        piezas_activas: piezas.map((p) => ({ id: p.id, nombre: p.nombre, dias_activa: p.dias, impresiones_30d: p.impresiones, ctr_30d_pct: p.ctr })),
+        nota: "De más vieja a más nueva. Para renovar, ofrece retirar (pausar) las más viejas o de peor CTR cuando se suba contenido nuevo; pasa sus ids en retirar_anuncios. Pausar no borra: se reactiva cuando se quiera.",
+      };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "No pude leer las piezas del conjunto." };
+    }
+  }
   if (nombre === "subir_contenido") {
     const clienteId = typeof entrada.cliente_id === "string" && entrada.cliente_id ? entrada.cliente_id : ctx.clienteId;
     if (!clienteId) return { error: "Elige un cliente en pantalla o dime de cuál es." };
@@ -923,6 +973,7 @@ async function ejecutarHerramienta(
         mensaje: typeof entrada.mensaje === "string" ? entrada.mensaje : undefined,
         enlace: typeof entrada.enlace === "string" ? entrada.enlace : undefined,
         cta: typeof entrada.cta === "string" ? entrada.cta : undefined,
+        retirar: Array.isArray(entrada.retirar_anuncios) ? entrada.retirar_anuncios.filter((x): x is string => typeof x === "string") : undefined,
       });
       return {
         enviada_a_revision: r.solicitud !== null,
@@ -971,7 +1022,25 @@ async function ejecutarHerramienta(
         conjunto: typeof entrada.conjunto === "string" ? entrada.conjunto : undefined,
         campana: typeof entrada.campana === "string" ? entrada.campana : undefined,
         regla: typeof entrada.regla === "string" ? entrada.regla : undefined,
+        soloVista: entrada.confirmar !== true,
+        retirar: Array.isArray(entrada.retirar_anuncios) ? entrada.retirar_anuncios.filter((x): x is string => typeof x === "string") : undefined,
+        destino:
+          entrada.destino_whatsapp === true
+            ? { tipo: "whatsapp" as const }
+            : typeof entrada.enlace_destino === "string" && /^https:\/\//i.test(entrada.enlace_destino.trim())
+              ? { tipo: "web" as const, url: entrada.enlace_destino.trim(), cta: "LEARN_MORE" }
+              : undefined,
       });
+      if (r.vista) {
+        return {
+          vista_previa: r.vista,
+          enviada_a_revision: false,
+          mensaje: r.mensaje,
+          supuestos: r.supuestos,
+          descartados: r.descartados,
+          instruccion: "Nada se ha enviado. Muestra la vista previa en pocas líneas y pregunta si la envías a revisión o qué cambia (conjunto, campaña o nombre).",
+        };
+      }
       return {
         enviada_a_revision: r.solicitudes.length > 0,
         mensaje: r.mensaje,

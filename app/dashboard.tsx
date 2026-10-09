@@ -503,9 +503,8 @@ export default function WiwoDashboard({
     // y se abra otra. Arranca en `false` a propósito (ver la nota del tema,
     // arriba): así la mayoría de las cargas —donde ya se eligió antes— no
     // parpadean con la puerta encima.
-    // Decisiones es la pantalla de entrada y muestra los pendientes de TODOS los clientes: no hace falta elegir uno.
+    // También al entrar por Decisiones: se elige un cliente o se pasa a «Ver todos los clientes».
     if (
-      initialView !== "decisiones" &&
       clientesDeclarados.length > 0 &&
       window.sessionStorage.getItem(PUERTA_CLIENTE_STORAGE_KEY) !== "1"
     ) {
@@ -781,10 +780,10 @@ export default function WiwoDashboard({
   }, [cacheAnuncios, claveDeAnuncios, clienteSeleccionado, rango]);
   const anunciosVigentes = anunciosDeLaClave !== undefined;
   const performanceConAnuncios = useMemo(
-    () => ({ ...performance, ads: view === "clients" && anunciosDeLaClave ? anunciosDeLaClave.ads : [] }),
+    () => ({ ...performance, ads: (view === "clients" || view === "health") && anunciosDeLaClave ? anunciosDeLaClave.ads : [] }),
     [performance, anunciosDeLaClave, view],
   );
-  const cargandoAnuncios = view === "clients" && claveDeAnuncios !== null && !anunciosVigentes;
+  const cargandoAnuncios = (view === "clients" || view === "health") && claveDeAnuncios !== null && !anunciosVigentes;
 
   async function refreshOperationalData(
     periodo: RangoId = rango,
@@ -834,6 +833,10 @@ export default function WiwoDashboard({
         clientes={clientesDeclarados}
         onElegir={(portfolioId) => {
           setClienteSeleccionado(portfolioId);
+          window.sessionStorage.setItem(PUERTA_CLIENTE_STORAGE_KEY, "1");
+          setMostrarPuertaCliente(false);
+        }}
+        onTodos={() => {
           window.sessionStorage.setItem(PUERTA_CLIENTE_STORAGE_KEY, "1");
           setMostrarPuertaCliente(false);
         }}
@@ -925,7 +928,8 @@ export default function WiwoDashboard({
           {view === "health" && (
             <HealthView
               client={clienteSeleccionado}
-              performance={performance}
+              performance={performanceConAnuncios}
+              cargandoAnuncios={cargandoAnuncios}
               onOpenIntegrations={abrirCuentas}
               checks={healthChecks}
               okCount={healthOk}

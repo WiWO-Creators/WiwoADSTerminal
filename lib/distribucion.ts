@@ -57,7 +57,11 @@ function agrupar(
     .sort((a, b) => b.gastoMicros - a.gastoMicros);
 }
 
-export function distribuirGasto(campanas: CampanaParaDistribuir[], limiteTop = 5): DistribucionDelGasto | null {
+/**
+ * `monedaElegida`: la moneda a repartir; sin ella, la de mayor gasto. El resto de las monedas con gasto queda en `otrasMonedas`
+ * (para mostrarlas todas se llama una vez por moneda: ver `distribuirPorMoneda`).
+ */
+export function distribuirGasto(campanas: CampanaParaDistribuir[], limiteTop = 5, monedaElegida?: string): DistribucionDelGasto | null {
   const conGasto = campanas.filter((c) => c.conActividad && c.spendMicros > 0);
   if (conGasto.length === 0) return null;
 
@@ -67,7 +71,7 @@ export function distribuirGasto(campanas: CampanaParaDistribuir[], limiteTop = 5
     porMoneda.set(m, (porMoneda.get(m) ?? 0) + c.spendMicros);
   }
   const ordenadas = [...porMoneda.entries()].sort((a, b) => b[1] - a[1]);
-  const moneda = ordenadas[0][0];
+  const moneda = monedaElegida && porMoneda.has(monedaElegida) ? monedaElegida : ordenadas[0][0];
   const enMoneda = conGasto.filter((c) => (c.currency ?? "N/D") === moneda);
   const total = enMoneda.reduce((suma, c) => suma + c.spendMicros, 0);
 
@@ -85,8 +89,24 @@ export function distribuirGasto(campanas: CampanaParaDistribuir[], limiteTop = 5
         gastoMicros: c.spendMicros,
         fraccion: total > 0 ? c.spendMicros / total : 0,
       })),
-    otrasMonedas: ordenadas.slice(1).map(([m]) => m),
+    otrasMonedas: ordenadas.filter(([m]) => m !== moneda).map(([m]) => m),
   };
+}
+
+/** Una distribución por cada moneda con gasto, de más a menos: ninguna plataforma queda fuera por cobrar en otra moneda. */
+export function distribuirPorMoneda(campanas: CampanaParaDistribuir[], limiteTop = 5): DistribucionDelGasto[] {
+  const primera = distribuirGasto(campanas, limiteTop);
+  if (!primera) return [];
+  const resto = primera.otrasMonedas.flatMap((m) => distribuirGasto(campanas, limiteTop, m) ?? []);
+  return [primera, ...resto];
+}
+
+/** Plataformas que tienen campañas pero no gastaron nada en el periodo: se dicen, para que no parezca que faltan. */
+export function plataformasSinGasto(campanas: CampanaParaDistribuir[]): Array<{ provider: string; campanas: number }> {
+  const gastan = new Set(campanas.filter((c) => c.spendMicros > 0).map((c) => c.provider));
+  const sin = new Map<string, number>();
+  for (const c of campanas) if (!gastan.has(c.provider)) sin.set(c.provider, (sin.get(c.provider) ?? 0) + 1);
+  return [...sin].map(([provider, campanas]) => ({ provider, campanas })).sort((a, b) => b.campanas - a.campanas);
 }
 
 /** Cuánto pesa la campaña que más gasta: si concentra casi todo, el resto apenas importa. */

@@ -47,3 +47,10 @@ test("buscarPorNombre exige todas las palabras y no adivina entre varios", () =>
   assert.equal(varios.unico, null);
   assert.equal(varios.candidatos.length, 2);
 });
+
+test("un nombre idéntico al pedido gana sobre los que solo lo contienen", async () => {
+  const { buscarPorNombre } = await import("../lib/links-meta-pura.ts");
+  const items = [{ nombre: "[AE] Awareness" }, { nombre: "[AE] Awareness Perú" }, { nombre: "[AE] Awareness Ecuador" }];
+  assert.equal(buscarPorNombre(items, "[AE] Awareness").unico?.nombre, "[AE] Awareness");
+  assert.equal(buscarPorNombre(items, "Awareness").unico, null);
+});

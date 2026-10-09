@@ -86,6 +86,9 @@ export function buscarPorNombre<T extends { nombre: string | null }>(items: T[],
   const normal = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
   const palabras = normal(consulta).split(/\s+/).filter((p) => p.length > 1);
   if (palabras.length === 0) return { unico: null, candidatos: [] };
-  const candidatos = items.filter((i) => palabras.every((p) => normal(i.nombre ?? "").includes(p)));
+  const parecidos = items.filter((i) => palabras.every((p) => normal(i.nombre ?? "").includes(p)));
+  // Un nombre idéntico al pedido gana sobre los que solo lo contienen («[AE] Awareness» frente a «[AE] Awareness Perú»).
+  const exactos = parecidos.filter((i) => normal(i.nombre ?? "").trim() === normal(consulta).trim());
+  const candidatos = exactos.length > 0 ? exactos : parecidos;
   return { unico: candidatos.length === 1 ? candidatos[0] : null, candidatos };
 }

@@ -6,6 +6,7 @@ import {
   type PlanStep,
 } from "@/lib/constructor";
 import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib/windsor";
+import { retirarPiezasMeta } from "@/lib/renovar-piezas";
 import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
 import { diferenciasConLoEsperado, planDeCampana, planDeGrupo, rutaDeEntidad, type DatosDeCampana } from "@/lib/linkedin-escritura-pura";
 import { enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
@@ -263,6 +264,13 @@ async function ejecutarPasoLinkedin(
   }
 }
 
+/** Retira (pausa) un anuncio viejo de Meta con la conexión directa y lo lee de vuelta: solo es ok si Meta lo dejó pausado. */
+async function ejecutarPasoMeta(accion: string, params: Record<string, unknown>): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+  if (accion !== "meta:retirar_anuncio") return { ok: false, error: `Acción de Meta desconocida: ${accion}`, raw: null };
+  const [r] = await retirarPiezasMeta([{ id: String(params.ad_id ?? ""), nombre: String(params.nombre ?? params.ad_id ?? "") }]);
+  return { ok: r?.ok === true, error: r?.error ?? null, raw: r ?? null };
+}
+
 export async function ejecutarPasosDelPlan(
   steps: PlanStep[],
   draft: Pick<CampaignDraft, "accountByPlatform">,
@@ -336,7 +344,9 @@ export async function ejecutarPasosDelPlan(
     const resultado =
       step.via === "nativa" && step.platform === "linkedin"
         ? await ejecutarPasoLinkedin(step.action, cuenta.externalId, params, credencialesLinkedin)
-        : step.via === "nativa"
+        : step.via === "nativa" && step.platform === "meta"
+          ? await ejecutarPasoMeta(step.action, params)
+          : step.via === "nativa"
           ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
           : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);
     realizados.push({

@@ -19,6 +19,8 @@ export type DestinoDeCreacion = {
   campaignName: string;
   adsetId?: string;
   adsetName?: string;
+  /** Renovar: anuncios viejos del conjunto que ya vienen marcados para retirarse al publicar el nuevo. */
+  retirarAnuncios?: Array<{ id: string; nombre: string }>;
 };
 
 const campo = "mt-1 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm";

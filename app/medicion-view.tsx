@@ -40,7 +40,7 @@ export function MedicionView({
     );
   }
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-6">
+    <div className="mx-auto w-full max-w-6xl space-y-4 px-4 py-6">
       <div>
         <p className="font-micro text-[0.65rem] text-muted-foreground">CALIDAD DE DATOS</p>
         <h2 className="neo-section-title">Salud de medición · {cliente.name}</h2>

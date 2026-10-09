@@ -88,6 +88,7 @@ import {
   SelectorDePublicaciones,
 } from "./selector-publicaciones";
 import { SelectorDeAnuncios } from "./selector-anuncios";
+import { RetirarAnunciosViejos } from "./retirar-anuncios-viejos";
 import { CopilotoDeCreativos } from "./copiloto-creativos";
 import { GeneradorDeVariantes } from "./generador-variantes";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
@@ -227,6 +228,8 @@ export type ConstructorAttachTo = {
   campaignName: string;
   adsetId?: string;
   adsetName?: string;
+  /** Renovar: anuncios viejos del conjunto que ya vienen marcados para retirarse al publicar el nuevo. */
+  retirarAnuncios?: Array<{ id: string; nombre: string }>;
 };
 
 /**
@@ -387,6 +390,7 @@ function borradorInicial(
             campaignName: attachTo.campaignName,
           }
         : null,
+    retirarAnuncios: adjuntando && attachTo?.adsetId ? (attachTo.retirarAnuncios ?? []) : [],
     existingAdset:
       adjuntando && attachTo?.adsetId && attachTo.adsetName
         ? { adsetId: attachTo.adsetId, adsetName: attachTo.adsetName }
@@ -2602,6 +2606,15 @@ function FaseAnuncio({
             className="bg-field/60"
           />
         </Seccion>
+      )}
+      {/* Renovar: al subir un anuncio nuevo a un conjunto de Meta existente, se pueden retirar los viejos para no saturarlo. */}
+      {draft.existingAdset && draft.existingCampaign?.platform === "meta" && cuentaMeta && (
+        <RetirarAnunciosViejos
+          accountId={cuentaMeta.externalId}
+          conjuntoId={draft.existingAdset.adsetId}
+          elegidos={draft.retirarAnuncios ?? []}
+          onChange={(lista) => onChange({ retirarAnuncios: lista })}
+        />
       )}
 
       {/* Destino: la misma URL alimenta el `final_url` de Google y el `link` de Meta. */}

@@ -132,8 +132,8 @@ export async function listarAuditoria(actor: Actor, filtros: FiltrosDeAuditoria 
   if (filtros.desde) { condiciones.push("created_at >= ?"); valores.push(filtros.desde); }
   if (filtros.soloImportantes) condiciones.push("importancia = 'alta'");
   if (filtros.conversacion && /^[A-Za-z0-9-]{8,64}$/.test(filtros.conversacion)) {
-    condiciones.push("detalle_json LIKE ?");
-    valores.push(`%"conversacion":"${filtros.conversacion}"%`);
+    condiciones.push("instr(detalle_json, ?) > 0");
+    valores.push(`"conversacion":"${filtros.conversacion}"`);
   }
   if (filtros.texto?.trim()) {
     condiciones.push("(titulo LIKE ? OR entidad_nombre LIKE ? OR actor_email LIKE ? OR portfolio_nombre LIKE ?)");

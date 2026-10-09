@@ -17,6 +17,7 @@
  *    cuando el presupuesto vive en la campaña (Advantage Campaign Budget).
  */
 import { unidadesMenoresMeta } from "./monedas";
+import { nombreDeTipoDeAnuncio } from "./vista-previa-google-pura";
 import {
   capacidadDe,
   type Platform,
@@ -339,6 +340,24 @@ export type ContenidoAnuncio = {
   creativeId: string | null;
   publicacionInstagram: string | null;
   vistaPreviaUrl: string | null;
+  /** Google (Display, Video, Demand Gen): lo visual del anuncio, para dibujar sus vistas previas. */
+  visual?: VisualGoogle | null;
+};
+
+/** Forma de una imagen de Google: decide en qué vistas previas cabe. */
+export type FormaDeImagen = "horizontal" | "cuadrada" | "vertical" | "logo";
+
+export type ImagenGoogle = { url: string; forma: FormaDeImagen };
+
+/** Lo visual de un anuncio de Google que no es de búsqueda: textos largos, imágenes, logos y videos. */
+export type VisualGoogle = {
+  titulares: string[];
+  titularesLargos: string[];
+  descripciones: string[];
+  negocio: string | null;
+  cta: string | null;
+  imagenes: ImagenGoogle[];
+  videosYoutube: string[];
 };
 
 export type EdicionDeContenido = {
@@ -541,7 +560,7 @@ export function edicionDeContenidoGoogle(tipo: string | null): EdicionDeContenid
     return {
       editable: false,
       via: "ninguna",
-      motivo: `Solo se editan por API los anuncios de búsqueda responsivos; este es ${tipo ?? "de otro tipo"}. Edítalo en Google Ads.`,
+      motivo: `Por ahora solo se editan los anuncios de búsqueda responsivos; este es un ${nombreDeTipoDeAnuncio(tipo)}. Esa configuración todavía no está añadida al sistema: se cambia en Google Ads, o contacta con soporte o con el equipo de paid media.`,
     };
   }
   return {
@@ -605,6 +624,8 @@ export function detalleCampanaGaql(fila: Row, accountId: string): DetalleCampana
   const id = texto(c.id);
   if (!id) return null;
   const presupuesto = micros(registro(fila.campaignBudget).amountMicros);
+  // Los presupuestos de período personalizado (por ejemplo, una campaña de video con fecha de fin) traen el total y no el diario.
+  const presupuestoTotal = micros(registro(fila.campaignBudget).totalAmountMicros);
   const redes = registro(c.networkSettings);
   return {
     provider: "google",
@@ -616,7 +637,7 @@ export function detalleCampanaGaql(fila: Row, accountId: string): DetalleCampana
     // Sin presupuesto propio (compartido) llega 0 o ausente: no es "cero".
     presupuesto: {
       diario: presupuesto !== null && presupuesto > 0 ? presupuesto : null,
-      total: null,
+      total: presupuestoTotal !== null && presupuestoTotal > 0 && !(presupuesto !== null && presupuesto > 0) ? presupuestoTotal : null,
     },
     puja: {
       estrategia: texto(c.biddingStrategyType),
@@ -1042,6 +1063,69 @@ export function detalleCampanaLinkedin(fila: Row): DetalleCampana | null {
   };
 }
 
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === "object" ? (v as Obj) : {});
+/** «{ amount: "100.00", currencyCode }» de LinkedIn → número, o null. */
+const montoLinkedin = (v: unknown): number | null => {
+  const n = numero(obj(v).amount);
+  return n !== null && n > 0 ? n : null;
+};
+/** Marca de tiempo en milisegundos de LinkedIn → aaaa-mm-dd. */
+const diaLinkedin = (ms: unknown): string | null => {
+  const n = typeof ms === "number" ? ms : Number(ms);
+  return Number.isFinite(n) && n > 0 ? new Date(n).toISOString().slice(0, 10) : null;
+};
+
+/** Grupo de campañas leído directo de la API de LinkedIn (trae todo, también lo pausado). */
+export function detalleCampanaLinkedinNativa(g: Obj, accountId: string): DetalleCampana | null {
+  const id = texto(g.id);
+  if (!id) return null;
+  const horario = obj(g.runSchedule);
+  return {
+    provider: "linkedin",
+    accountId,
+    id,
+    nombre: texto(g.name),
+    estado: texto(g.status),
+    objetivo: null,
+    presupuesto: { diario: null, total: montoLinkedin(g.totalBudget) },
+    puja: { estrategia: null, objetivoCpa: null, objetivoRoas: null },
+    inicio: diaLinkedin(horario.start),
+    fin: diaLinkedin(horario.end),
+    categoriasEspeciales: [],
+    limiteGasto: null,
+    redes: null,
+    urlSeguimiento: null,
+  };
+}
+
+/** Campaña de LinkedIn (el «conjunto» de la interfaz) leída directo de la API. */
+export function detalleConjuntoLinkedinNativo(c: Obj, accountId: string): DetalleConjunto | null {
+  const id = texto(c.id);
+  if (!id) return null;
+  const horario = obj(c.runSchedule);
+  return {
+    provider: "linkedin",
+    accountId,
+    campaignId: texto(c.campaignGroup) ? texto(c.campaignGroup)!.split(":").pop() ?? null : null,
+    id,
+    nombre: texto(c.name),
+    estado: texto(c.status),
+    tipo: texto(c.type),
+    presupuesto: { diario: montoLinkedin(c.dailyBudget), total: montoLinkedin(c.totalBudget) },
+    puja: { estrategia: texto(c.costType), monto: montoLinkedin(c.unitCost), objetivoCpa: null, objetivoRoas: null },
+    optimizacion: texto(c.optimizationTargetType),
+    cobroPor: texto(c.costType),
+    destino: null,
+    inicio: diaLinkedin(horario.start),
+    fin: diaLinkedin(horario.end),
+    objetoPromovido: null,
+    segmentacion: null,
+    segmentacionCruda: null,
+    palabrasClave: null,
+  };
+}
+
 /** La campaña de LinkedIn (el «conjunto» de la interfaz): trae su propio presupuesto y fechas. */
 export function detalleConjuntoLinkedin(fila: Row): DetalleConjunto | null {
   const id = texto(fila.campaign_id);
@@ -1206,4 +1290,114 @@ export function gruposDeRecursosGaql(grupos: Row[], recursos: Row[]): GrupoDeRec
     });
   }
   return salida;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Google: lo visual de los anuncios (Display, Video, Demand Gen)              */
+/* -------------------------------------------------------------------------- */
+
+/** Cada tipo de anuncio de Google guarda sus piezas en un objeto distinto; todos usan los mismos nombres de campo. */
+const OBJETOS_VISUALES = ["responsiveDisplayAd", "videoResponsiveAd", "demandGenMultiAssetAd", "demandGenVideoResponsiveAd"] as const;
+
+const CAMPOS_DE_IMAGEN: Array<[string, FormaDeImagen]> = [
+  ["marketingImages", "horizontal"],
+  ["squareMarketingImages", "cuadrada"],
+  ["portraitMarketingImages", "vertical"],
+  ["logoImages", "logo"],
+  ["squareLogoImages", "logo"],
+];
+
+const CAMPOS_DE_VIDEO = ["youtubeVideos", "videos"] as const;
+
+function referencias(valor: unknown): string[] {
+  return (Array.isArray(valor) ? valor : [])
+    .map((v) => texto(registro(v).asset))
+    .filter((v): v is string => v !== null);
+}
+
+function textosDeAssets(valor: unknown): string[] {
+  return (Array.isArray(valor) ? valor : [])
+    .map((v) => texto(registro(v).text))
+    .filter((v): v is string => v !== null);
+}
+
+/** Los `asset` (nombres de recurso) que usan las filas visuales, para pedir sus imágenes y videos en una sola consulta. */
+export function recursosDeVisuales(filas: Row[]): string[] {
+  const salida = new Set<string>();
+  for (const fila of filas) {
+    const ad = registro(registro(fila.adGroupAd).ad);
+    for (const nombre of OBJETOS_VISUALES) {
+      const o = registro(ad[nombre]);
+      for (const [campo] of CAMPOS_DE_IMAGEN) referencias(o[campo]).forEach((r) => salida.add(r));
+      for (const campo of CAMPOS_DE_VIDEO) referencias(o[campo]).forEach((r) => salida.add(r));
+    }
+  }
+  return [...salida];
+}
+
+/** Lo que Google responde de un recurso: la URL de su imagen o el id de su video de YouTube. */
+export type ArchivoDeRecurso = { imagenUrl: string | null; videoYoutube: string | null };
+
+/** Filas de `asset` (con `resourceName`) → mapa por nombre de recurso. */
+export function archivosDeRecursos(filas: Row[]): Map<string, ArchivoDeRecurso> {
+  const mapa = new Map<string, ArchivoDeRecurso>();
+  for (const fila of filas) {
+    const a = registro(fila.asset);
+    const nombre = texto(a.resourceName);
+    if (!nombre) continue;
+    mapa.set(nombre, {
+      imagenUrl: texto(registro(registro(a.imageAsset).fullSize).url),
+      videoYoutube: texto(registro(a.youtubeVideoAsset).youtubeVideoId),
+    });
+  }
+  return mapa;
+}
+
+/** Filas de los anuncios visuales → lo visual por id de anuncio. Parte pura. */
+export function visualesDeAnunciosGaql(filas: Row[], archivos: Map<string, ArchivoDeRecurso>): Map<string, VisualGoogle> {
+  const salida = new Map<string, VisualGoogle>();
+  for (const fila of filas) {
+    const ad = registro(registro(fila.adGroupAd).ad);
+    const id = texto(ad.id);
+    if (!id) continue;
+    const nombre = OBJETOS_VISUALES.find((n) => Object.keys(registro(ad[n])).length > 0);
+    if (!nombre) continue;
+    const o = registro(ad[nombre]);
+    const imagenes: ImagenGoogle[] = [];
+    for (const [campo, forma] of CAMPOS_DE_IMAGEN) {
+      for (const ref of referencias(o[campo])) {
+        const url = archivos.get(ref)?.imagenUrl;
+        if (url) imagenes.push({ url, forma });
+      }
+    }
+    const videos: string[] = [];
+    for (const campo of CAMPOS_DE_VIDEO) {
+      for (const ref of referencias(o[campo])) {
+        const v = archivos.get(ref)?.videoYoutube;
+        if (v && !videos.includes(v)) videos.push(v);
+      }
+    }
+    const largo = texto(registro(o.longHeadline).text);
+    const cta = texto(o.callToActionText) ?? textosDeAssets(o.callToActions)[0] ?? null;
+    salida.set(id, {
+      titulares: textosDeAssets(o.headlines),
+      titularesLargos: largo ? [largo] : textosDeAssets(o.longHeadlines),
+      descripciones: textosDeAssets(o.descriptions),
+      // En unos anuncios el nombre del negocio es texto; en otros, un recurso de texto con su `text`.
+      negocio: typeof o.businessName === "string" ? texto(o.businessName) : texto(registro(o.businessName).text),
+      cta,
+      imagenes,
+      videosYoutube: videos,
+    });
+  }
+  return salida;
+}
+
+/** Suma lo visual a los anuncios ya leídos (los de búsqueda no tienen y quedan igual). */
+export function conVisuales(anuncios: DetalleAnuncio[], visuales: Map<string, VisualGoogle>): DetalleAnuncio[] {
+  if (visuales.size === 0) return anuncios;
+  return anuncios.map((a) => {
+    const v = visuales.get(a.id);
+    return v ? { ...a, contenido: { ...a.contenido, visual: v } } : a;
+  });
 }

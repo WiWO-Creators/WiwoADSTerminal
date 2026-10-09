@@ -1,6 +1,6 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
-import { fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
+import { leerDetalleParaMostrar } from "@/lib/detalle-entidad-store";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { enAlcance, puedeArmarCampanas } from "@/lib/permisos";
 import { isActivePlatform } from "@/lib/plataformas";
@@ -12,6 +12,11 @@ import { WindsorError } from "@/lib/windsor";
  * vigilar con una regla. Meta por defecto; `provider=google` también. Solo lectura.
  */
 export const dynamic = "force-dynamic";
+
+/** Google no da nombre a los anuncios: en el árbol se identifican por su primer titular. */
+function nombreDeAnuncio(a: { contenido: { titulares: Array<{ texto: string }>; visual?: { titulares: string[] } | null } }): string | null {
+  return a.contenido.titulares[0]?.texto ?? a.contenido.visual?.titulares[0] ?? null;
+}
 const NO_STORE = { "cache-control": "no-store" };
 
 export async function GET(request: Request) {
@@ -32,15 +37,17 @@ export async function GET(request: Request) {
 
   try {
     const credencialesGoogle = provider === "google" ? await accesoNativoGoogle(session.actor, accountId) : null;
-    const d = await fetchDetalleDeCuenta(provider, accountId, { credencialesGoogle });
+    const d = await leerDetalleParaMostrar(provider, accountId, { credencialesGoogle, permitirViejo: true }).datos;
     return Response.json(
       {
         campanas: d.campanas.map((c) => ({ id: c.id, nombre: c.nombre, estado: c.estado, objetivo: c.objetivo })),
         conjuntos: d.conjuntos.map((c) => ({ id: c.id, nombre: c.nombre, estado: c.estado, campaignId: c.campaignId })),
         anuncios:
           params.get("anuncios") === "1"
-            ? d.anuncios.map((a) => ({ id: a.id, nombre: a.nombre, estado: a.estado, campaignId: a.campaignId, conjuntoId: a.conjuntoId }))
+            ? d.anuncios.map((a) => ({ id: a.id, nombre: a.nombre ?? nombreDeAnuncio(a), estado: a.estado, campaignId: a.campaignId, conjuntoId: a.conjuntoId }))
             : undefined,
+        // Performance Max no tiene grupos de anuncios: sus grupos de recursos hacen de «conjunto» en el árbol.
+        gruposDeRecursos: (d.gruposDeRecursos ?? []).map((g) => ({ id: g.id, nombre: g.nombre, estado: g.estado, campaignId: g.campaignId })),
         avisos: d.avisos,
       },
       { headers: NO_STORE },

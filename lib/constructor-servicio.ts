@@ -4,6 +4,7 @@
  * cómo se corre, para que lo que se aprobó sea exactamente lo que se ejecuta.
  */
 import { cargarCompatibilidadBoost } from "@/lib/boost-compat-store";
+import { cargarRetiradas } from "@/lib/renovar-piezas";
 import { detalleClientes } from "@/lib/clientes-detalle";
 import { buildPlan, normalizeDraft, type BuildResult, type CampaignDraft, type CuentaCliente } from "@/lib/constructor";
 import {
@@ -46,6 +47,7 @@ export async function armarPlanDeBorrador(actor: Actor, cuerpo: Partial<Campaign
   const compat = await cargarCompatibilidadBoost(draft);
   const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluir, compat, {
     sinConversionesMedidas: cliente?.gtmEstado === "no_tiene",
+    retirar: await cargarRetiradas(draft, cuentas),
   });
   return { draft, plan, cuentas, clienteNombre: cliente?.name ?? portfolio?.name ?? draft.portfolioId };
 }

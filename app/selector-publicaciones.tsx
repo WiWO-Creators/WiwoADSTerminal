@@ -33,6 +33,8 @@ export type Publicacion = {
   id: string;
   createdAt: string | null;
   mediaUrl: string;
+  /** Enlace público de la publicación (puede venir vacío). */
+  permalink?: string;
   caption: string | null;
   format: "reel" | "story" | "carousel" | "image" | "video";
   /** Reacciones + comentarios + compartidos ya reales, no una proyección. */

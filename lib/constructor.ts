@@ -961,6 +961,11 @@ export type CampaignDraft = {
    */
   existingAdset: { adsetId: string; adsetName: string } | null;
   /**
+   * Meta, anuncio nuevo en un conjunto que ya existe: los anuncios viejos que se retiran (pausan) al publicar el nuevo, para que el
+   * conjunto no se sature. El servidor los valida contra Meta (solo activos de ESE conjunto) antes de armar los pasos.
+   */
+  retirarAnuncios: Array<{ id: string; nombre: string }>;
+  /**
    * Obsoleto: desde 2026-10-06 nada nace pausado (la campaña, el conjunto y el anuncio quedan activos al publicarse,
    * porque ya pasaron por las aprobaciones). Se conserva en el borrador por compatibilidad y se ignora.
    */
@@ -1578,6 +1583,8 @@ export function buildPlan(
   opciones: {
     /** El cliente no mide conversiones (p. ej. sin Tag Manager): «Maximizar conversiones» no tendría con qué optimizar. */
     sinConversionesMedidas?: boolean;
+    /** Anuncios viejos ya validados contra Meta (activos de ese conjunto) que se pausan tras publicar el nuevo. */
+    retirar?: Array<{ id: string; nombre: string }>;
   } = {},
 ): BuildResult {
   const boostEnExistente = Boolean(
@@ -2356,6 +2363,18 @@ export function buildPlan(
         },
       });
     }
+    // Renovar: el anuncio nuevo ya quedó creado; recién ahí se pausan los viejos elegidos (si la creación falla, el plan se detiene antes).
+    if (enConjuntoMetaExistente && (opciones.retirar?.length ?? 0) > 0) {
+      for (const r of opciones.retirar ?? []) {
+        steps.push({
+          platform: "meta",
+          action: "meta:retirar_anuncio",
+          label: `Retirar el anuncio viejo «${r.nombre}» (se pausa; se puede reactivar)`,
+          params: { ad_id: r.id, nombre: r.nombre },
+          via: "nativa",
+        });
+      }
+    }
     // Transparencia de anuncios y seguridad de marca: Meta las gestiona en su
     // propia interfaz (Biblioteca de anuncios, herramientas de idoneidad de
     // marca) y Windsor no expone un parámetro de escritura para ninguna de
@@ -2643,6 +2662,7 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     linkedin: normalizarLinkedin(body.linkedin),
     existingCampaign: normalizeExistingCampaign(body.existingCampaign),
     existingAdset: normalizeExistingAdset(body.existingAdset),
+    retirarAnuncios: normalizarRetiradas(body.retirarAnuncios),
     // Default true a propósito: es el ahorro de pasos que se pidió. Solo se
     // desactiva si alguien lo destildó explícitamente en la pantalla.
     activarConjuntoYAnuncio: body.activarConjuntoYAnuncio !== false,
@@ -2732,6 +2752,20 @@ function normalizeExistingCampaign(
     campaignId: String(value.campaignId),
     campaignName: String(value.campaignName),
   };
+}
+
+function normalizarRetiradas(valor: unknown): CampaignDraft["retirarAnuncios"] {
+  if (!Array.isArray(valor)) return [];
+  const vistos = new Set<string>();
+  const salida: CampaignDraft["retirarAnuncios"] = [];
+  for (const v of valor) {
+    const id = String((v as { id?: unknown } | null)?.id ?? "");
+    if (!/^\d+$/.test(id) || vistos.has(id)) continue;
+    vistos.add(id);
+    salida.push({ id, nombre: String((v as { nombre?: unknown }).nombre ?? id).slice(0, 120) });
+    if (salida.length >= 20) break;
+  }
+  return salida;
 }
 
 function normalizeExistingAdset(

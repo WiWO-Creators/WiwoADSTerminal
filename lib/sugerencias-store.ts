@@ -4,12 +4,13 @@
  * una sugerencia deja constancia de la firma; el cambio real se aplica después
  * desde el editor, con sus propios guardarraíles.
  */
+import { enProyectosAsignados, type Segmento } from "@/lib/segmentos";
 import { getRawDb } from "@/db";
 import { resolverDecision, type DecisionAction } from "@/lib/dashboard-store";
 import type { CampanaBase, Metas } from "@/lib/contexto-cliente";
 import { can, enAlcance, type Actor } from "@/lib/permisos";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
-import { isActivePlatform } from "@/lib/plataformas";
+import { isActivePlatform, platformLabel } from "@/lib/plataformas";
 import { enlacesDeSugerencia, type Enlace } from "@/lib/enlaces";
 import { listPortfolios } from "@/lib/portafolios-store";
 import { rangoAnterior, resolverRango } from "@/lib/rangos";
@@ -35,9 +36,11 @@ import { recortar } from "@/lib/auditoria-pura";
 import { ultimoAnuncioGooglePorCampana } from "@/lib/google-ads-nativo";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { contenidoRenovadoEn } from "@/lib/contenido-renovado";
+import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
 import { campanasVivasDeMeta, metaNativoConfigurado, ultimoAnuncioPorCampana } from "@/lib/meta-nativo";
 import { sugerenciasDeFicha, type EntradaDeFicha } from "@/lib/sugerencias-ficha-pura";
 import { idDeCuentaMeta, soloVigentes, type CampanasVivasPorCuenta } from "@/lib/sugerencias-verificacion-pura";
+import { fetchWindsorCatalog } from "@/lib/windsor";
 
 export class ErrorDeSugerencias extends Error {
   status: number;
@@ -58,6 +61,8 @@ export type SugerenciaVista = {
   /** Cliente al que pertenece (las filas viejas, anteriores a la migración 0020, no lo traen). */
   clienteId: string | null;
   clienteNombre: string;
+  /** Nombre de la cuenta publicitaria (por ejemplo «SQM ESPAÑA»): distingue países o marcas de un mismo cliente. */
+  cuentaNombre: string | null;
   version: number;
   estado: "pendiente" | "aprobada" | "descartada";
   severity: "critical" | "high" | "medium" | "info";
@@ -134,7 +139,7 @@ function accionDe(json: string | null): AccionSugerida | null {
   return null;
 }
 
-type DatosDeClientes = Map<string, { ga4PropertyId: string | null; gtmContainerId: string | null }>;
+type DatosDeClientes = Map<string, { ga4PropertyId: string | null; gtmContainerId: string | null; segmentos?: Segmento[] }>;
 
 async function datosDeClientes(): Promise<DatosDeClientes> {
   try {
@@ -145,11 +150,42 @@ async function datosDeClientes(): Promise<DatosDeClientes> {
   }
 }
 
-function aVista(f: Fila, clientes: DatosDeClientes): SugerenciaVista {
+/** Nombres de las cuentas publicitarias (id solo con dígitos → nombre), de lo que Windsor ya tiene guardado. Sin eso, queda vacío. */
+async function nombresDeCuentas(): Promise<Map<string, string>> {
+  const nombres = new Map<string, string>();
+  try {
+    const catalogo = await fetchWindsorCatalog(new Date().toISOString().slice(0, 10));
+    for (const c of catalogo.campanas) {
+      const clave = c.accountId.replace(/\D/g, "");
+      if (clave && c.accountName && !nombres.has(clave)) nombres.set(clave, c.accountName);
+    }
+  } catch {
+    // sin catálogo no se muestra el nombre de la cuenta
+  }
+  return nombres;
+}
+
+/**
+ * De un cliente con proyectos de otros equipos (Valor), solo quedan las decisiones de los proyectos asignados. Una decisión sin
+ * campaña de por medio (la ficha, la medición) no es de ningún proyecto y se conserva. Devuelve cuántas se ocultaron, para decirlo.
+ */
+function soloProyectosAsignados(vistas: SugerenciaVista[], clientes: DatosDeClientes): { visibles: SugerenciaVista[]; ocultas: number } {
+  const visibles = vistas.filter((v) => !v.entityName || enProyectosAsignados(v.clienteId, clientes.get(v.clienteId ?? "")?.segmentos ?? [], [v.entityName, v.title, v.cuentaNombre]));
+  return { visibles, ocultas: vistas.length - visibles.length };
+}
+
+/** Ver una campaña directo en Meta Ads Manager o en Google Ads solo lo hacen los Directores y Administradores. */
+const esEnlaceDePlataforma = (url: string) => /^https:\/\/(adsmanager\.facebook\.com|business\.facebook\.com|ads\.google\.com|www\.linkedin\.com\/campaignmanager)/i.test(url);
+function sinEnlacesDePlataforma(v: SugerenciaVista): SugerenciaVista {
+  return { ...v, enlaces: v.enlaces.filter((e) => !esEnlaceDePlataforma(e.url)) };
+}
+
+function aVista(f: Fila, clientes: DatosDeClientes, cuentas: Map<string, string> = new Map()): SugerenciaVista {
   return {
     id: f.id,
     clienteId: f.portfolio_id,
     clienteNombre: f.client,
+    cuentaNombre: f.account_id ? (cuentas.get(f.account_id.replace(/\D/g, "")) ?? null) : null,
     version: Number(f.version),
     estado: f.status === "approved" ? "aprobada" : f.status === "discarded" ? "descartada" : "pendiente",
     severity: f.severity,
@@ -257,6 +293,8 @@ export async function evaluarSugerencias(
 
   const metasPorId = new Map(portafolios.map((p) => [p.id, p]));
   const clientes: ClienteParaSugerir[] = [];
+  // Por cliente: sus cuentas, cuántas campañas activas tienen y cuánto gastaron (para decisiones de ficha más específicas).
+  const resumenDeCuentasDe = new Map<string, string>();
   for (const resumen of actual.portfolios) {
     if (!resumen.declared || resumen.archivado) continue;
     if (opciones.portfolioId && resumen.id !== opciones.portfolioId) continue;
@@ -270,6 +308,15 @@ export async function evaluarSugerencias(
       frecuenciaMaxima: p?.metas.frecuenciaMaxima ?? null,
     };
     clientes.push({ id: resumen.id, nombre: resumen.name, metas, cuentas: new Set(resumen.accounts.map((a) => a.id)) });
+    const lineas = resumen.accounts
+      .filter((a) => (a.spendMicros ?? 0) > 0 || actual.campaigns.some((k) => k.accountKey === a.id))
+      .slice(0, 6)
+      .map((a) => {
+        const activas = actual.campaigns.filter((k) => k.accountKey === a.id && ["ACTIVE", "ENABLED"].includes((k.status ?? "").toUpperCase())).length;
+        const gasto = a.spendMicros ? new Intl.NumberFormat("es-CL", { style: "currency", currency: a.currency ?? "USD", maximumFractionDigits: 0 }).format(a.spendMicros / 1_000_000) : "sin gasto";
+        return `${a.name} (${platformLabel(a.provider)}): ${activas} campaña${activas === 1 ? "" : "s"} activa${activas === 1 ? "" : "s"}, ${gasto}`;
+      });
+    if (lineas.length > 0) resumenDeCuentasDe.set(resumen.id, lineas.join("; "));
   }
 
   const entradasDePresupuesto: EntradaDePresupuesto[] = [];
@@ -299,13 +346,21 @@ export async function evaluarSugerencias(
   for (const c of clientes) {
     const p = metasPorId.get(c.id);
     if (!p) continue;
+    // La página cuenta como declarada si lo está en la ficha o si Meta deja promocionar a cada cuenta exactamente una (se detecta sola).
+    const cuentasMeta = Object.entries(p.accountProviders).filter(([, prov]) => prov === "meta").map(([id]) => id);
+    let paginaDeFicha: string | null = p.pageId ?? Object.values(p.accountPages).find((x): x is string => Boolean(x)) ?? null;
+    if (!paginaDeFicha && cuentasMeta.length > 0) {
+      const detectadas = await Promise.all(cuentasMeta.map((id) => paginaDeLaCuenta(p, id)));
+      paginaDeFicha = detectadas.every(Boolean) ? (detectadas[0] as string) : null;
+    }
     entradasDeFicha.push({
       cliente: { id: c.id, nombre: c.nombre },
       tieneMeta: Object.values(p.accountProviders).includes("meta"),
-      pageId: p.pageId,
+      pageId: paginaDeFicha,
       instagramId: p.instagramId,
       kpiPrincipal: p.kpiPrincipal,
       presupuestoMensual: Boolean(p.monthlyBudgetMicros),
+      resumenDeCuentas: resumenDeCuentasDe.get(c.id) ?? null,
       metaDeCpaORoas: Boolean(p.targetCpaMicros || p.targetRoas),
       ga4: Boolean(p.ga4PropertyId),
       gtmEstado: p.gtmEstado,
@@ -429,6 +484,11 @@ export async function evaluarSugerencias(
     const cuentas = new Set(
       candidatasSinVerificar.filter((s) => s.provider === "meta" && s.entityLevel === "campana" && s.accountId).map((s) => idDeCuentaMeta(s.accountId as string)),
     );
+    // También las cuentas con decisiones ya pendientes: si hoy no se genera nada nuevo, las viejas igual se confirman (o se retiran).
+    const conPendientes = await getRawDb()
+      .prepare("SELECT DISTINCT account_id FROM decisions WHERE status = 'pending' AND provider = 'meta' AND entity_level = 'campana' AND account_id IS NOT NULL")
+      .all<{ account_id: string }>();
+    for (const fila of conPendientes.results ?? []) cuentas.add(idDeCuentaMeta(fila.account_id));
     await Promise.all(
       [...cuentas].map(async (c) => {
         try {
@@ -444,9 +504,9 @@ export async function evaluarSugerencias(
   // Las pendientes de Meta que ya no son ciertas (campaña borrada o en otro estado) se quitan.
   for (const [cuenta, campanas] of vivas) {
     const pendientes = await getRawDb()
-      .prepare("SELECT id, entity_id, action_json FROM decisions WHERE status = 'pending' AND provider = 'meta' AND entity_level = 'campana' AND account_id IN (?, ?)")
+      .prepare("SELECT id, entity_id, rule, action_json FROM decisions WHERE status = 'pending' AND provider = 'meta' AND entity_level = 'campana' AND account_id IN (?, ?)")
       .bind(cuenta, `act_${cuenta}`)
-      .all<{ id: string; entity_id: string | null; action_json: string | null }>();
+      .all<{ id: string; entity_id: string | null; rule: string | null; action_json: string | null }>();
     for (const p of pendientes.results ?? []) {
       let tipo = "revisar";
       try {
@@ -455,7 +515,7 @@ export async function evaluarSugerencias(
         // acción ilegible: se trata como «revisar»
       }
       const vigente = soloVigentes(
-        [{ provider: "meta", accountId: cuenta, entityId: p.entity_id, entityLevel: "campana", accion: { tipo } }],
+        [{ provider: "meta", accountId: cuenta, entityId: p.entity_id, entityLevel: "campana", rule: p.rule, accion: { tipo } }],
         new Map([[cuenta, campanas]]),
       ).length > 0;
       if (!vigente) await getRawDb().prepare("DELETE FROM decisions WHERE id = ?").bind(p.id).run();
@@ -490,7 +550,16 @@ export async function evaluarSugerencias(
       .prepare("SELECT 1 AS x FROM decisions WHERE status = 'pending' AND COALESCE(portfolio_id, '') = ? AND rule = ? AND COALESCE(entity_id, '') = ? LIMIT 1")
       .bind(s.portfolioId ?? "", s.rule, s.entityId ?? "")
       .first<{ x: number }>();
-    if (igual) continue;
+    if (igual) {
+      // Las de ficha se mantienen al día: si el texto mejoró (por ejemplo, ahora dice de qué cuentas se trata), se actualiza la pendiente.
+      if (s.rule.startsWith("ficha_")) {
+        await db
+          .prepare("UPDATE decisions SET diagnosis = ? WHERE status = 'pending' AND COALESCE(portfolio_id, '') = ? AND rule = ? AND COALESCE(entity_id, '') = ? AND diagnosis <> ?")
+          .bind(s.diagnosis, s.portfolioId ?? "", s.rule, s.entityId ?? "", s.diagnosis)
+          .run();
+      }
+      continue;
+    }
     aInsertar.push(s);
   }
 
@@ -596,12 +665,12 @@ function exigirVerOperacion(actor: Actor): void {
  */
 export async function listarPendientesDeAlcance(
   actor: Actor,
-): Promise<{ pendientes: SugerenciaVista[]; puedeResolver: boolean }> {
+): Promise<{ pendientes: SugerenciaVista[]; ocultas: number; puedeResolver: boolean }> {
   exigirVerOperacion(actor);
   const ahora = Date.now();
   const todos = can(actor, "ver_todos_los_clientes");
   const propios = actor.portfolioIds;
-  if (!todos && propios.length === 0) return { pendientes: [], puedeResolver: can(actor, "aprobar_cambios") };
+  if (!todos && propios.length === 0) return { pendientes: [], ocultas: 0, puedeResolver: can(actor, "aprobar_cambios") };
   const filtroAlcance = todos ? "" : `AND portfolio_id IN (${propios.map(() => "?").join(",")})`;
   // Las advertencias de GA4 y de medición son de los Directores (administradores).
   const filtroMedicion = can(actor, "aprobar_presupuesto") ? "" : "AND rule NOT LIKE 'medicion_%' AND rule NOT LIKE 'ficha_%'";
@@ -618,14 +687,21 @@ export async function listarPendientesDeAlcance(
     .bind(ahora, ahora, ...(todos ? [] : propios))
     .all<Fila>();
   const clientes = await datosDeClientes();
-  return { pendientes: filas.results.map((f) => aVista(f, clientes)), puedeResolver: can(actor, "aprobar_cambios") };
+  const cuentas = await nombresDeCuentas();
+  const verEnPlataforma = can(actor, "aprobar_presupuesto");
+  const { visibles, ocultas } = soloProyectosAsignados(filas.results.map((f) => aVista(f, clientes, cuentas)), clientes);
+  return {
+    pendientes: visibles.map((v) => (verEnPlataforma ? v : sinEnlacesDePlataforma(v))),
+    ocultas,
+    puedeResolver: can(actor, "aprobar_cambios"),
+  };
 }
 
 export async function listarSugerencias(
   actor: Actor,
   portfolioId: string,
   clienteNombre: string,
-): Promise<{ pendientes: SugerenciaVista[]; resueltas: SugerenciaVista[]; puedeResolver: boolean }> {
+): Promise<{ pendientes: SugerenciaVista[]; resueltas: SugerenciaVista[]; ocultas: number; puedeResolver: boolean }> {
   exigirVerOperacion(actor);
   if (!enAlcance(actor, portfolioId)) throw new ErrorDeSugerencias("Ese cliente no está en tu alcance", 403);
   const db = getRawDb();
@@ -655,9 +731,12 @@ export async function listarSugerencias(
   ]);
 
   const clientes = await datosDeClientes();
+  const cuentas = await nombresDeCuentas();
+  const propias = soloProyectosAsignados(pendientes.results.map((f) => aVista(f, clientes, cuentas)), clientes);
   return {
-    pendientes: pendientes.results.map((f) => aVista(f, clientes)),
-    resueltas: resueltas.results.map((f) => aVista(f, clientes)),
+    pendientes: propias.visibles.map((v) => (can(actor, "aprobar_presupuesto") ? v : sinEnlacesDePlataforma(v))),
+    ocultas: propias.ocultas,
+    resueltas: resueltas.results.map((f) => aVista(f, clientes, cuentas)).map((v) => (can(actor, "aprobar_presupuesto") ? v : sinEnlacesDePlataforma(v))),
     puedeResolver: can(actor, "aprobar_cambios"),
   };
 }

@@ -4,6 +4,7 @@ import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { mismoOrigen } from "@/lib/origen-publico";
 import { cargarCompatibilidadBoost } from "@/lib/boost-compat-store";
+import { cargarRetiradas } from "@/lib/renovar-piezas";
 import { detalleClientes } from "@/lib/clientes-detalle";
 import { buildPlan, normalizeDraft, type CampaignDraft, type CuentaCliente } from "@/lib/constructor";
 import {
@@ -113,6 +114,7 @@ export async function POST(request: Request) {
   const compatBoost = await cargarCompatibilidadBoost(draft);
   const plan = buildPlan(draft, portfolio, cuentas, snapshot, excluirCampanasDePresupuesto, compatBoost, {
       sinConversionesMedidas: cliente?.gtmEstado === "no_tiene",
+      retirar: await cargarRetiradas(draft, cuentas),
     });
   const bloqueantes = plan.issues.filter((issue) => issue.blocking);
   if (bloqueantes.length > 0) {

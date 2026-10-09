@@ -8,6 +8,7 @@ import { resolverDestinoMeta } from "@/lib/impulsos";
 import { colocacionesDeConjuntoMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { enAlcance, type Actor } from "@/lib/permisos";
 import { listPortfolios } from "@/lib/portafolios-store";
+import { validarRetiradas } from "@/lib/renovar-piezas";
 import { crearSolicitudDeContenido, ErrorDeSolicitud, type Solicitud } from "@/lib/solicitudes";
 
 export type ResultadoDeContenido = {
@@ -29,6 +30,8 @@ export async function solicitarContenido(
     mensaje?: string;
     enlace?: string;
     cta?: string;
+    /** Renovar: ids de anuncios viejos del mismo conjunto que se pausan al publicarse lo nuevo. */
+    retirar?: string[];
   },
 ): Promise<ResultadoDeContenido> {
   const vacio = (mensaje: string, extra: Partial<ResultadoDeContenido> = {}): ResultadoDeContenido => ({ solicitud: null, supuestos: [], avisos: [], conjuntosPosibles: [], mensaje, ...extra });
@@ -66,6 +69,13 @@ export async function solicitarContenido(
     }
   }
 
+  let retirar: Array<{ id: string; nombre: string }> = [];
+  if (entrada.retirar && entrada.retirar.length > 0) {
+    const v = await validarRetiradas(elegido.id, entrada.retirar).catch(() => ({ validas: [], descartadas: entrada.retirar ?? [] }));
+    retirar = v.validas;
+    if (v.descartadas.length > 0) avisos.push(`No retiro ${v.descartadas.length} anuncio(s) que no están activos en este conjunto.`);
+    if (retirar.length > 0) supuestos.push(`Al publicarse, pauso estos anuncios viejos del conjunto: ${retirar.map((x) => `«${x.nombre}»`).join(", ")} (se pueden reactivar).`);
+  }
   const etiqueta = datos.mensaje.replace(/\s+/g, " ").slice(0, 40);
   const solicitud = await crearSolicitudDeContenido(actor, [
     {
@@ -78,6 +88,7 @@ export async function solicitarContenido(
       adsetName: elegido.nombre ?? "",
       nombre: `${entrada.formato === "carrusel" ? "Carrusel" : "Imagen"} · ${etiqueta}`,
       datos,
+      ...(retirar.length > 0 ? { retirar } : {}),
     },
   ]);
   return {

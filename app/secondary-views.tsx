@@ -22,10 +22,14 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { platformLabel } from "@/lib/plataformas";
-import { summarizeObjectives, type ObjectiveTotal } from "@/lib/objetivos";
+import { OBJETIVO_LABELS, RESULTADO_POR_OBJETIVO, summarizeObjectives, type Objetivo, type ObjectiveTotal } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
 import { TarjetaResumenSemanal } from "./resumen-semanal";
+import { SaludDeMedicion } from "./salud-medicion";
+import { CLIENTES_SOLO_PROYECTOS_ASIGNADOS, coincideConSegmento, enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
+import { MejoresYPeores } from "./mejores-peores";
+import { TableroDeSalud } from "./tablero-salud";
 import {
   HealthBadge,
   StatCard,
@@ -330,7 +334,10 @@ export function HealthView({
   critical,
   warnings,
   puedeVerResumen,
+  cargandoAnuncios = false,
 }: {
+  /** Los anuncios del cliente (casi tres mil filas en toda la cartera) se leen aparte y pueden tardar. */
+  cargandoAnuncios?: boolean;
   /**
    * Id de cliente, no de cuenta: la salud se mira por cliente. Viene del
    * selector del navbar — no tiene su propio selector acá adentro, para no
@@ -351,6 +358,12 @@ export function HealthView({
   const portfolios = performance.portfolios;
   const portfolio = portfolios.find((item) => item.id === client) ?? null;
   const monthLabel = etiquetaPeriodo(performance);
+  // Proyectos o mercados del cliente (Valor: Ébano, Corotú…; SQM: México…): un filtro para ver cada uno por separado.
+  const [segmentoElegido, setSegmentoElegido] = useState<{ cliente: string; id: string } | null>(null);
+  const segmentos = portfolio?.segmentos ?? [];
+  const segmento = segmentoElegido && segmentoElegido.cliente === portfolio?.id ? (segmentos.find((x) => x.id === segmentoElegido.id) ?? null) : null;
+  // Grupo Valor: la cuenta trae proyectos de otros equipos; solo se ven los que llevamos.
+  const soloAsignados = portfolio ? CLIENTES_SOLO_PROYECTOS_ASIGNADOS.has(portfolio.id) && segmentos.length > 0 : false;
   // Resultado de "Resultados" mezclando ventas, leads y awareness en una
   // sola cifra: cada objetivo se mide con su propia métrica (ver
   // `summarizeObjectives`), así que acá se recalcula solo con las campañas
@@ -358,16 +371,21 @@ export function HealthView({
   const cuentasDelCliente = new Set(portfolio?.accounts.map((a) => a.id) ?? []);
   // Solo los objetivos que ese cliente de verdad movió: uno con campañas pero
   // sin ningún resultado no aporta nada y se lee como un dato roto ("—").
-  const objetivosDelCliente = portfolio
-    ? summarizeObjectives(
-        performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)),
-      ).filter((o) => o.result !== null && o.result > 0)
-    : [];
-
-  // Las campañas de este cliente, para la tabla de estado (la de verificaciones técnicas va plegada).
-  const campanasDelCliente = portfolio
-    ? performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)).sort((a, b) => b.spendMicros - a.spendMicros)
-    : [];
+  const todasDelCliente = portfolio ? performance.campaigns.filter((c) => cuentasDelCliente.has(c.accountKey)) : [];
+  const delAlcance = soloAsignados && portfolio ? todasDelCliente.filter((c) => enProyectosAsignados(portfolio.id, segmentos, [c.name])) : todasDelCliente;
+  const ocultasPorProyecto = todasDelCliente.length - delAlcance.length;
+  // Las campañas de este cliente (y del proyecto elegido), para el tablero y la tabla de estado.
+  const campanasDelCliente = (segmento ? delAlcance.filter((c) => coincideConSegmento([c.name, c.accountName], segmento)) : delAlcance).sort((a, b) => b.spendMicros - a.spendMicros);
+  const resumenPorObjetivo = portfolio ? summarizeObjectives(campanasDelCliente) : [];
+  const filtrado = soloAsignados || segmento !== null;
+  const clicsMostrados = portfolio ? (filtrado ? campanasDelCliente.reduce((t, c) => t + (c.clicks ?? 0), 0) : portfolio.clicks) : null;
+  const impresionesMostradas = portfolio ? (filtrado ? campanasDelCliente.reduce((t, c) => t + (c.impressions ?? 0), 0) : portfolio.impressions) : null;
+  const anunciosDelAlcance = (performance.ads ?? []).filter((a) => {
+    if (!cuentasDelCliente.has(a.accountKey)) return false;
+    const textos = [a.campaignName, a.adsetName, a.adName];
+    if (soloAsignados && portfolio && !enProyectosAsignados(portfolio.id, segmentos, textos)) return false;
+    return segmento ? coincideConSegmento([...textos, a.accountName], segmento) : true;
+  });
 
   // Sin cliente elegido no hay nada que medir: antes el selector arrancaba
   // solo en una de sus cuentas de Windsor, elegida al azar, sin decir a qué
@@ -414,18 +432,44 @@ export function HealthView({
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+      {segmentos.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-xs font-semibold text-foreground/55">{soloAsignados ? "Proyecto" : "Segmento"}</span>
+            {[{ id: "", nombre: soloAsignados ? "Todos los míos" : "Todos" }, ...segmentos].map((x) => (
+              <button
+                key={x.id || "todos"}
+                type="button"
+                onClick={() => setSegmentoElegido(x.id ? { cliente: portfolio.id, id: x.id } : null)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold transition-colors",
+                  (segmento?.id ?? "") === x.id ? "border-brand bg-brand/15 text-brand" : "border-foreground/15 text-foreground/65 hover:border-brand/40",
+                )}
+              >
+                {x.nombre}
+              </button>
+            ))}
+          </div>
+          {soloAsignados && (
+            <p className="text-[0.7rem] leading-4 text-foreground/50">
+              Se muestran solo los proyectos que llevamos ({nombresDeProyectos(segmentos)}).{ocultasPorProyecto > 0 ? ` ${ocultasPorProyecto} ${ocultasPorProyecto === 1 ? "campaña de otro proyecto de la cuenta no se muestra" : "campañas de otros proyectos de la cuenta no se muestran"}.` : ""}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)]">
         <StatCard
           label={`Clics · ${monthLabel}`}
-          value={portfolio.clicks === null ? "—" : formatInteger(portfolio.clicks)}
+          value={clicsMostrados === null ? "—" : formatInteger(clicsMostrados)}
           note={
-            portfolio.impressions === null
+            impresionesMostradas === null
               ? "Sin lectura disponible"
-              : `${formatInteger(portfolio.impressions)} impresiones`
+              : `${formatInteger(impresionesMostradas)} impresiones`
           }
           icon={Activity}
         />
-        <TarjetaResultadosPorObjetivo objetivos={objetivosDelCliente} monthLabel={monthLabel} />
+        <TarjetaResultadosPorObjetivo objetivos={resumenPorObjetivo} monthLabel={monthLabel} />
       </div>
 
 
@@ -504,6 +548,23 @@ export function HealthView({
           tone="cyan"
         />
       </div>
+
+      <TableroDeSalud
+        campanas={campanasDelCliente.map((c) => ({ name: c.name, provider: c.provider, status: c.status, accountKey: c.accountKey, accountName: c.accountName, currency: c.currency, spendMicros: c.spendMicros, objetivo: c.objetivo }))}
+        checks={checks}
+        periodo={monthLabel}
+      />
+
+      <MejoresYPeores
+        anuncios={anunciosDelAlcance}
+        cargandoAnuncios={cargandoAnuncios}
+        campanas={campanasDelCliente}
+        cuentas={portfolio.accounts}
+        periodo={monthLabel}
+      />
+
+      {/* Medición de GA4 (solo la ven quienes pueden: la lectura responde 403 al resto y la tarjeta no aparece). */}
+      <SaludDeMedicion key={`ga4-${portfolio.id}`} portfolioId={portfolio.id} puedeEditar={false} />
 
       <TablaDeCampanas
         campanas={campanasDelCliente}
@@ -644,6 +705,11 @@ export function HealthView({
  * campañas activas simplemente no aparece, no hace falta un caso especial
  * para ocultarlo.
  */
+/** Los objetivos que el cliente tiene en el periodo, en el orden de siempre. */
+const OBJETIVOS_FIJOS: Objetivo[] = ["AE", "VTA", "LDS", "TRF", "OCV"];
+
+const COLUMNAS_POR_CANTIDAD: Record<number, string> = { 1: "lg:grid-cols-1", 2: "lg:grid-cols-2", 3: "lg:grid-cols-3", 4: "lg:grid-cols-4", 5: "lg:grid-cols-5" };
+
 function TarjetaResultadosPorObjetivo({
   objetivos,
   monthLabel,
@@ -651,33 +717,45 @@ function TarjetaResultadosPorObjetivo({
   objetivos: ObjectiveTotal[];
   monthLabel: string;
 }) {
-  // Sin ningún resultado no se muestra una tarjeta vacía.
-  if (objetivos.length === 0) return null;
+  const por = new Map(objetivos.map((o) => [o.objetivo, o]));
+  // Solo los objetivos que el cliente de verdad tiene en el periodo: no se muestran Ventas o Leads vacíos si no hay campañas de eso.
+  const lista = OBJETIVOS_FIJOS.filter((o) => por.has(o));
+  if (lista.length === 0) return null;
   return (
     <Surface className="neo-card-accent p-5">
       <p className="font-micro text-[0.62rem] text-foreground/45">
         RESULTADOS POR OBJETIVO · {monthLabel.toUpperCase()}
       </p>
-      <div className="mt-3 space-y-2.5">
-        {objetivos.map((obj) => (
-          <div
-            key={obj.objetivo}
-            className="flex items-center justify-between gap-3"
-          >
-            <span className="min-w-0 truncate text-xs font-semibold text-foreground/70">
-              {obj.label}
-            </span>
-            <span className="metric-number shrink-0 text-sm font-extrabold text-foreground">
-              {obj.result === null ? "—" : formatConversiones(obj.result)}
-              <span className="ml-1.5 text-[0.62rem] font-normal text-foreground/40">
-                {obj.resultLabel.toLowerCase()}
-              </span>
-            </span>
-          </div>
-        ))}
+      <div className={cn("mt-3 grid grid-cols-2 gap-3", COLUMNAS_POR_CANTIDAD[lista.length] ?? "lg:grid-cols-5")}>
+        {lista.map((clave) => {
+          const obj = por.get(clave);
+          const gasto = obj?.currencyTotals.filter((t) => t.spendMicros > 0).map((t) => dineroCorto(t.spendMicros / 1_000_000, t.currency)).join(" · ");
+          return (
+            <div key={clave} className={cn("rounded-xl border border-foreground/10 p-3", !obj && "opacity-60")}>
+              <p className="truncate text-[0.7rem] font-semibold text-foreground/65" title={OBJETIVO_LABELS[clave]}>
+                {OBJETIVO_LABELS[clave]}
+              </p>
+              <p className="metric-number mt-1 text-2xl font-extrabold text-foreground">
+                {obj && obj.result !== null ? formatConversiones(obj.result) : "—"}
+              </p>
+              <p className="text-[0.62rem] text-foreground/45">{RESULTADO_POR_OBJETIVO[clave].toLowerCase()}</p>
+              <p className="mt-1.5 text-[0.65rem] leading-4 text-foreground/55">
+                {obj ? `${obj.campaigns} ${obj.campaigns === 1 ? "campaña con actividad" : "campañas con actividad"}${gasto ? ` · ${gasto}` : ""}` : "sin campañas en el periodo"}
+              </p>
+            </div>
+          );
+        })}
       </div>
     </Surface>
   );
+}
+
+function dineroCorto(valor: number, moneda: string): string {
+  try {
+    return valor.toLocaleString("es-CL", { style: "currency", currency: moneda, maximumFractionDigits: 0 });
+  } catch {
+    return `${Math.round(valor).toLocaleString("es-CL")} ${moneda}`;
+  }
 }
 
 /**

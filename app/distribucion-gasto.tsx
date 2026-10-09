@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { PieChart } from "lucide-react";
 
-import { concentracion, distribuirGasto, type Segmento } from "@/lib/distribucion";
+import { concentracion, distribuirPorMoneda, plataformasSinGasto, type DistribucionDelGasto, type Segmento } from "@/lib/distribucion";
 import { OBJETIVO_LABELS, type ObjectiveTotal, type Objetivo } from "@/lib/objetivos";
 import type { CampaignSummary } from "@/lib/performance-store";
 import { platformLabel } from "@/lib/plataformas";
@@ -74,13 +74,14 @@ export function DistribucionDelGasto({
   objetivos: ObjectiveTotal[];
   periodo: string;
 }) {
-  const d = useMemo(() => distribuirGasto(campanas), [campanas]);
-  if (!d) return null;
+  const porMoneda = useMemo(() => distribuirPorMoneda(campanas), [campanas]);
+  const sinGasto = useMemo(() => plataformasSinGasto(campanas), [campanas]);
+  if (porMoneda.length === 0) return null;
 
   const resultadoPorObjetivo = new Map(objetivos.map((o) => [o.objetivo as string, o]));
   const etiquetaObjetivo = (s: Segmento) =>
     s.clave === "sin_sigla" ? "Sin sigla de objetivo" : (OBJETIVO_LABELS[s.clave as Objetivo] ?? s.clave);
-  const concentrada = concentracion(d);
+  const varias = porMoneda.length > 1;
 
   return (
     <Surface className="mb-4 p-5">
@@ -90,10 +91,42 @@ export function DistribucionDelGasto({
           <h3 className="text-sm font-bold text-foreground">¿Adónde se fue el presupuesto?</h3>
         </div>
         <span className="text-xs text-muted-foreground">
-          {periodo} · {dinero(d.totalMicros, d.moneda)} en total
+          {periodo}
+          {!varias && ` · ${dinero(porMoneda[0].totalMicros, porMoneda[0].moneda)} en total`}
         </span>
       </div>
 
+      {porMoneda.map((d) => (
+        <BloqueDeMoneda key={d.moneda} d={d} varias={varias} resultadoPorObjetivo={resultadoPorObjetivo} etiquetaObjetivo={etiquetaObjetivo} />
+      ))}
+      {sinGasto.length > 0 && (
+        <p className="mt-3 rounded-lg bg-foreground/5 px-3 py-2 text-xs leading-5 text-foreground/65">
+          Sin gasto en este periodo: {sinGasto.map((s) => `${platformLabel(s.provider)} (${s.campanas} ${s.campanas === 1 ? "campaña" : "campañas"})`).join(", ")}. Tienen campañas, pero no invirtieron nada.
+        </p>
+      )}
+    </Surface>
+  );
+}
+
+function BloqueDeMoneda({
+  d,
+  varias,
+  resultadoPorObjetivo,
+  etiquetaObjetivo,
+}: {
+  d: DistribucionDelGasto;
+  varias: boolean;
+  resultadoPorObjetivo: Map<string, ObjectiveTotal>;
+  etiquetaObjetivo: (s: Segmento) => string;
+}) {
+  const concentrada = concentracion(d);
+  return (
+    <div className={cn(varias && "mt-4 border-t border-foreground/10 pt-4")}>
+      {varias && (
+        <p className="text-xs font-bold text-foreground/80">
+          Gasto en {d.moneda} · {dinero(d.totalMicros, d.moneda)} en total
+        </p>
+      )}
       <div className="mt-2 grid gap-6 lg:grid-cols-3">
         <div>
           <p className="font-micro text-[0.6rem] text-muted-foreground">POR PLATAFORMA</p>
@@ -158,11 +191,6 @@ export function DistribucionDelGasto({
           queda sin resultados.
         </p>
       )}
-      {d.otrasMonedas.length > 0 && (
-        <p className="mt-2 text-[0.68rem] text-muted-foreground">
-          Solo se muestra el gasto en {d.moneda}; este cliente también invirtió en {d.otrasMonedas.join(", ")}, que no se suma.
-        </p>
-      )}
-    </Surface>
+    </div>
   );
 }

@@ -35,6 +35,8 @@ export type CambiosEdicion = {
   pausar?: boolean;
   /** true: volver a activar la entidad (por ejemplo, una campaña que quedó apagada). */
   activar?: boolean;
+  /** true: ELIMINAR la entidad (irreversible). Un Creator lo propone y lo aprueba un Lead o superior. Se pide solo. */
+  eliminar?: boolean;
   presupuesto?: { tipo: "daily" | "lifetime"; monto: number };
   /** Meta: puja del conjunto. Google: CPC máximo del grupo. En la moneda de la cuenta. */
   puja?: number;
@@ -227,6 +229,11 @@ export function planEdicion(
   const problema = (campo: string, mensaje: string, bloqueante = true) =>
     plan.problemas.push({ campo, mensaje, bloqueante });
 
+  if (cambios.eliminar === true) {
+    planDeEliminacion(plan, provider, antes, cambios, problema);
+    return plan;
+  }
+
   if (provider === "google") planGoogle(plan, antes, cambios, currency, problema);
   else if (provider === "meta") planMeta(plan, antes, cambios, currency, problema);
   else if (provider === "linkedin") planLinkedin(plan, antes, cambios, currency, problema, nativaLinkedin);
@@ -277,6 +284,39 @@ export function planEdicion(
 }
 
 type Reporte = (campo: string, mensaje: string, bloqueante?: boolean) => void;
+
+/** Eliminar: irreversible, se pide solo y lo aprueba un Lead o superior. LinkedIn no lo permite desde aquí. */
+function planDeEliminacion(plan: PlanEdicion, provider: Platform, antes: AntesDeEdicion, cambios: CambiosEdicion, problema: Reporte) {
+  const otros = Object.entries(cambios).filter(([k, v]) => k !== "eliminar" && v !== undefined);
+  if (otros.length > 0) {
+    problema("eliminar", "Eliminar se pide solo, sin otros cambios a la vez.");
+    return;
+  }
+  const entidad = antes.entidad as { id: string; estado?: string | null; conjuntoId?: string | null };
+  const estado = String(entidad.estado ?? "").toUpperCase();
+  if (["DELETED", "REMOVED"].includes(estado)) {
+    problema("eliminar", "Ya está eliminado.");
+    return;
+  }
+  const que = antes.nivel === "campana" ? "la campaña" : antes.nivel === "conjunto" ? (provider === "google" ? "el grupo de anuncios" : "el conjunto") : "el anuncio";
+  if (provider === "meta") {
+    plan.pasos.push({ via: "nativa", platform: "meta", action: "meta:eliminar", label: `Eliminar ${que} en Meta`, params: { id: entidad.id, nivel: antes.nivel }, campos: ["eliminar"] });
+  } else if (provider === "google") {
+    plan.pasos.push({
+      via: "nativa", platform: "google", action: "ads:eliminar", label: `Eliminar ${que} en Google Ads`,
+      params: { id: entidad.id, nivel: antes.nivel, ad_group_id: antes.nivel === "anuncio" ? (entidad.conjuntoId ?? null) : null }, campos: ["eliminar"],
+    });
+  } else {
+    problema("eliminar", "LinkedIn no permite eliminar desde WiWO.ADS: se archiva o se elimina en Campaign Manager. Aquí solo se puede pausar.");
+    return;
+  }
+  plan.diff.push({ campo: "eliminar", etiqueta: "Eliminar", antes: "Existe", despues: "Eliminado para siempre" });
+  problema(
+    "eliminar",
+    `Eliminar no se puede deshacer${antes.nivel === "anuncio" ? "." : antes.nivel === "conjunto" ? ": también se eliminan sus anuncios." : ": también se eliminan sus conjuntos y anuncios."} Si solo quieres detener la entrega, pausa.`,
+    false,
+  );
+}
 
 /** Campo de `CambiosRsa` → el mismo campo en `CambiosEdicion` (solo cambia `urlsFinales`). */
 function campoDeRsa(clave: keyof CambiosRsa): keyof CambiosEdicion {
@@ -331,6 +371,9 @@ function planGoogle(
       nativo.inicio = c.inicio;
       campos.push("inicio");
       plan.diff.push({ campo: "inicio", etiqueta: "Inicio", antes: vacio(e.inicio), despues: c.inicio });
+      if (c.inicio && c.inicio < new Date().toISOString().slice(0, 10) && !(e.inicio && e.inicio <= new Date().toISOString().slice(0, 10))) {
+        problema("inicio", "La fecha de inicio ya pasó: elige hoy o una fecha futura.");
+      }
       if (e.inicio && e.inicio <= new Date().toISOString().slice(0, 10)) {
         problema("inicio", "Esta campaña ya empezó: Google no deja cambiar su fecha de inicio.", true);
       }
@@ -339,6 +382,7 @@ function planGoogle(
       nativo.fin = c.fin;
       campos.push("fin");
       plan.diff.push({ campo: "fin", etiqueta: "Fin", antes: e.fin ?? "Sin fin", despues: c.fin || "Sin fin" });
+      if (c.fin && c.fin < new Date().toISOString().slice(0, 10)) problema("fin", "La fecha de término ya pasó: elige hoy o una fecha futura.");
     }
     if (c.redes && e.redes && (c.redes.busqueda !== e.redes.busqueda || c.redes.asociadas !== e.redes.asociadas || c.redes.display !== e.redes.display)) {
       // Verificado con `validateOnly` contra Google: en una campaña de Display las redes de búsqueda no se pueden tocar.
@@ -383,7 +427,9 @@ function planGoogle(
       plan.diff.push({ campo: "plantillaSeguimiento", etiqueta: "Plantilla de seguimiento", antes: vacio(e.urlSeguimiento), despues: vacio(c.plantillaSeguimiento) });
     }
     if (c.extensiones !== undefined) {
-      if (e.extensiones === undefined) {
+      if (e.objetivo !== "SEARCH") {
+        problema("extensiones", "Las extensiones de enlaces y textos destacados solo se editan en campañas de Búsqueda.");
+      } else if (e.extensiones === undefined) {
         problema("extensiones", "No se pudieron leer las extensiones de esta campaña: conecta tu cuenta de Google en Integraciones.");
       } else {
         const mensajes = validarCambiosExtensiones(c.extensiones);

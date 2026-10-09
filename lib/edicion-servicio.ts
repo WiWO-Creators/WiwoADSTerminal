@@ -99,7 +99,7 @@ export async function prepararEdicion({
     provider === "google" ? await accesoNativoGoogle(actor, accountId) : null;
   const credencialesLinkedin =
     provider === "linkedin" ? await accesoNativoLinkedin(actor, accountId) : null;
-  const detalle = await fetchDetalleDeCuenta(provider, accountId, { credencialesGoogle });
+  const detalle = await fetchDetalleDeCuenta(provider, accountId, { credencialesGoogle, credencialesLinkedin });
   const antes = armarAntes(nivel, entidadConAncestros(detalle, nivel, id));
   if (!antes) {
     throw new ErrorDeEdicion(

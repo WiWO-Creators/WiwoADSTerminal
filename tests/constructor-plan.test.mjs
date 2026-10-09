@@ -533,3 +533,42 @@ test("tráfico no admite ventanas con vista; con ventas sí", () => {
   const ventas = plan(borrador({ platforms: ["meta"], objective: "ventas", metaAttribution: "click_1d_view_1d" }));
   assert.ok(!bloqueantes(ventas).some((i) => /ventana/.test(i.message)));
 });
+
+// --- renovar: retirar anuncios viejos al subir uno nuevo a un conjunto existente de Meta ---
+const DESTINO_META = { platform: "meta", accountId: "999", campaignId: "5251", campaignName: "Camp" };
+const VIEJOS = [
+  { id: "111", nombre: "Pieza vieja A" },
+  { id: "222", nombre: "Pieza vieja B" },
+];
+
+function planRenovar(over, retirar) {
+  const draft = borrador({ platforms: ["meta"], existingCampaign: DESTINO_META, existingAdset: { adsetId: "9001", adsetName: "Conj" }, ...over });
+  return buildPlan(draft, null, [CUENTA_META], SNAPSHOT, new Set(), null, { retirar });
+}
+
+test("renovar: los anuncios viejos se pausan DESPUÉS de crear el nuevo, uno por paso y con Meta directo", () => {
+  const r = planRenovar({}, VIEJOS);
+  assert.deepEqual(bloqueantes(r), []);
+  const acciones = ejecutables(r).map((s) => s.action);
+  assert.deepEqual(acciones, ["create_ad", "meta:retirar_anuncio", "meta:retirar_anuncio"]);
+  const retiros = ejecutables(r).slice(1);
+  assert.deepEqual(retiros.map((s) => s.params.ad_id), ["111", "222"]);
+  assert.ok(retiros.every((s) => s.via === "nativa" && s.platform === "meta"));
+});
+
+test("renovar: sin anuncios elegidos el plan es el de siempre", () => {
+  assert.deepEqual(ejecutables(planRenovar({}, [])).map((s) => s.action), ["create_ad"]);
+  assert.deepEqual(ejecutables(planRenovar({}, undefined)).map((s) => s.action), ["create_ad"]);
+});
+
+test("renovar: sin conjunto existente no se retira nada, aunque el navegador lo pida", () => {
+  const draft = borrador({ platforms: ["meta"] });
+  const r = buildPlan(draft, null, [CUENTA_META], SNAPSHOT, new Set(), null, { retirar: VIEJOS });
+  assert.equal(ejecutables(r).some((s) => s.action === "meta:retirar_anuncio"), false);
+});
+
+test("normalizeDraft de retirarAnuncios descarta ids que no son numéricos y repetidos", () => {
+  const d = normalizeDraft({ retirarAnuncios: [{ id: "111", nombre: "A" }, { id: "111", nombre: "A2" }, { id: "abc", nombre: "X" }, { id: "../1", nombre: "Y" }, null] });
+  assert.deepEqual(d.retirarAnuncios, [{ id: "111", nombre: "A" }]);
+  assert.deepEqual(normalizeDraft({}).retirarAnuncios, []);
+});

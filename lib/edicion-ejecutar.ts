@@ -1,7 +1,9 @@
 import { CAMPOS_DE_CONTENIDO, marcarContenidoRenovado } from "@/lib/contenido-renovado";
 import type { PasoEjecutado } from "@/lib/constructor-ejecutar";
 import type { CambiosRsa, CredencialesGoogle } from "@/lib/google-ads-nativo";
+import { eliminarEnMeta } from "@/lib/meta-nativo";
 import {
+  eliminarEnGoogle,
   actualizarAnuncioRsa,
   actualizarCampanaGoogle,
   actualizarExtensionesCampana,
@@ -141,7 +143,14 @@ export async function ejecutarPasosDeEdicion({
     let error: string | null = null;
     let raw: unknown = null;
 
-    if (paso.via === "nativa" && paso.platform === "linkedin") {
+    if (paso.action === "meta:eliminar") {
+      try {
+        raw = await eliminarEnMeta(String(paso.params.id));
+        ok = true;
+      } catch (e) {
+        error = e instanceof Error ? e.message : "No se pudo eliminar en Meta.";
+      }
+    } else if (paso.via === "nativa" && paso.platform === "linkedin") {
       const nivelNativo = paso.params.nivel === "grupo" || paso.params.nivel === "campana" ? paso.params.nivel : null;
       if (!credencialesLinkedin) {
         error = "Falta conectar tu cuenta de LinkedIn en Integraciones.";
@@ -159,7 +168,15 @@ export async function ejecutarPasosDeEdicion({
       } else {
         try {
           const r =
-            paso.action === "ads:update_campaign_assets"
+            paso.action === "ads:eliminar"
+              ? await eliminarEnGoogle(
+                  credencialesGoogle,
+                  accountId,
+                  paso.params.nivel === "campana" ? "campana" : paso.params.nivel === "conjunto" ? "conjunto" : "anuncio",
+                  String(paso.params.id),
+                  paso.params.ad_group_id ? String(paso.params.ad_group_id) : null,
+                )
+              : paso.action === "ads:update_campaign_assets"
               ? await actualizarExtensionesCampana(credencialesGoogle, accountId, String(paso.params.campaign_id), paso.params.cambios as CambiosExtensiones)
               : paso.action === "ads:update_asset_group"
               ? await actualizarGrupoDeRecursos(credencialesGoogle, accountId, String(paso.params.asset_group_id), paso.params.cambios as CambiosGrupoDeRecursos)

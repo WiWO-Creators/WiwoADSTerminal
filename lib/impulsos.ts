@@ -1,4 +1,6 @@
-import { paginaDeLaCuenta } from "@/lib/pagina-de-cuenta";
+import { paginaDeLaCuenta, paginaEInstagramDeLaCampana } from "@/lib/pagina-de-cuenta";
+import { destinoDeLosAnunciosDelConjunto, type DestinoDeAnuncio } from "@/lib/meta-nativo";
+import { piezasDelConjunto, validarRetiradas, type PiezaDeConjunto } from "@/lib/renovar-piezas";
 /**
  * «Impulsa estos links en el conjunto o campaña X»: resuelve los links a publicaciones reales de la Página y de
  * Instagram del cliente, encuentra el destino por nombre y deja las solicitudes listas para que un supervisor las apruebe.
@@ -30,6 +32,19 @@ export type ResultadoDeImpulsos = {
   /** Qué se asumió (por ejemplo, el conjunto elegido dentro de una campaña). */
   supuestos: string[];
   mensaje: string;
+  /** Solo con `soloVista`: lo que se publicaría, para revisarlo y corregirlo ANTES de enviar nada. */
+  vista?: {
+    destino: { cuenta: string; campana: string; conjunto: string };
+    publicaciones: Array<{ red: string; formato: string; texto: string; enlace: string; fecha: string | null; nombreDelAnuncio: string }>;
+    pagina: string;
+    instagram: string | null;
+    /** Botón y destino que llevará el anuncio (el de los demás del conjunto, o el pedido). */
+    botonYDestino: string;
+    /** Anuncios activos del conjunto (los más viejos primero): candidatos a retirar para no saturarlo. */
+    piezasDelConjunto: PiezaDeConjunto[];
+    /** Los que se retirarán (pausarán) al publicarse, si la persona los eligió. */
+    seRetiran: Array<{ id: string; nombre: string }>;
+  };
 };
 
 export type ConjuntoDeDestino = {
@@ -52,12 +67,22 @@ export async function resolverDestinoMeta(
   cliente: { name: string; accountIds: string[]; accountProviders: Record<string, string | null | undefined> },
   entrada: { conjunto?: string; campana?: string },
 ): Promise<DestinoResuelto> {
-  const falla = (error: string, conjuntosPosibles: string[] = []): DestinoResuelto => ({ error, conjuntosPosibles });
+  const cuentasSinLeer: string[] = [];
+  const falla = (error: string, conjuntosPosibles: string[] = []): DestinoResuelto => ({
+    error: cuentasSinLeer.length > 0 ? `${error} (No pude leer las cuentas de Meta: ${cuentasSinLeer.join(", ")}.)` : error,
+    conjuntosPosibles,
+  });
   const cuentasMeta = cliente.accountIds.filter((id) => cliente.accountProviders[id] === "meta");
   if (cuentasMeta.length === 0) return falla("Este cliente no tiene cuentas de Meta conectadas.");
   const conjuntos: ConjuntoDeDestino[] = [];
   for (const cuenta of cuentasMeta) {
-    const detalle = await fetchDetalleDeCuenta("meta", cuenta, {});
+    // Una cuenta que no se pueda leer no tumba a las demás (SQM tiene varias): se salta y, si no aparece el destino, se dice cuál falló.
+    const detalle = await fetchDetalleDeCuenta("meta", cuenta, {}).catch((error: unknown) => {
+      console.error("WiWO.ADS impulsos: no se pudo leer la cuenta", cuenta, error instanceof Error ? error.message : "error");
+      cuentasSinLeer.push(cuenta);
+      return null;
+    });
+    if (!detalle) continue;
     for (const c of detalle.conjuntos) {
       conjuntos.push({
         objetivo: detalle.campanas.find((k) => k.id === c.campaignId)?.objetivo ?? null,
@@ -84,7 +109,10 @@ export async function resolverDestinoMeta(
     candidatos = conjuntos.filter((c) => nombresDeCampana.includes(c.campaignName));
   }
   let elegido: ConjuntoDeDestino | null = null;
-  if (entrada.conjunto?.trim()) {
+  const porId = entrada.conjunto && /^\d{6,}$/.test(entrada.conjunto.trim()) ? conjuntos.find((c) => c.id === entrada.conjunto!.trim()) : undefined;
+  if (porId) {
+    elegido = porId;
+  } else if (entrada.conjunto?.trim()) {
     const { unico, candidatos: varios } = buscarPorNombre(candidatos, entrada.conjunto);
     if (!unico) {
       return falla(
@@ -108,7 +136,7 @@ export async function resolverDestinoMeta(
 
 export async function solicitarImpulsos(
   actor: Actor,
-  entrada: { clienteId: string; links: string[]; conjunto?: string; campana?: string; regla?: string },
+  entrada: { clienteId: string; links: string[]; conjunto?: string; campana?: string; regla?: string; soloVista?: boolean; destino?: DestinoDeAnuncio; retirar?: string[] },
 ): Promise<ResultadoDeImpulsos> {
   const vacio = (mensaje: string, extra: Partial<ResultadoDeImpulsos> = {}): ResultadoDeImpulsos => ({
     solicitudes: [],
@@ -149,16 +177,21 @@ export async function solicitarImpulsos(
   }
 
   // 2) Links → publicaciones reales de la Página y de Instagram del cliente.
-  const pageId = await paginaDeLaCuenta(cliente, elegido.accountId);
-  if (!pageId) return vacio("La cuenta de Meta de este cliente no tiene una Página de Facebook asociada.");
+  // Con varias páginas posibles en la cuenta (SQM: México, Global…) se toma la que ya usan los anuncios de esa campaña.
+  const deLaCampana = elegido.campaignId ? await paginaEInstagramDeLaCampana(elegido.campaignId) : null;
+  const pageId = (await paginaDeLaCuenta(cliente, elegido.accountId)) ?? deLaCampana?.pageId ?? null;
+  const instagramId = deLaCampana?.instagramId ?? cliente.instagramId;
+  if (!pageId) {
+    return vacio("La cuenta de Meta puede promocionar varias Páginas (o ninguna) y la campaña no tiene anuncios que digan cuál usar: declara la Página de esa cuenta en Clientes → ficha del cliente y vuelve a intentarlo.");
+  }
   const desde = isoHaceDias(DIAS_ATRAS);
   const hasta = isoHaceDias(0);
   // Solo se lee lo que los links piden. Instagram: directo de Meta (rápido); si no, Windsor.
   const piden = (re: RegExp) => links.some((l) => re.test(l));
   const [facebook, instagram] = await Promise.all([
     piden(/facebook.com|fb.watch|fb.com/i) ? fetchFacebookPosts(pageId, desde, hasta) : Promise.resolve<OrganicPost[]>([]),
-    cliente.instagramId && piden(/instagram.com/i)
-      ? (metaNativoConfigurado() ? listarMediosInstagram(cliente.instagramId).catch(() => fetchInstagramMedia(cliente.instagramId!, desde, hasta)) : fetchInstagramMedia(cliente.instagramId, desde, hasta))
+    instagramId && piden(/instagram.com/i)
+      ? (metaNativoConfigurado() ? listarMediosInstagram(instagramId).catch(() => fetchInstagramMedia(instagramId, desde, hasta)) : fetchInstagramMedia(instagramId, desde, hasta))
       : Promise.resolve<OrganicPost[]>([]),
   ]);
   const { encontrados, noEncontrados } = resolverLinks<OrganicPost & PostConLink>(links, [...facebook, ...instagram]);
@@ -167,8 +200,48 @@ export async function solicitarImpulsos(
   const deInstagram = encontrados.filter((e) => e.post.platform === "instagram");
   if (deFacebook.length + deInstagram.length === 0) return vacio("Ninguno de los links se pudo usar.", { descartados });
 
+  // Botón y destino: el pedido por la persona o, si no, el que ya usan los demás anuncios del conjunto (así el nuevo no sale sin destino).
+  const botonDestino: DestinoDeAnuncio | null = entrada.destino ?? (await destinoDeLosAnunciosDelConjunto(elegido.id).catch(() => null));
+  const textoDeDestino = botonDestino ? (botonDestino.tipo === "whatsapp" ? "botón de WhatsApp" : `«${botonDestino.cta ?? "Más información"}» → ${botonDestino.url}`) : "sin botón (si el conjunto es de visitas al perfil, lleva «Visitar perfil»)";
+  if (botonDestino && deInstagram.length > 0) supuestos.push(`El anuncio lleva el mismo destino que los demás del conjunto: ${textoDeDestino}.`);
+  // Renovar piezas: los anuncios viejos que la persona eligió retirar (solo los activos de ESTE conjunto).
+  let retirar: Array<{ id: string; nombre: string }> = [];
+  if (entrada.retirar && entrada.retirar.length > 0) {
+    const v = await validarRetiradas(elegido.id, entrada.retirar).catch(() => ({ validas: [], descartadas: entrada.retirar ?? [] }));
+    retirar = v.validas;
+    if (v.descartadas.length > 0) supuestos.push(`No retiro ${v.descartadas.length} anuncio(s) que no están activos en este conjunto: ${v.descartadas.join(", ")}.`);
+    if (retirar.length > 0) supuestos.push(`Al publicarse, pauso estos anuncios viejos del conjunto: ${retirar.map((x) => `«${x.nombre}»`).join(", ")} (se pueden reactivar).`);
+  }
   const solicitudes: Solicitud[] = [];
   const etiqueta = (e: { post: OrganicPost }) => (e.post.caption ?? "publicación").replace(/\s+/g, " ").slice(0, 40);
+
+  // Con `soloVista` no se crea nada: se muestra lo que se publicaría para que la persona lo revise y lo corrija.
+  if (entrada.soloVista) {
+    const todas = [...deFacebook, ...deInstagram];
+    return {
+      solicitudes: [],
+      descartados,
+      conjuntosPosibles: [],
+      supuestos,
+      mensaje: `${todas.length} publicación${todas.length === 1 ? "" : "es"} lista${todas.length === 1 ? "" : "s"} para impulsar en «${elegido.nombre}»: revisa y confirma.`,
+      vista: {
+        destino: { cuenta: elegido.accountId, campana: elegido.campaignName, conjunto: elegido.nombre ?? "" },
+        publicaciones: todas.map((e) => ({
+          red: e.post.platform === "instagram" ? "Instagram" : "Facebook",
+          formato: e.post.format,
+          texto: (e.post.caption ?? "").replace(/\s+/g, " ").slice(0, 160),
+          enlace: e.link,
+          fecha: e.post.createdAt,
+          nombreDelAnuncio: (e.post.platform === "instagram" ? `Impulso Instagram · ${etiqueta(e)}` : `Impulso Facebook · ${etiqueta(e)}`).slice(0, 80),
+        })),
+        pagina: pageId,
+        instagram: instagramId ?? null,
+        botonYDestino: textoDeDestino,
+        piezasDelConjunto: await piezasDelConjunto(elegido.id).catch(() => [] as PiezaDeConjunto[]),
+        seRetiran: retirar,
+      },
+    };
+  }
 
   // 3a) Facebook en campañas de Interacción: boost_post (Windsor). En cualquier otra, anuncio pausado con la API directa.
   const esInteraccion = (elegido.objetivo ?? "").toUpperCase() === "OUTCOME_ENGAGEMENT";
@@ -186,6 +259,11 @@ export async function solicitarImpulsos(
       mediaId: e.post.id,
       nombre: `Impulso Facebook · ${etiqueta(e)}`.slice(0, 80),
       regla: reglaPropia,
+      paginaId: pageId,
+      instagramId: instagramId ?? undefined,
+      enlace: e.link,
+      texto: (e.post.caption ?? "").replace(/\s+/g, " ").slice(0, 300),
+      formato: e.post.format,
     }));
     try {
       solicitudes.push(await crearSolicitudDeInstagram(actor, impulsos));
@@ -223,7 +301,14 @@ export async function solicitarImpulsos(
       mediaId: e.post.id,
       nombre: `Impulso Instagram · ${etiqueta(e)}`.slice(0, 80),
       regla: reglaPropia,
+      paginaId: pageId,
+      instagramId: instagramId ?? undefined,
+      enlace: e.link,
+      texto: (e.post.caption ?? "").replace(/\s+/g, " ").slice(0, 300),
+      formato: e.post.format,
+      destino: botonDestino ?? undefined,
     }));
+    if (retirar.length > 0) impulsos[0].retirar = retirar;
     try {
       solicitudes.push(await crearSolicitudDeInstagram(actor, impulsos));
     } catch (error) {

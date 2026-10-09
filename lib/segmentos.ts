@@ -115,3 +115,24 @@ export function conPresupuestos(
     return { ...s, presupuesto: valor && valor > 0 ? { micros: Math.round(valor), moneda: moneda.toUpperCase() } : null };
   });
 }
+
+/**
+ * Clientes de los que el equipo solo trabaja los proyectos asignados (Grupo Valor: Ébano, Corotú, Marea y Bijao; la cuenta trae
+ * además proyectos de otros equipos). Lo que no nombra a ninguno de sus segmentos no es nuestro: no se muestra ni genera decisiones.
+ */
+export const CLIENTES_SOLO_PROYECTOS_ASIGNADOS = new Set(["valor"]);
+
+/**
+ * ¿Esto (una campaña, un conjunto, un anuncio) es de un proyecto que llevamos? Siempre sí para un cliente sin esta regla o sin
+ * segmentos definidos. Con la regla, tiene que nombrar a alguno de sus segmentos.
+ */
+export function enProyectosAsignados(portfolioId: string | null | undefined, segmentos: Segmento[], textos: Array<string | null | undefined>): boolean {
+  if (!portfolioId || !CLIENTES_SOLO_PROYECTOS_ASIGNADOS.has(portfolioId) || segmentos.length === 0) return true;
+  return segmentos.some((s) => coincideConSegmento(textos, s));
+}
+
+/** Nombres de los proyectos asignados, para decirlo en pantalla («Ébano, Corotú, Marea y Bijao»). */
+export function nombresDeProyectos(segmentos: Segmento[]): string {
+  const n = segmentos.map((s) => s.nombre);
+  return n.length <= 1 ? n.join("") : `${n.slice(0, -1).join(", ")} y ${n[n.length - 1]}`;
+}

@@ -266,7 +266,7 @@ test("Google anuncio: pedir los mismos titulares no escribe nada", () => {
 test("Google anuncio de video: el contenido no se edita y dice por qué", () => {
   const p = planEdicion("google", { nivel: "anuncio", entidad: VIDEO_GOOGLE }, { urlsFinales: ["https://x.cl"] }, conNativa);
   assert.equal(p.pasos.length, 0);
-  assert.match(bloqueantes(p)[0].mensaje, /VIDEO_RESPONSIVE_AD/);
+  assert.match(bloqueantes(p)[0].mensaje, /anuncio de video/);
 });
 
 test("una plataforma sin edición implementada no arma pasos", () => {
@@ -643,4 +643,18 @@ test("Google campaña: la puja, la ubicación y el seguimiento van en un solo pa
 test("Google campaña: la cuota de impresiones exige CPC máximo", () => {
   const p = planEdicion("google", { nivel: "campana", entidad: CAMPANA_GOOGLE }, { pujaGoogle: { tipo: "cuota_impresiones", cuotaPorcentaje: 60 } }, conNativa);
   assert.ok(bloqueantes(p).some((x) => /CPC máximo/.test(x.mensaje)));
+});
+
+test("eliminar: Meta y Google arman un paso irreversible con advertencia; LinkedIn lo bloquea; no se mezcla con otros cambios", () => {
+  const meta = planEdicion("meta", { nivel: "conjunto", entidad: CONJUNTO_META, campana: CAMPANA_META }, { eliminar: true }, { currency: "CLP" });
+  assert.equal(meta.pasos.length, 1);
+  assert.equal(meta.pasos[0].action, "meta:eliminar");
+  assert.equal(meta.problemas.some((p) => p.bloqueante), false);
+  assert.ok(meta.problemas.some((p) => /no se puede deshacer/i.test(p.mensaje)));
+  const mezcla = planEdicion("meta", { nivel: "conjunto", entidad: CONJUNTO_META, campana: CAMPANA_META }, { eliminar: true, nombre: "otro" }, { currency: "CLP" });
+  assert.equal(mezcla.pasos.length, 0);
+  assert.ok(mezcla.problemas.some((p) => p.bloqueante));
+  const li = planEdicion("linkedin", { nivel: "campana", entidad: { ...CAMPANA_META, provider: "linkedin" } }, { eliminar: true }, { currency: "CLP" });
+  assert.equal(li.pasos.length, 0);
+  assert.ok(li.problemas.some((p) => p.bloqueante && /LinkedIn/.test(p.mensaje)));
 });
