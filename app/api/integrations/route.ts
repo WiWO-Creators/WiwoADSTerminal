@@ -5,6 +5,7 @@ import {
   listIntegrations,
   userCanManageIntegrations,
 } from "@/lib/integration-store";
+import { conexionesDelEquipo } from "@/lib/conexiones-equipo";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import type { PlataformaConectable } from "@/lib/plataformas";
 import { windsorConfigured } from "@/lib/windsor";
@@ -33,6 +34,7 @@ export async function GET() {
         integrations: await listIntegrations(user),
         canManage: userCanManageIntegrations(user),
         windsor: await windsorStatus(user),
+        equipo: await conexionesDelEquipo(user),
       },
       { headers: { "cache-control": "no-store" } },
     );

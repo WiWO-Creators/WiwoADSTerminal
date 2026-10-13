@@ -71,7 +71,7 @@ const AVISO_SOLO_ACTIVIDAD =
   "Windsor solo entrega lo que tuvo actividad en los últimos días: una campaña, conjunto o anuncio pausado o recién creado puede no aparecer.";
 
 const AVISO_CONECTAR_GOOGLE =
-  "Conecta tu cuenta de Google en Integraciones para ver también los anuncios sin actividad y poder editar su contenido.";
+  "La conexión del equipo con Google no está activa, así que no se ven los anuncios sin actividad ni su contenido, y no se pueden editar. Avisa a un administrador: se conecta una sola vez y queda para todo el equipo.";
 
 const ESTADOS_BORRADOS = new Set(["REMOVED", "DELETED"]);
 

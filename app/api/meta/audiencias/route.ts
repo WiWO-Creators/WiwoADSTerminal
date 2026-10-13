@@ -5,6 +5,7 @@ import {
   crearAudienciaWeb,
   eliminarAudienciaDePrueba,
   ErrorDeMeta,
+  graphJson,
   listarAudienciasMeta,
   listarPixelesMeta,
   listarReglasNativasMeta,
@@ -14,6 +15,11 @@ import { mismoOrigen } from "@/lib/origen-publico";
 import { can, enAlcance } from "@/lib/permisos";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 import { registrarEjecucion } from "@/lib/constructor-ejecutar";
+import { crearPublicoDeInteraccion } from "@/lib/meta-publicos";
+import { listarFormulariosMeta } from "@/lib/meta-formularios";
+import { paginaDeLaCuenta, paginaEInstagramDeLaCampana } from "@/lib/pagina-de-cuenta";
+import { listPortfolios } from "@/lib/portafolios-store";
+import type { DatosDePublico } from "@/lib/meta-publicos-pura";
 
 /**
  * Audiencias de Meta por la API directa: leer (audiencias, píxeles y reglas nativas de la cuenta) y crear audiencias
@@ -58,7 +64,10 @@ export async function GET(request: Request) {
 type Cuerpo = {
   portfolioId?: string;
   accountId?: string;
-  tipo?: "similar" | "web";
+  tipo?: "similar" | "web" | "video" | "pagina" | "instagram" | "formulario";
+  /** Público de interacción (retargeting): lo que corresponda a su tipo. */
+  formularioId?: string;
+  quien?: "abrieron" | "abrieron_sin_enviar" | "enviaron";
   nombre?: string;
   origenId?: string;
   pais?: string;
@@ -92,12 +101,33 @@ export async function POST(request: Request) {
     } else if (b.tipo === "web") {
       if (!b.pixelId) return fail("Elige el píxel.", 400);
       resultado = await crearAudienciaWeb(accountId, { nombre, pixelId: b.pixelId, dias: b.dias ?? 30, simular });
+    } else if (b.tipo === "video" || b.tipo === "pagina" || b.tipo === "instagram" || b.tipo === "formulario") {
+      const dias = b.dias ?? 30;
+      // La página, el Instagram y el formulario salen de la cuenta, no de lo que mande el navegador.
+      const cliente = (await listPortfolios()).find((c) => c.id === b.portfolioId);
+      const pageId = cliente ? await paginaDeLaCuenta(cliente, accountId) : null;
+      if (!pageId) return fail("Esta cuenta no tiene una página de Facebook asociada: asígnala en la ficha del cliente.", 422);
+      let datos: DatosDePublico;
+      if (b.tipo === "video") {
+        datos = { tipo: "video", nombre, dias, pageId, porcentaje: ([3, 10, 25, 50, 75, 95, 100] as const).find((x) => x === b.porcentaje) ?? 25 };
+      } else if (b.tipo === "pagina") {
+        datos = { tipo: "pagina", nombre, dias, pageId };
+      } else if (b.tipo === "instagram") {
+        const ig = (await paginaEInstagramDeLaCampana(`act_${accountId.replace(/D/g, "")}`))?.instagramId ?? (await graphJson<{ instagram_business_account?: { id?: string } }>(pageId, "GET", { fields: "instagram_business_account" }).catch(() => null))?.instagram_business_account?.id ?? "";
+        if (!ig) return fail("La página no tiene una cuenta de Instagram conectada.", 422);
+        datos = { tipo: "instagram", nombre, dias, instagramId: ig };
+      } else {
+        const formularios = await listarFormulariosMeta(pageId);
+        if (!formularios.some((f) => f.id === b.formularioId)) return fail("Ese formulario no es de la página de esta cuenta.", 403);
+        datos = { tipo: "formulario", nombre, dias, formularioId: b.formularioId ?? "", quien: b.quien ?? "abrieron_sin_enviar" };
+      }
+      resultado = await crearPublicoDeInteraccion(accountId, datos, { simular });
     } else {
       return fail("Tipo de audiencia no válido", 400);
     }
     if (!simular) {
       await registrarEjecucion(
-        { portfolioId: b.portfolioId!, name: `Audiencia ${b.tipo === "similar" ? "similar" : "de sitio web"}: ${nombre}`, platforms: ["meta"] },
+        { portfolioId: b.portfolioId!, name: `Audiencia ${b.tipo === "similar" ? "similar" : b.tipo === "web" ? "de sitio web" : `de interacción (${b.tipo})`}: ${nombre}`, platforms: ["meta"] },
         session.actor.email,
         [{ platform: "meta", action: `customaudiences:${b.tipo}`, label: nombre, ok: true, error: null, raw: { id: resultado.id } } as never],
         true,

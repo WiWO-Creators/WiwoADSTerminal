@@ -104,3 +104,15 @@ Los tokens de anunciante de TikTok no vencen ni se renuevan: si se pierde uno, e
 - `.dev.vars` ya está en `.gitignore`. No lo copies a otras carpetas ni lo pegues en chats.
 - En el VPS, que cada clave tenga solo el permiso que necesita: el token de Meta con `ads_read`, salvo que decidas escribir con la propia app.
 - Guarda una copia de las claves en un gestor de contraseñas de la empresa, para que no dependan de una sola persona.
+
+## Permisos del token de Meta para formularios instantáneos y leads
+
+El token del usuario del sistema («WiwoAds») ya alcanza para **leer los formularios de las páginas** (se verificó en Colbún, SQM y Valor: se pide el token de la página con `/{page}?fields=access_token`). Para el resto del flujo de formularios hace falta:
+
+| Qué | Permiso de Meta | Estado (2026-10-09) |
+|---|---|---|
+| Leer los formularios de una página | `pages_show_list` / `pages_manage_ads` | ✅ funciona |
+| Crear un formulario en la página | `pages_manage_ads` (la página con control total para el usuario del sistema) | Sin probar contra una página real: Meta no deja borrar un formulario, solo archivarlo |
+| **Leer los leads y sus respuestas** (para calcular el % de calificados) | **`leads_retrieval`** | ❌ **Falta**: Meta responde «(#200) Requires leads_retrieval permission to manage the object». Hay que generar el token del usuario del sistema con ese permiso (la app «WiwoAds» debe tenerlo aprobado) |
+
+Sin `leads_retrieval` todo lo demás funciona; solo el cálculo de «% de calificados» del panel «Plan de estrategia» avisa que falta el permiso.

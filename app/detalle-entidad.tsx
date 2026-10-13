@@ -984,6 +984,19 @@ function Bloque({ titulo, subtitulo, children }: { titulo: string; subtitulo?: s
   );
 }
 
+/**
+ * Lo mínimo de cada formato. El feed de Facebook crece con el contenido (un carrusel, un texto largo); el de Instagram lo recorta Meta
+ * mismo a unos 565 px (verificado con un Reel): más altura solo deja espacio en blanco, así que ahí no se agranda.
+ */
+const ALTO_MINIMO_POR_FORMATO: Record<string, number> = {
+  MOBILE_FEED_STANDARD: 600,
+  INSTAGRAM_STANDARD: 570,
+  INSTAGRAM_STORY: 640,
+  INSTAGRAM_REELS: 640,
+};
+const PASO_DE_ALTURA = 260;
+const ALTURA_MAXIMA_EXTRA = 780;
+
 const FORMATOS_VISTA: Array<[string, string]> = [
   ["MOBILE_FEED_STANDARD", "Feed Facebook"],
   ["INSTAGRAM_STANDARD", "Feed Instagram"],
@@ -997,6 +1010,8 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
   const [url, setUrl] = useState<string | null | undefined>(undefined);
   const [medidas, setMedidas] = useState<{ ancho: number; alto: number }>({ ancho: 340, alto: 560 });
   const [disponible, setDisponible] = useState(0);
+  /** Meta declara una altura que a veces no alcanza (un Reel, un carrusel): cada clic en «Ver más» suma altura. */
+  const [extra, setExtra] = useState(0);
   const caja = useRef<HTMLDivElement>(null);
   // Se mide el espacio del panel para escalar la vista previa de Meta a su ancho (sin barras de desplazamiento).
   useEffect(() => {
@@ -1010,12 +1025,13 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
     let vivo = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a pedir la vista previa al cambiar de formato o de anuncio
     setUrl(undefined);
+    setExtra(0);
     fetch(`/api/entidades/vista-previa?accountId=${encodeURIComponent(accountId)}&id=${encodeURIComponent(anuncioId)}&formato=${formato}`)
       .then((r) => r.json().catch(() => null))
       .then((j: { url?: string | null; ancho?: number | null; alto?: number | null } | null) => {
         if (!vivo) return;
         // Meta declara 450 de alto para el feed aunque un carrusel o un video con texto largo necesita más: se deja holgura para que no se corte.
-        if (j?.ancho && j?.alto) setMedidas({ ancho: j.ancho, alto: formato.includes("STORY") || formato.includes("REELS") ? Math.max(j.alto, 640) : Math.max(j.alto, 600) });
+        if (j?.ancho && j?.alto) setMedidas({ ancho: j.ancho, alto: Math.max(j.alto, ALTO_MINIMO_POR_FORMATO[formato] ?? 640) });
         setUrl(j?.url ?? null);
         if (!j?.url) alFallar();
       })
@@ -1049,11 +1065,13 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
         ) : url ? (
           (() => {
             const escala = disponible > 0 ? Math.min(1, disponible / medidas.ancho) : 1;
+            const alto = medidas.alto + extra;
             return (
-              // El marco recorta con esquinas redondeadas: la vista previa de Meta se ve limpia, sin barras ni bordes cuadrados.
+              <>
+              {/* El marco recorta con esquinas redondeadas: la vista previa de Meta se ve limpia, sin barras ni bordes cuadrados. */}
               <div
                 className="mx-auto overflow-hidden rounded-3xl bg-white shadow-sm"
-                style={{ width: medidas.ancho * escala, height: medidas.alto * escala }}
+                style={{ width: medidas.ancho * escala, height: alto * escala }}
               >
                 <iframe
                   key={url}
@@ -1062,9 +1080,15 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
                   scrolling="no"
                   sandbox="allow-scripts allow-same-origin allow-popups"
                   className="block border-0 bg-white"
-                  style={{ width: medidas.ancho, height: medidas.alto, transform: `scale(${escala})`, transformOrigin: "top left" }}
+                  style={{ width: medidas.ancho, height: alto, transform: `scale(${escala})`, transformOrigin: "top left" }}
                 />
               </div>
+              {extra < ALTURA_MAXIMA_EXTRA && formato === "MOBILE_FEED_STANDARD" && (
+                <button type="button" onClick={() => setExtra((e) => Math.min(e + PASO_DE_ALTURA, ALTURA_MAXIMA_EXTRA))} className="mx-auto mt-2 block text-[0.7rem] font-semibold text-brand hover:underline">
+                  ¿Se corta? Ver más abajo ↓
+                </button>
+              )}
+              </>
             );
           })()
         ) : null}

@@ -8,6 +8,7 @@ import { CONSTRUCTOR_PLATFORMS, platformLabel } from "@/lib/plataformas";
 import { normalizarLinkedin, parametrosLinkedin, type EntradaLinkedin, type LinkedinDraft } from "@/lib/constructor-linkedin";
 import type { Platform } from "@/lib/plataformas";
 import { unidadesMenoresMeta } from "@/lib/monedas";
+import { BOTONES_DE_FORMULARIO } from "@/lib/meta-lead-ads-pura";
 import { nombreCompuesto } from "@/lib/nomenclatura";
 import type { Objetivo } from "@/lib/objetivos";
 import type { PortfolioSummary } from "@/lib/portafolios";
@@ -598,6 +599,8 @@ export const GOOGLE_GEO_TARGET_IDS: Record<string, string> = {
  * más), para que un mismo valor sirva para las dos plataformas a la vez.
  */
 export const RADIO_MINIMO_KM = 1;
+/** Lo que Meta acepta en la práctica para un círculo de segmentación (el editor no deja menos de 2 km). */
+export const RADIO_MINIMO_META_KM = 2;
 export const RADIO_MAXIMO_KM = 80;
 
 /**
@@ -754,7 +757,18 @@ export type CampaignDraft = {
    * un anuncio de clic-a-mensaje (`destination_type: MESSENGER`) en vez de
    * uno que lleva al sitio. Solo Meta: Google no tiene este concepto.
    */
-  conversionLocation: "sitio_web" | "mensajes";
+  conversionLocation: "sitio_web" | "mensajes" | "formulario";
+  /** Formulario instantáneo (lead ad) de la página que usa el anuncio. Obligatorio con `conversionLocation: "formulario"`. */
+  metaLeadFormId: string;
+  /**
+   * Quién cuenta como «en esta ubicación»: `home` = vive aquí, `recent` = estuvo recientemente. Vacío = lo que Meta decida por defecto
+   * (los dos más viajeros). Una campaña de clubes necesita `recent`; una de barrios, `home`.
+   */
+  metaLocationType: "" | "home" | "recent";
+  /** Advantage+ público y segmentación detallada Advantage+. Apagados por defecto: el público es el que se define. */
+  metaAdvantageAudience: boolean;
+  /** Meta: fecha en que empieza a entregar (`YYYY-MM-DD`, zona horaria de la cuenta). Vacía = al publicar. Sirve para programar un retargeting. */
+  metaStartDate: string;
   /** Presupuesto diario en unidades de la moneda, no en micros ni centavos. */
   dailyBudget: number | null;
   /**
@@ -1338,7 +1352,14 @@ export function validateDraft(
     draft.conversionLocation !== "mensajes" &&
     !url
   ) {
-    add("landingUrl", "Meta Ads exige una URL de destino (o cambia el destino de conversión a mensajes)");
+    add("landingUrl", "Meta Ads exige una URL de destino (o cambia el destino de conversión a mensajes). Con formulario instantáneo también hace falta: Meta exige que el anuncio enlace a un sitio externo");
+  }
+  if (draft.platforms.includes("meta") && draft.conversionLocation === "formulario") {
+    if (!draft.metaLeadFormId) add("metaLeadFormId", "Elige el formulario instantáneo del anuncio (o créalo antes en el Constructor)");
+    if ((draft.metaObjective ?? "leads") !== "OUTCOME_LEADS" && draft.objective !== "leads") add("conversionLocation", "El formulario instantáneo solo sirve con el objetivo de clientes potenciales (leads)");
+  }
+  if (draft.platforms.includes("meta") && draft.metaStartDate && draft.endDate && draft.endDate < draft.metaStartDate) {
+    add("metaStartDate", "La fecha de inicio es posterior a la de fin");
   }
   if (url && !/^https?:\/\//i.test(url)) {
     add("landingUrl", "La URL debe empezar con http:// o https://");
@@ -2091,6 +2112,14 @@ export function buildPlan(
         })),
     ];
     if (circulos.length > 0) geoLocations.custom_locations = circulos;
+    // Meta no deja círculos de menos de 2 km en el editor (mínimo observado en conjuntos sin categoría especial): un radio menor suele
+    // rechazarse al publicar. Se avisa antes; no bloquea porque el mínimo exacto depende de la cuenta.
+    const chicos = circulos.filter((c) => c.radius < RADIO_MINIMO_META_KM);
+    if (chicos.length > 0) {
+      issues.push({ field: "geoRadius", message: `Meta: ${chicos.length === 1 ? "un círculo tiene" : `${chicos.length} círculos tienen`} menos de ${RADIO_MINIMO_META_KM} km de radio y es probable que Meta lo rechace al publicar. Usa ${RADIO_MINIMO_META_KM} km o más.`, blocking: false });
+    }
+    // «Viven aquí» o «estuvieron recientemente»: sin esto Meta usa los dos y más (viajeros).
+    if (draft.metaLocationType) geoLocations.location_types = [draft.metaLocationType];
     // Lugares con key real de Meta: la región o la ciudad de Meta tal cual (más precisa que un círculo).
     const regionesMeta = draft.targetPlaces.filter((l) => l.metaKey && l.tier === "region").map((l) => ({ key: l.metaKey! }));
     const ciudadesMeta = draft.targetPlaces.filter((l) => l.metaKey && l.tier === "city").map((l) => ({ key: l.metaKey! }));
@@ -2146,8 +2175,13 @@ export function buildPlan(
     if (draft.metaExcludedAudiences.length > 0) {
       targeting.excluded_custom_audiences = draft.metaExcludedAudiences.map((id) => ({ id }));
     }
+    // Advantage+ público y segmentación detallada Advantage+ apagados: se manda explícito, para que Meta no amplíe el público por su cuenta.
+    targeting.targeting_automation = { advantage_audience: draft.metaAdvantageAudience ? 1 : 0 };
+    if (!draft.metaAdvantageAudience) targeting.targeting_relaxation_types = { lookalike: 0, custom_audience: 0 };
 
     const aMensajes = draft.conversionLocation === "mensajes";
+    // Formulario instantáneo: el conjunto y el anuncio se crean con la API directa de Meta (Windsor no pasa el formulario).
+    const aFormulario = draft.conversionLocation === "formulario" && objetivoMeta === "leads" && !boosteando;
     // Meta exige un `custom_event_type` por objetivo, no un "conversión"
     // genérico: LEAD para pedir datos de contacto, PURCHASE para venta.
     // "Alcance" (OUTCOME_AWARENESS) nunca fue una conversión — optimizaba mal
@@ -2164,7 +2198,7 @@ export function buildPlan(
     // bloquea antes de publicar algo condenado a fallar, en vez de dejarlo
     // pasar y enterarse por la cuenta real.
     const necesitaPixel =
-      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes;
+      !enConjuntoMetaExistente && eventoDeConversion !== null && !boosteando && !aMensajes && !aFormulario;
     const pixelesDeLaCuenta = cuenta?.pixels ?? [];
     // Una cuenta puede tener más de un píxel (MGC: Converse y Coliseum en la
     // misma cuenta) — con exactamente uno no hay nada que elegir, con más de
@@ -2192,7 +2226,28 @@ export function buildPlan(
         blocking: true,
       });
     }
-    if (!enConjuntoMetaExistente) {
+    if (!enConjuntoMetaExistente && aFormulario) {
+      // Conjunto con destino «formulario instantáneo»: API directa de Meta (Windsor no lo permite).
+      const sinPresupuestoPropio = conCBO;
+      steps.push({
+        platform: "meta",
+        action: "meta:crear_conjunto_formulario",
+        via: "nativa",
+        label: enCampanaMetaExistente
+          ? `Crear conjunto con formulario en «${enCampanaMetaExistente.campaignName}» (${etiquetaEstadoMeta})`
+          : `Crear conjunto con formulario instantáneo (${etiquetaEstadoMeta})`,
+        params: {
+          campaign_id: enCampanaMetaExistente?.campaignId ?? MARCADOR_PASO_ANTERIOR,
+          nombre: enCampanaMetaExistente ? draft.name : `${draft.name} · principal`,
+          page_id: cuenta?.pageId ?? null,
+          presupuesto: sinPresupuestoPropio ? null : { tipo: draft.budgetMode === "total" ? "total" : "diario", menor: Math.round(presupuestoDe("meta") * unidadesMenoresMeta(cuenta?.currency)) },
+          inicio: draft.metaStartDate || null,
+          fin: draft.endDate || null,
+          targeting,
+          estado: "ACTIVE",
+        },
+      });
+    } else if (!enConjuntoMetaExistente) {
       steps.push({
         platform: "meta",
         action: "create_adset",
@@ -2331,7 +2386,28 @@ export function buildPlan(
           params: { name: draft.name, video_url: draft.mediaUrl.trim() },
         });
       }
-      steps.push({
+      if (aFormulario) {
+        steps.push({
+          platform: "meta",
+          action: "meta:crear_anuncio_formulario",
+          via: "nativa",
+          label: enConjuntoMetaExistente ? `Crear anuncio con formulario en «${enConjuntoMetaExistente.adsetName}» (${etiquetaEstadoMeta})` : `Crear anuncio con formulario instantáneo (${etiquetaEstadoMeta})`,
+          params: {
+            adset_id: enConjuntoMetaExistente?.adsetId ?? MARCADOR_PASO_ANTERIOR,
+            nombre: draft.name,
+            page_id: cuenta?.pageId ?? null,
+            formulario_id: draft.metaLeadFormId,
+            enlace: draft.landingUrl.trim(),
+            mensaje: draft.message,
+            titulo: draft.metaHeadline.trim() || undefined,
+            descripcion: draft.metaDescription.trim() || undefined,
+            // Con formulario no valen todos los botones: se usa el elegido si sirve y, si no, «Registrarse».
+            boton: (BOTONES_DE_FORMULARIO as readonly string[]).includes(draft.callToAction) ? draft.callToAction : "SIGN_UP",
+            ...(draft.mediaType === "video" ? { video_id: MARCADOR_PASO_ANTERIOR } : { imagen_url: draft.mediaUrl.trim() }),
+            estado: "ACTIVE",
+          },
+        });
+      } else steps.push({
         platform: "meta",
         action: "create_ad",
         label: enConjuntoMetaExistente
@@ -2568,7 +2644,11 @@ export function normalizeDraft(body: Partial<CampaignDraft>): CampaignDraft {
     googleBusqueda: normalizarBusquedaGoogle(body.googleBusqueda),
     metaObjective,
     specialAdCategory,
-    conversionLocation: body.conversionLocation === "mensajes" ? "mensajes" : "sitio_web",
+    conversionLocation: body.conversionLocation === "mensajes" ? "mensajes" : body.conversionLocation === "formulario" ? "formulario" : "sitio_web",
+    metaLeadFormId: /^\d+$/.test(String(body.metaLeadFormId ?? "")) ? String(body.metaLeadFormId) : "",
+    metaLocationType: body.metaLocationType === "home" || body.metaLocationType === "recent" ? body.metaLocationType : "",
+    metaAdvantageAudience: body.metaAdvantageAudience === true,
+    metaStartDate: /^\d{4}-\d{2}-\d{2}$/.test(String(body.metaStartDate ?? "")) ? String(body.metaStartDate) : "",
     dailyBudget:
       typeof body.dailyBudget === "number" && Number.isFinite(body.dailyBudget)
         ? body.dailyBudget

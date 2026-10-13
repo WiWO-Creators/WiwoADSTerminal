@@ -232,6 +232,21 @@ function Superficie({ formato, p, indice }: { formato: FormatoGoogle; p: PiezaGo
 
 /** Las vistas previas de Google de un anuncio o un grupo de recursos, con una pestaña por superficie donde puede salir. */
 export function VistaPreviaGoogle({ pieza }: { pieza: PiezaGoogle }) {
+  // Sin textos ni piezas (Windsor no entrega el contenido de los anuncios que no son de búsqueda): mejor decirlo que dibujar un anuncio vacío.
+  const sinContenido = pieza.titulares.length === 0 && pieza.titularesLargos.length === 0 && pieza.descripciones.length === 0 && pieza.imagenes.length === 0 && !pieza.videoYoutube;
+  if (sinContenido) {
+    return (
+      <div className="overflow-hidden rounded-2xl border border-foreground/10 bg-card/40">
+        <p className="border-b border-foreground/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-foreground/45">Vista previa · así se ve en Google</p>
+        <p className="p-4 text-xs leading-5 text-foreground/60">
+          No se pudo leer el contenido de este anuncio (sus textos y piezas), así que no hay con qué dibujar la vista previa. Hace falta la conexión del equipo con Google (un administrador la conecta una sola vez); mientras, revísalo en Google Ads.
+        </p>
+      </div>
+    );
+  }  return <VistaPreviaConContenido pieza={pieza} />;
+}
+
+function VistaPreviaConContenido({ pieza }: { pieza: PiezaGoogle }) {
   const formatos = formatosDeFamilia(pieza.familia);
   const [elegido, setElegido] = useState<FormatoGoogle>(formatos[0]);
   const [indice, setIndice] = useState(0);

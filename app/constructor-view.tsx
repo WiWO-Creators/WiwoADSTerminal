@@ -89,6 +89,8 @@ import {
 } from "./selector-publicaciones";
 import { SelectorDeAnuncios } from "./selector-anuncios";
 import { RetirarAnunciosViejos } from "./retirar-anuncios-viejos";
+import { FormularioInstantaneo, OpcionesDePublicoMeta } from "./formulario-meta";
+import { PlanDeEstrategiaPanel } from "./plan-estrategia";
 import { CopilotoDeCreativos } from "./copiloto-creativos";
 import { GeneradorDeVariantes } from "./generador-variantes";
 import { Surface, ThinkingOrb, OrbeDeBoton } from "./ui";
@@ -335,6 +337,10 @@ function borradorInicial(
     metaObjective: null,
     specialAdCategory: "ninguna",
     conversionLocation: "sitio_web",
+    metaLeadFormId: "",
+    metaLocationType: "",
+    metaAdvantageAudience: false,
+    metaStartDate: "",
     dailyBudget: semilla?.dailyBudget ?? null,
     budgetByPlatform: semilla?.budgetByPlatform ?? {},
     budgetMode: semilla?.budgetMode ?? "diaria",
@@ -721,6 +727,18 @@ export function ConstructorView({
           )}
         </p>
       </div>
+
+      {draft.platforms.includes("meta") && !draft.existingCampaign && draft.portfolioId && (
+        <div className="mb-4">
+          <PlanDeEstrategiaPanel
+            portfolioId={draft.portfolioId}
+            accountId={cuentaMetaId ?? null}
+            cuentasMeta={cuentasMeta.map((c) => ({ id: c.externalId, nombre: c.name || c.externalId }))}
+            onElegirCuenta={(id) => actualizar({ accountByPlatform: { ...draft.accountByPlatform, meta: id } })}
+            onCargar={actualizar}
+          />
+        </div>
+      )}
 
       <div className="mb-4 flex items-start gap-3 rounded-[16px] border border-[#3BFF00]/25 bg-[#3BFF00]/[0.06] px-4 py-3">
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
@@ -2029,7 +2047,7 @@ function FaseConjunto({
             <RadioGroup
               value={draft.conversionLocation ?? "sitio_web"}
               onValueChange={(value) =>
-                onChange({ conversionLocation: value as "sitio_web" | "mensajes" })
+                onChange({ conversionLocation: value as "sitio_web" | "mensajes" | "formulario" })
               }
               className="grid-flow-col justify-start gap-6"
             >
@@ -2041,8 +2059,22 @@ function FaseConjunto({
                 <RadioGroupItem value="mensajes" className="border-foreground/30" />
                 Mensajes
               </label>
+              <label className="flex items-center gap-2 text-sm text-foreground/80">
+                <RadioGroupItem value="formulario" className="border-foreground/30" />
+                Formulario instantáneo
+              </label>
             </RadioGroup>
           </Seccion>
+          {draft.conversionLocation === "formulario" && (
+            <FormularioInstantaneo
+              accountId={
+                (cuentas.find((c) => c.provider === "meta" && (draft.accountByPlatform.meta ? c.externalId === draft.accountByPlatform.meta : cuentas.filter((x) => x.provider === "meta").length === 1)) ?? null)?.externalId ?? null
+              }
+              draft={draft}
+              onChange={onChange}
+            />
+          )}
+          <OpcionesDePublicoMeta draft={draft} onChange={onChange} />
 
           <Seccion titulo="Público" completa>
             <div className="grid gap-4 sm:grid-cols-3">

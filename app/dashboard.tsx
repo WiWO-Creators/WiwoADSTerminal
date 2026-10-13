@@ -84,6 +84,7 @@ import { PaletaDeComandos } from "./paleta-comandos";
 import { PuertaDeCliente } from "./puerta-cliente";
 import { SelectorDeFechas } from "./selector-fechas";
 import { ThinkingOrb } from "./ui";
+import { AvisoDeConexiones } from "./aviso-de-conexiones";
 
 /**
  * Las pantallas pesadas se bajan solo cuando se abren. Antes todo viajaba junto en un único paquete de ~700 KB
@@ -902,6 +903,7 @@ export default function WiwoDashboard({
             margen (16px) y algo de aire, para que ninguna vista termine con
             un control importante (un botón, la última fila de una tabla)
             justo detrás del orbe flotante al hacer scroll hasta el final. */}
+        <AvisoDeConexiones onAbrirCuentas={initialSnapshot.user.role === "admin" ? abrirCuentas : undefined} />
         <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
           {view === "decisiones" && <DecisionesView
               modo="pagina"

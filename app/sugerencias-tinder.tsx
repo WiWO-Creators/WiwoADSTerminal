@@ -279,6 +279,15 @@ export function BotonDeSugerencias({
     return mejor ? { adsetId: mejor[0], ...mejor[1] } : null;
   }
 
+  /** Abre el editor en ese anuncio de Meta: se cambia su pieza o su texto ahí mismo, sin crear una campaña ni un anuncio nuevo. */
+  function editarAnuncio(s: SugerenciaVista, pieza: PiezaParaReemplazar) {
+    if (!s.accountId) return;
+    // La decisión se cierra cuando se aplique un cambio en el editor.
+    setEditorDe(s);
+    aplicadoEnEditor.current = false;
+    setEditor({ provider: "meta", accountId: s.accountId, nivel: "anuncio", id: pieza.id, nombre: pieza.nombre, currency: null, abrirEnEdicion: true, rango });
+  }
+
   function subirContenido(s: SugerenciaVista) {
     // Directo al conjunto donde hay que renovar (con los anuncios viejos ya marcados para retirar); sin eso, se elige el destino.
     const destino = conjuntoParaRenovar(s);
@@ -628,6 +637,7 @@ export function BotonDeSugerencias({
                       accountId={actual.accountId}
                       campaignId={actual.entityId}
                       onCargado={(piezas) => setPeoresDe((a) => ({ ...a, [actual.id]: piezas }))}
+                      onEditar={(pieza) => editarAnuncio(actual, pieza)}
                     />
                   )}
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -691,14 +701,25 @@ export function BotonDeSugerencias({
                       Proponer pausar esta campaña
                     </button>
                   )}
+                  {actual.accion?.tipo === "contenido" && actual.provider === "meta" && actual.accountId && (peoresDe[actual.id] ?? []).length > 0 && (
+                    <button
+                      type="button"
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() => editarAnuncio(actual, (peoresDe[actual.id] ?? [])[0])}
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
+                    >
+                      Editar los anuncios a reemplazar
+                    </button>
+                  )}
                   {actual.accion?.tipo === "contenido" && actual.clienteId && (
                     <button
                       type="button"
                       onPointerDown={(ev) => ev.stopPropagation()}
                       onClick={() => subirContenido(actual)}
-                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
+                      title="Abre el creador solo para añadir un anuncio dentro de un conjunto que ya existe: no crea una campaña."
+                      className={cn("rounded-full px-4 py-2 text-xs font-bold hover:opacity-90", actual.provider === "meta" && (peoresDe[actual.id] ?? []).length > 0 ? "border border-brand/40 text-brand hover:bg-brand/10" : "bg-brand text-primary-foreground")}
                     >
-                      {conjuntoParaRenovar(actual) ? `Ir al conjunto «${conjuntoParaRenovar(actual)?.adsetName}» y subir contenido` : "Elegir conjunto y subir contenido"}
+                      {conjuntoParaRenovar(actual) ? `Añadir un anuncio nuevo en «${conjuntoParaRenovar(actual)?.adsetName}» (no crea campaña)` : "Añadir un anuncio nuevo (elegir conjunto)"}
                     </button>
                   )}
                   {actual.accion?.tipo === "contenido" && actual.clienteId && actual.provider === "meta" && (

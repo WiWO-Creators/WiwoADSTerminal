@@ -10,6 +10,17 @@ type Cliente = { id: string; name: string; accounts: Cuenta[]; countries?: strin
 type Audiencia = { id: string; nombre: string; tipo: string; subtipo: string; tamanoMinimo: number | null; tamanoMaximo: number | null; estado: string | null };
 type Datos = { audiencias: Audiencia[]; pixeles: Array<{ id: string; nombre: string }>; reglas: Array<{ id: string; nombre: string; estado: string }> };
 
+type Tipo = "similar" | "web" | "video" | "pagina" | "instagram" | "formulario";
+
+const ETIQUETA_DE_TIPO: Record<Tipo, string> = {
+  similar: "Similar (lookalike)",
+  web: "Visitantes del sitio",
+  video: "Vieron videos de la página",
+  pagina: "Interactuaron con la página",
+  instagram: "Interactuaron con Instagram",
+  formulario: "Formulario instantáneo",
+};
+
 const campo = "h-11 w-full rounded-xl border border-border bg-background px-3 text-sm";
 
 /** Audiencias de Meta (API directa): ver las existentes y crear similares (lookalike) y de sitio web. Crear es solo de supervisores. */
@@ -20,7 +31,11 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
   const [error, setError] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
-  const [tipo, setTipo] = useState<"similar" | "web">("similar");
+  const [tipo, setTipo] = useState<Tipo>("similar");
+  const [formularios, setFormularios] = useState<Array<{ id: string; nombre: string }>>([]);
+  const [formularioId, setFormularioId] = useState("");
+  const [quien, setQuien] = useState<"abrieron_sin_enviar" | "abrieron" | "enviaron">("abrieron_sin_enviar");
+  const [vioPorcentaje, setVioPorcentaje] = useState("25");
   const [nombre, setNombre] = useState("");
   const [origenId, setOrigenId] = useState("");
   const [pais, setPais] = useState("CL");
@@ -79,6 +94,18 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
     };
   }, [cliente, cuenta]);
 
+  async function cargarFormularios() {
+    if (!cuenta || formularios.length > 0) return;
+    try {
+      const r = await fetch(`/api/meta/formularios?accountId=${encodeURIComponent(cuenta)}`, { cache: "no-store" });
+      const j = (await r.json()) as { formularios?: Array<{ id: string; nombre: string; estado: string }>; error?: string };
+      if (!r.ok) throw new Error(j.error ?? "No se pudieron leer los formularios");
+      setFormularios((j.formularios ?? []).filter((f) => f.estado === "ACTIVE"));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudieron leer los formularios");
+    }
+  }
+
   async function crear() {
     if (!cliente) return;
     setOcupado(true);
@@ -88,7 +115,7 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
       const r = await fetch("/api/meta/audiencias", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ portfolioId: cliente.id, accountId: cuenta, tipo, nombre, origenId, pais, porcentaje: Number(porcentaje), pixelId, dias: Number(dias), simular: false }),
+        body: JSON.stringify({ portfolioId: cliente.id, accountId: cuenta, tipo, nombre, origenId, pais, porcentaje: tipo === "video" ? Number(vioPorcentaje) : Number(porcentaje), pixelId, dias: Number(dias), formularioId, quien, simular: false }),
       });
       const j = (await r.json().catch(() => ({}))) as { id?: string; error?: string };
       if (!r.ok) throw new Error(j.error ?? "No se pudo crear la audiencia");
@@ -105,7 +132,10 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
 
   if (!clienteId) return <p className="text-sm text-muted-foreground">Elige un cliente arriba para empezar.</p>;
   const cuentasMeta = (cliente?.accounts ?? []).filter((a) => a.provider === "meta");
-  const listo = nombre.trim().length >= 3 && (tipo === "similar" ? origenId && Number(porcentaje) >= 1 && Number(porcentaje) <= 20 : pixelId && Number(dias) >= 1 && Number(dias) <= 180);
+  const diasValidos = Number(dias) >= 1 && Number(dias) <= (tipo === "formulario" ? 90 : tipo === "web" ? 180 : 365);
+  const listo =
+    nombre.trim().length >= 3 &&
+    (tipo === "similar" ? origenId && Number(porcentaje) >= 1 && Number(porcentaje) <= 20 : tipo === "web" ? pixelId && diasValidos : tipo === "formulario" ? formularioId && diasValidos : diasValidos);
 
   return (
     <div className="space-y-4">
@@ -142,10 +172,10 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
       {datos && puedeAprobar && (
         <Surface className="space-y-3 p-4">
           <h3 className="font-micro text-[0.65rem] text-muted-foreground">CREAR AUDIENCIA</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {(["similar", "web"] as const).map((t) => (
-              <button key={t} type="button" onClick={() => setTipo(t)} className={cn("h-10 rounded-full border text-sm font-semibold", tipo === t ? "border-brand bg-brand/10 text-foreground" : "border-border text-muted-foreground")}>
-                {t === "similar" ? "Similar (lookalike)" : "Visitantes del sitio"}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {(Object.keys(ETIQUETA_DE_TIPO) as Tipo[]).map((t) => (
+              <button key={t} type="button" onClick={() => setTipo(t)} className={cn("h-10 rounded-full border px-2 text-xs font-semibold", tipo === t ? "border-brand bg-brand/10 text-foreground" : "border-border text-muted-foreground")}>
+                {ETIQUETA_DE_TIPO[t]}
               </button>
             ))}
           </div>
@@ -161,6 +191,29 @@ export function AudienciasMeta({ clienteId, puedeAprobar }: { clienteId: string 
                 <input className={campo} inputMode="decimal" placeholder="Similitud % (1 a 20)" value={porcentaje} onChange={(e) => setPorcentaje(e.target.value)} />
               </div>
             </>
+          ) : tipo !== "web" ? (
+            <div className="space-y-2">
+              {tipo === "video" && (
+                <select className={campo} value={vioPorcentaje} onChange={(e) => setVioPorcentaje(e.target.value)}>
+                  {[["3", "Vieron al menos 3 segundos"], ["10", "Vieron al menos 10 segundos"], ["25", "Vieron el 25 %"], ["50", "Vieron el 50 %"], ["75", "Vieron el 75 %"], ["95", "Vieron el 95 %"], ["100", "Vieron el video completo"]].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                </select>
+              )}
+              {tipo === "formulario" && (
+                <>
+                  <select className={campo} value={formularioId} onChange={(e) => setFormularioId(e.target.value)} onFocus={() => void cargarFormularios()}>
+                    <option value="">{formularios.length ? "Formulario…" : "Formulario (se leen de la página)…"}</option>
+                    {formularios.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                  </select>
+                  <select className={campo} value={quien} onChange={(e) => setQuien(e.target.value as typeof quien)}>
+                    <option value="abrieron_sin_enviar">Abrieron el formulario y no lo enviaron</option>
+                    <option value="abrieron">Abrieron el formulario</option>
+                    <option value="enviaron">Enviaron el formulario</option>
+                  </select>
+                </>
+              )}
+              <input className={campo} inputMode="numeric" placeholder={`Días que se recuerda (1 a ${tipo === "formulario" ? 90 : 365})`} value={dias} onChange={(e) => setDias(e.target.value)} />
+              <p className="text-xs text-foreground/50">La página y la cuenta de Instagram salen de la cuenta elegida.</p>
+            </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
               <select className={campo} value={pixelId} onChange={(e) => setPixelId(e.target.value)}>

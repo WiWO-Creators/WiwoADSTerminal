@@ -104,7 +104,7 @@ export async function prepararEdicion({
   if (!antes) {
     throw new ErrorDeEdicion(
       provider === "google" && !credencialesGoogle
-        ? "No se encontró esta entidad. Windsor solo entrega lo que tuvo actividad reciente: conecta tu cuenta de Google en Integraciones para ver y editar también lo pausado o recién creado."
+        ? "No se encontró esta entidad. Windsor solo entrega lo que tuvo actividad reciente: hace falta la conexión del equipo con Google (un administrador la conecta una sola vez) para ver y editar también lo pausado o recién creado."
         : "No se encontró la entidad en la plataforma. Si está pausada hace mucho, Windsor no la entrega.",
       404,
     );

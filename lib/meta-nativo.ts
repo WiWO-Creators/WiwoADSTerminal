@@ -318,7 +318,7 @@ export async function crearReglaMetaDeGasto(accountId: string, o: { nombre: stri
 
 /** Borra una regla de Meta de PRUEBA (su nombre lleva el prefijo). Nunca toca una regla de un cliente. */
 export async function eliminarReglaMetaDePrueba(reglaId: string): Promise<void> {
-  if (!/^d+$/.test(reglaId)) throw new ErrorDeMeta("Id de regla no válido.", 400);
+  if (!/^\d+$/.test(reglaId)) throw new ErrorDeMeta("Id de regla no válido.", 400);
   const r = await graph<{ name?: string }>(reglaId, "GET", { fields: "name" });
   if (!(r.name ?? "").includes(PREFIJO_DE_PRUEBA)) throw new ErrorDeMeta(`No se borra: «${r.name}» no es una regla de prueba.`, 403);
   await graph<{ success?: boolean }>(reglaId, "DELETE");
