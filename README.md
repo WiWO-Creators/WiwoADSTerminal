@@ -1,236 +1,82 @@
 # WiWO.ADS
 
-Sistema operativo de medios pagados de MGC/WiWO: unifica Google Ads y Meta
-Ads (TikTok y LinkedIn ya están en el registro de plataformas, pero
-desactivados) en un solo tablero. Permite crear y gestionar campañas reales
-desde una sola interfaz, y tiene un asistente de IA (Claude) que lee las
-campañas, analiza CSV de MetriQ y recomienda. Nada se activa ni gasta dinero
-sin que una persona lo apruebe: ni el sistema ni el asistente ejecutan un
-cambio por sí solos.
+Sistema operativo de medios pagados de MGC y WiWO. Reúne **Google Ads, Meta Ads y LinkedIn Ads** (TikTok Ads, por
+ahora solo lectura) en un solo tablero y permite **crear, editar y revisar campañas reales** desde una sola interfaz,
+con un asistente de IA (Claude) que lee las campañas y recomienda.
 
-> Si vienes de la plantilla original de este repo (vinext-starter): este
-> README la reemplaza. Lo que describía la plantilla —scripts, bindings de
-> Cloudflare, headers de auth— sigue siendo cierto por debajo, pero acá se
-> explica en términos del producto, no del framework.
+Dos ideas ordenan todo:
 
-## Empezar
+1. **Nadie del equipo inicia sesión en Meta, Google ni LinkedIn.** Hay una conexión del equipo y cada persona hace lo
+   que su rol permite.
+2. **Ningún cambio llega a una plataforma sin que una persona con permiso lo apruebe.** Quien arma pero no aprueba
+   (Digital Creator) deja una solicitud; quien aprueba (Digital Lead o Admin) la revisa. El asistente de IA solo
+   propone.
+
+WiWO.ADS sirve para **gestionar campañas y ver información**. Los reportes mensuales de clientes son de otra
+herramienta (wiwometriq).
+
+## Dónde leer qué
+
+La documentación vive en [`docs/`](docs/README.md). Los más útiles para empezar:
+
+| Si quieres… | Lee |
+|---|---|
+| Entender el producto de punta a punta | [`PROYECTO.md`](PROYECTO.md) |
+| Saber qué hace cada pantalla | [`docs/FUNCIONES_DEL_PRODUCTO.md`](docs/FUNCIONES_DEL_PRODUCTO.md) |
+| Saber qué se puede leer, crear y editar en cada plataforma | [`docs/PLATAFORMAS.md`](docs/PLATAFORMAS.md) |
+| Entender roles, solicitudes y aprobaciones | [`docs/ROLES_Y_APROBACIONES.md`](docs/ROLES_Y_APROBACIONES.md) |
+| Levantarlo y probarlo en tu máquina | [`docs/DESARROLLO_Y_PRUEBAS.md`](docs/DESARROLLO_Y_PRUEBAS.md) |
+| Desplegarlo y operarlo | [`docs/DESPLIEGUE_VPS.md`](docs/DESPLIEGUE_VPS.md), [`docs/OPERACION.md`](docs/OPERACION.md) |
+
+## Empezar en local
 
 ```bash
-npm run install:ci   # instala dependencias (usa el lockfile, no reintenta)
-npm run dev          # levanta vite en http://localhost:5173
+npm run install:ci          # instala dependencias (usa el lockfile)
+npm run db:migrate:local    # crea el esquema local (la primera vez)
+npm run dev                 # Vite en http://localhost:5173
 ```
 
-Node `>=22.13.0`. En Windows, usa Git Bash o WSL para los scripts en `scripts/`
-(están escritos para Linux).
+- Requiere **Node 22.13 o superior**. En Windows usa **Git Bash o WSL** para los scripts de `scripts/`.
+- Las credenciales de desarrollo van en `.dev.vars` en la raíz (nunca se sube a git). Los nombres de todas las
+  variables están en [`docs/VARIABLES_DE_ENTORNO.md`](docs/VARIABLES_DE_ENTORNO.md); los valores se piden a quien
+  administra el proyecto.
+- Para **entrar** en local y para probar otros roles, ver
+  [`docs/DESARROLLO_Y_PRUEBAS.md`](docs/DESARROLLO_Y_PRUEBAS.md#3-entrar-en-local). Estar autenticado no basta: hay
+  que existir en la tabla `users` con un rol.
 
-**Llevarlo a un servidor propio (VPS)**: ver
-[`docs/DESPLIEGUE_VPS.md`](docs/DESPLIEGUE_VPS.md). El código corre en Node con
-un puente (`servidor/`) que reemplaza a Cloudflare D1/R2 por SQLite y disco.
+Antes de cualquier commit: `npm run lint`, `npx tsc --noEmit`, `node --test tests/*.test.mjs` y `npx vinext build`.
 
-### Variables de entorno
+## Roles en una línea
 
-Van en `.dev.vars` en la raíz del repo (nunca se sube a git). La lista
-completa de nombres —sin valores— está en
-[`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md#5-variables-de-entorno).
-Pide los valores reales a alguien del equipo que ya tenga acceso.
+| Rol | Etiqueta | Puede |
+|---|---|---|
+| `admin` | Admin / Directores | Todo, incluido aprobar presupuesto y administrar el equipo |
+| `supervisor` | Digital Lead | Ver todo, crear y aprobar cambios, conectar cuentas |
+| `analyst` | Digital Creator | Ver todo y **proponer**; no publica ni aprueba |
+| `client` | Cliente | Ver su portafolio y sugerir |
 
-### Iniciar sesión en local
+El detalle está en [`docs/ROLES_Y_APROBACIONES.md`](docs/ROLES_Y_APROBACIONES.md).
 
-En ChatGPT Sites, la identidad la inyecta el hosting por la cabecera
-`oai-authenticated-user-email`; eso no existe corriendo `npm run dev` a pelo.
-Dos formas de entrar en local:
-
-- **Simulando esa cabecera** (se comporta como ChatGPT Sites):
-  ```bash
-  pip install playwright && playwright install chromium
-  python scripts/open-in-chrome.py        # abre Chrome como techlab@mgcglobalgroup.com
-  ```
-- **Con Google** (`/acceso`): solo entran correos `@mgcglobalgroup.com`. La
-  sesión es una cookie **firmada** (HMAC, vence a las 12 h), así que hace falta
-  `SESSION_SECRET` u `OAUTH_TOKEN_KEY` en `.dev.vars`; sin ninguno no se abre
-  sesión. Es la única puerta: el formulario de "escribe cualquier correo" se
-  quitó porque dejaba entrar sin probar identidad.
-
-En un servidor propio (VPS) la cabecera `oai-*` **se ignora** (cualquiera
-podría mandarla): solo vale la cookie firmada.
-
-Estar autenticado no basta: además hay que existir en la tabla `users` con un
-rol asignado (ver [Roles](#roles-y-permisos)). Sin eso, la app muestra "no
-estás en el equipo" aunque el login haya funcionado.
-
-## Qué hay en la app
-
-**Inicio** es un vestíbulo: una tarjeta por módulo, según el rol. La barra
-lateral tiene dos grupos:
-
-**Operación** (trabajo de campaña, día a día):
-| Sección | Qué hace |
-|---|---|
-| **Cliente** | Cartera de clientes para elegir uno; adentro, ficha, cuentas conectadas y tabla de campañas/conjuntos/anuncios de ese cliente, con pausar/activar y gestión (ver abajo) |
-| **Creador de campañas** | Wizard paso a paso para crear campañas reales en Google y/o Meta a la vez: objetivo, presupuesto, segmentación (edad, género, país, región/ciudad por búsqueda, radio en mapa, exclusiones, intereses de Meta, palabras clave de Google), pieza creativa (o publicación existente), vista previa por plataforma. Todo nace **pausado** |
-| **Audiencias** | Dos pestañas. **Mensajería**: anuncios de Meta con botón de WhatsApp, llamada o mensaje, agrupados por campaña y conjunto, con pausa/activación en bloque. **Listas de contactos**: Customer Match de Google Ads (crear listas —recordadas en el navegador—, subir contactos, adjuntarlas o excluirlas de un grupo de anuncios ya leído) |
-| **Dashboard C-Level** | Lectura ejecutiva: inversión, clics, resultados **desglosados por objetivo real** (una cifra de "conversiones" mezclando ventas con awareness no dice nada — cada [AE]/[VTA]/[LDS]/[TRF]/[OCV] se mide con su propia métrica), estado de cartera y calidad del dato |
-
-**Gestión** (administración de cuenta, no campaña):
-| Sección | Qué hace |
-|---|---|
-| **Auditoría** | Bitácora de cada intento real de publicación (éxito o error), con el detalle de cada paso |
-| **Cuentas** | Conexión de cuentas publicitarias por cliente. Incluye una tabla "Estado por cliente y plataforma": un cliente puede estar bien en Google y con problemas en Meta a la vez, y esto lo muestra por separado en vez de mezclar todos los clientes de una plataforma en un solo estado |
-| **Equipo** (engranaje junto a tu ficha) | Alta/baja de personas, rol y qué clientes puede ver cada una (solo admin) |
-
-Transversal a todo:
-
-- **Puerta de cliente al entrar**: la primera vez en cada sesión de navegador,
-  antes de ver nada más, hay que elegir un cliente (como el selector de
-  cuenta de Google Ads Manager). Después de elegir, el resto de la app sigue
-  igual — incluido poder volver a "Todos los clientes" desde el selector del
-  encabezado.
-- **Selector de cliente** solo en el encabezado: cambiar ahí cambia el cliente
-  activo en toda la app y **no cambia de pantalla**. Ninguna vista debería
-  tener su propio selector; si ves uno, es un bug.
-- **Periodo** con calendario (presets y rango libre) donde cambia lo que se ve.
-- **Actualizar** (encabezado): relee Windsor y reconstruye el catálogo de
-  campañas. Se hace solo cada semana (la primera sesión admin/lead que abra la
-  app pasados 7 días); no hay cron en el hosting original. Tras publicar, las
-  campañas nuevas se suman al catálogo sin esperar.
-- **Búsqueda ⌘K / Ctrl+K**: saltar a una sección o cambiar de cliente.
-- **Tema claro/oscuro** con la paleta de MetriQ, y el Thinking Orb en todas las
-  cargas.
-
-### Asistente de IA
-
-El orbe flotante (abajo a la derecha) abre un chat con **Claude Sonnet**
-(`claude-sonnet-5`, configurable con `ANTHROPIC_MODEL`). Puede:
-
-- Responder sobre campañas y clientes (gasto, CTR, resultados, costo por
-  resultado) con datos reales, respetando el cliente activo y los permisos.
-- Recomendar según cómo le fue a una campaña.
-- Analizar un **CSV** (por ejemplo de MetriQ): las sumas y rankings los calcula
-  el servidor en código, y al modelo solo le llegan el resumen y una muestra.
-
-Regla de diseño: **el asistente nunca escribe en una plataforma.** Los cambios
-llegan como tarjetas con botón (pausar/activar una campaña, o abrir el Creador
-de campañas con el cliente elegido) y la persona decide; el cambio lo aplica el
-mismo endpoint de siempre, con sus permisos y su bitácora. Antes de mostrar una
-tarjeta se comprueba que la campaña exista en los datos reales.
-
-Todavía no hay límite de consultas por persona (cada respuesta cuesta dinero).
-Detalle en [`lib/asistente.ts`](lib/asistente.ts).
-
-## Gestionar campañas ya publicadas
-
-Desde **Clientes → tabla de campañas**, el ícono de ajustes junto a
-pausar/activar abre un panel por campaña o conjunto:
-
-- **Las dos plataformas**: presupuesto, nombre.
-- **Solo Google** (Windsor no expone estas acciones para Meta): estrategia
-  de puja (CPC manual / CPA objetivo / ROAS objetivo / maximizar
-  conversiones-valor-clics / gasto objetivo), idiomas, horario de entrega
-  (una ventana diaria por día marcado), palabras clave negativas,
-  extensiones de anuncio (sitelinks, callouts, fragmentos estructurados,
-  llamada).
-
-## Roles y permisos
-
-Definidos en [`lib/permisos.ts`](lib/permisos.ts). Dos ejes separados: el
-**rol** define qué se puede hacer, los **clientes asignados** definen sobre
-qué (vacío para admin/lead: ven todo).
-
-| Rol | Puede |
-|---|---|
-| `admin` | Todo, incluida la administración del equipo |
-| `lead` | Ve todos los clientes, aprueba cambios (publicar, pausar, gestionar) |
-| `buyer` | Trabaja los clientes asignados, propone cambios |
-| `analyst` | Solo lectura sobre los clientes asignados |
-| `client` | Solo ve el rendimiento de su propio portafolio |
-
-## Cómo está armado por dentro
+## Cómo está armado
 
 ```
-app/                   vistas (Next.js App Router, "use client" casi todo)
-  dashboard.tsx         shell: sidebar, header, switch de vistas
-  asistente.tsx         orbe flotante y chat del asistente de IA
-  paleta-comandos.tsx   búsqueda ⌘K
-  mensajeria-view.tsx   anuncios de WhatsApp/llamada/mensaje de Meta
-  constructor-view.tsx  wizard de creación de campañas
-  gestionar-campana.tsx panel de gestión de campaña/conjunto ya publicado
-  geo-map.tsx           mapa Leaflet de segmentación (país / radio / excluir)
-  audiencias-view.tsx   Customer Match de Google
-  clientes-view.tsx     cartera de clientes + ficha de cada uno
-  api/                  rutas de servidor (lectura de sesión, escritura real)
-lib/
-  windsor.ts            TODA la lectura y escritura contra Windsor.ai
-  constructor.ts        arma el plan de una campaña (buildPlan) sin ejecutarlo
-  geo.ts                países segmentables + su id de Google verificado
-  geo-targets-store.ts  búsqueda de región/ciudad reales (tabla geo_targets)
-  objetivos.ts          taxonomía [AE]/[VTA]/[LDS]/[TRF]/[OCV] + resultado por objetivo
-  permisos.ts           roles y capacidades
-  reglas.ts             motor de recomendaciones (fase 1, sin autonomía)
-  asistente.ts          agente de IA: herramientas de lectura y propuestas
-  asistente-csv.ts      perfil de un CSV calculado en código
-  sesion-firmada.ts     cookie de sesión firmada (HMAC)
-servidor/               puente para correr en Node/VPS (SQLite, disco, migrador)
-db/                     esquema Drizzle + bindings de D1
-docs/ARQUITECTURA.md    arquitectura técnica completa (lectura/escritura,
-                        variables de entorno, esquema de base de datos)
+app/        pantallas (*.tsx) y rutas del servidor (app/api/*)
+lib/        lógica de negocio; los módulos *-pura.ts no usan red ni entorno y se prueban solos
+db/         esquema Drizzle      drizzle/   migraciones SQL (0000–0045)
+servidor/   puente Cloudflare Workers ⇄ Node (SQLite y disco en el VPS)
+worker/     entrada del Worker de Cloudflare
+config/     definición de portafolios (clientes)
+tests/      pruebas con node --test (sin mocks de plataformas)
+docs/       documentación por tema e historial
 ```
 
-**Regla de oro del proyecto**: nunca se adivina un campo o una acción de
-Windsor. Antes de usar cualquiera, se verifica contra el MCP de Windsor
-(`get_fields`, `list_actions`) o su documentación oficial. Pedir un campo
-inexistente no da error — devuelve `null` en silencio, que es la peor forma
-de fallar. Lo mismo aplica a cualquier id de segmentación (país, idioma,
-extensión): si no hay una fuente verificada para un valor, la función
-correspondiente queda fuera de la interfaz en vez de inventarlo.
+Corre en **Cloudflare Workers** o en **Node/VPS** con el mismo código (ver
+[`PROYECTO.md`](PROYECTO.md#el-runtime-dual-cloudflare-workers-y-nodevps)). Producción es el VPS: se despliega al
+integrar un PR a `main`.
 
 ## Límites conocidos
 
-No son bugs — son huecos reales de la integración actual, documentados para
-no tener que redescubrirlos:
-
-- **Meta no tiene Customer Match / audiencias personalizadas** en esta app.
-  Windsor no expone esa acción para el conector `facebook` (verificado
-  directamente contra su `list_actions`, no es un supuesto). Conectarlo de
-  verdad exigiría una integración aparte, directa contra la API de Meta
-  (app propia en Meta for Developers, credenciales nuevas, revisión de
-  permisos `ads_management`) — una decisión de infraestructura distinta a
-  todo lo que corre hoy sobre Windsor.
-- **Segmentación por región/ciudad**: para **Google** usa el id real del
-  lugar (tabla `geo_targets` en D1, sembrada desde la misma fuente oficial
-  que los 219 países — `drizzle/0014_geo_targets.sql` — buscable desde el
-  Constructor, pestaña "Región / Ciudad"). Windsor no expone, para el
-  conector `facebook`, una forma de buscar el id de región/ciudad propio de
-  Meta (es un sistema de ids distinto al de Google) — para **Meta**, el
-  lugar se geocodifica contra Nominatim/OpenStreetMap (`lib/geocoding.ts`,
-  con caché en D1) y se segmenta con un círculo real alrededor de su centro
-  (`geo_locations.custom_locations`), acotado a 1-80 km. Dos límites reales,
-  no de la interfaz: si Nominatim no ubica el lugar, ese lugar solo
-  segmenta a Google (se avisa en el Constructor); y una región más grande
-  que 80 km de radio queda cubierta solo alrededor del centro, no en toda
-  su área.
-- **Palabras clave negativas**: solo se pueden añadir desde acá, no quitar
-  las que ya existen (eso todavía se hace en Google Ads directamente).
-- **Borrar campañas**: no existe esa acción en Windsor; solo se pausan. El
-  asistente lo sabe y no lo ofrece.
-- **Número de WhatsApp de un anuncio**: Windsor no lo expone ni tiene acción
-  para cambiarlo (el destino llega vacío). Solo se ve el tipo de botón. Cambiarlo
-  en bloque exigiría una integración directa con la API de WhatsApp Business.
-- **Edición de creativo de un anuncio ya publicado**: no implementada
-  todavía, aunque Windsor sí expone la acción (`update_ad_creative` en
-  Meta) — quedó fuera por alcance, no por imposibilidad.
-- **Tipos de campaña de Google**: solo Búsqueda y Display. La acción real
-  de Windsor (`create_campaign`) solo acepta esos dos valores de
-  `channel_type` — no existe una acción para crear Performance Max,
-  Shopping, Video ni Demand Gen. No es una limitación de la interfaz: es
-  que Windsor no tiene la acción, así que no hay nada real que ofrecer ahí
-  sin inventarlo. En Meta sí se puede elegir el objetivo real (ODAX)
-  aparte del objetivo de negocio — ver "Objetivo de Meta" en el paso de
-  Campaña del Constructor.
-
-## Seguir leyendo
-
-[`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md) tiene el detalle técnico
-completo: cómo se lee cada dato de Windsor, el flujo exacto de publicación
-de una campaña (encadenado de ids, auditoría, reintentos — o más bien, por
-qué nunca reintenta), el motor de reglas, y el esquema completo de base de
-datos.
+Los límites vigentes de cada plataforma (qué campos no se pueden editar, qué exige permisos de la página, qué está
+solo en lectura) están en [`docs/PLATAFORMAS.md`](docs/PLATAFORMAS.md). Los pendientes de producto, en
+[`docs/FUNCIONES_DEL_PRODUCTO.md`](docs/FUNCIONES_DEL_PRODUCTO.md) y en el historial de rondas de
+[`docs/historial/`](docs/historial/).

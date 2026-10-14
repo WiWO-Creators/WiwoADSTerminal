@@ -14,7 +14,7 @@ Leyenda de riesgo: 🔴 da acceso o permite actuar · 🟠 da acceso parcial o g
 | Variable | Qué hace | Dónde | Si se filtra |
 |---|---|---|---|
 | `OAUTH_ADMIN_EMAILS` 🟢 | Correos que se autoprovisionan como **administrador** la primera vez que entran. Es la única puerta de arranque en frío. | `lib/equipo.ts` | No es secreto, pero define quién puede volverse admin: quien controle uno de esos correos entra como admin. |
-| `DEV_LOGIN_ENABLED` 🟠 | Si vale `"true"`, la app acepta las cabeceras de identidad de ChatGPT Sites. | `app/chatgpt-auth.ts` | En un servidor propio cualquiera podría mandar esas cabeceras y **suplantar a un usuario**. Debe estar apagada en el VPS. |
+| `DEV_LOGIN_ENABLED` 🟢 | Solo decide a qué ruta de salida se manda al cerrar sesión (local sin el despacho de ChatGPT Sites). Su antiguo trabajo, abrir un formulario de «escribe cualquier correo», ya no existe: hoy solo se entra con Google. | `app/chatgpt-auth.ts` | No abre ninguna puerta. Se deja apagada o ausente en el VPS. (En el VPS, además, las cabeceras `oai-authenticated-user-*` se ignoran siempre.) |
 | `SESSION_SECRET` 🔴 | Clave HMAC con la que se firma la cookie `wiwo-dev-user`. Si falta, se usa `OAUTH_TOKEN_KEY`. | `app/chatgpt-auth.ts`, `lib/sesion-firmada.ts` | Permite **fabricar una sesión válida** de cualquier persona del equipo. |
 | `OAUTH_TOKEN_KEY` 🔴 | Clave que **cifra** los tokens OAuth guardados en la base (Google/Meta) y respalda la firma de sesión. | `lib/integration-store.ts`, `lib/sesion-firmada.ts` | Con el archivo de la base, permite **descifrar todos los tokens** de las integraciones. Si cambia, los tokens guardados dejan de poder leerse. |
 | `APP_ORIGIN` 🟢 | URL pública (`https://ads.wiwo.me`). Arma las URLs de retorno de OAuth. | `lib/origen-publico.ts`, `lib/integration-store.ts` | No es secreto. Si está mal, el login con Google/Meta falla por redirect inválido. |
@@ -50,12 +50,12 @@ Leyenda de riesgo: 🔴 da acceso o permite actuar · 🟠 da acceso parcial o g
 
 Sin las dos primeras, la vía nativa queda apagada y LinkedIn sigue leyéndose por Windsor.
 
-## TikTok (preparado: todavía no hay código que las lea)
+## TikTok (preparado: ningún código las lee todavía)
 
 | Variable | Qué hace | Dónde | Si se filtra |
 |---|---|---|---|
-| `TIKTOK_APP_ID` 🟢 | ID de la app «WiwoAds» de TikTok for Business (Marketing API). Aparece como «--» en el portal hasta que la aprueben. | futuro `lib/tiktok-nativo.ts` | Es público: sale en la URL de autorización. |
-| `TIKTOK_APP_SECRET` 🔴 | Secreto de esa app. Canjea el `auth_code` por el token del anunciante. | futuro `lib/tiktok-nativo.ts` | Permite **hacerse pasar por la app**. Regenerarlo en el portal de desarrolladores de TikTok. |
+| `TIKTOK_APP_ID` 🟢 | ID de la app «WiwoAds» de TikTok for Business (Marketing API). Aparece como «--» en el portal hasta que la aprueben. | aún no hay lector; el módulo puro es `lib/tiktok-nativo-pura.ts` | Es público: sale en la URL de autorización. |
+| `TIKTOK_APP_SECRET` 🔴 | Secreto de esa app. Canjea el `auth_code` por el token del anunciante. | aún no hay lector | Permite **hacerse pasar por la app**. Regenerarlo en el portal de desarrolladores de TikTok. |
 
 Los tokens de anunciante de TikTok no vencen ni se renuevan: si se pierde uno, el anunciante debe cancelar y volver a autorizar. La URL de retorno registrada es `https://ads.wiwo.me/api/integrations/tiktok/callback`.
 
@@ -63,14 +63,14 @@ Los tokens de anunciante de TikTok no vencen ni se renuevan: si se pierde uno, e
 
 | Variable | Qué hace | Dónde | Si se filtra |
 |---|---|---|---|
-| `WINDSOR_API_KEY` 🔴 | Clave de la cuenta de Windsor. **Lectura y escritura** de campañas, conjuntos y anuncios de Google y Meta. | `lib/windsor.ts` | Permite **leer los datos de todos los clientes y ejecutar las acciones de escritura** que Windsor expone. Es el único punto de escritura del sistema. Restablécela en Windsor. |
+| `WINDSOR_API_KEY` 🔴 | Clave de la cuenta de Windsor. **Lectura** de todas las plataformas y escritura de la mayoría de pausar, activar y crear en Google y Meta. | `lib/windsor.ts` | Permite **leer los datos de todos los clientes y ejecutar las acciones de escritura** que Windsor expone. Ya no es el único punto de escritura: Meta, Google y LinkedIn también escriben por sus APIs directas. Restablécela en Windsor. |
 
 ## IA
 
 | Variable | Qué hace | Dónde | Si se filtra |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` 🟠 | Clave para el asistente y el copiloto de creativos (Claude). | `lib/asistente.ts`, `lib/copiloto-creativos.ts` | No toca ads, pero **gasta crédito** de Anthropic. Ponle un límite de gasto mensual. |
-| `ANTHROPIC_MODEL` 🟢 | Modelo que usa el asistente. Por defecto, `MODELO_POR_DEFECTO`. | `lib/asistente.ts`, `lib/copiloto-creativos.ts` | No es secreto. |
+| `ANTHROPIC_MODEL` 🟢 | Modelo que usa el asistente. Por defecto, `claude-sonnet-5` (constante en `lib/asistente.ts`). | `lib/asistente.ts`, `lib/copiloto-creativos.ts` | No es secreto. |
 | `GEMINI_API_KEY` 🟠 | Clave de Gemini para generar imágenes de creativos. | `lib/generador-creativos.ts` | **Gasta crédito** de Google. Sin ella, el generador queda desactivado. |
 
 ## Infraestructura (no son secretos)
@@ -104,3 +104,19 @@ Los tokens de anunciante de TikTok no vencen ni se renuevan: si se pierde uno, e
 - `.dev.vars` ya está en `.gitignore`. No lo copies a otras carpetas ni lo pegues en chats.
 - En el VPS, que cada clave tenga solo el permiso que necesita: el token de Meta con `ads_read`, salvo que decidas escribir con la propia app.
 - Guarda una copia de las claves en un gestor de contraseñas de la empresa, para que no dependan de una sola persona.
+
+## Permisos del token de Meta para formularios instantáneos y leads
+
+El token del usuario del sistema («WiwoAds») ya alcanza para **leer los formularios de las páginas** (se verificó en Colbún, SQM y Valor: se pide el token de la página con `/{page}?fields=access_token`). Para el resto del flujo de formularios hace falta:
+
+| Qué | Permiso de Meta | Estado (2026-10-09) |
+|---|---|---|
+| Leer los formularios de una página | `pages_show_list` / `pages_manage_ads` | ✅ funciona |
+| Crear un formulario en la página | `pages_manage_ads` (la página con control total para el usuario del sistema) | Sin probar contra una página real: Meta no deja borrar un formulario, solo archivarlo |
+| **Leer los leads y sus respuestas** (para calcular el % de calificados) | **`leads_retrieval`** | ❌ **Falta**: Meta responde «(#200) Requires leads_retrieval permission to manage the object». Hay que generar el token del usuario del sistema con ese permiso (la app «WiwoAds» debe tenerlo aprobado) |
+
+Sin `leads_retrieval` todo lo demás funciona; solo el cálculo de «% de calificados» del panel «Plan de estrategia» avisa que falta el permiso.
+
+## Variables de herramientas (no son de la app)
+
+Las leen los scripts y el entorno de desarrollo, no la aplicación; no son secretos: `WRANGLER_LOG_PATH`, `WRANGLER_WRITE_LOGS`, `MINIFLARE_REGISTRY_PATH`, `CODEX_SANDBOX` y las `SITES_*` de `scripts/*.sh`. Los bindings `DB`, `MEDIA`, `ASSETS` e `IMAGES` los pone la plataforma o el puente de `servidor/`. `WIWO_RUNTIME` la fija el puente en Node: no se define a mano.

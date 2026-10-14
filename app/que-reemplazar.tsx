@@ -14,10 +14,13 @@ export function QueReemplazar({
   accountId,
   campaignId,
   onCargado,
+  onEditar,
 }: {
   accountId: string;
   campaignId: string;
   onCargado?: (piezas: PiezaParaReemplazar[]) => void;
+  /** Abre el editor en ese anuncio (se edita ahí mismo; no se crea nada nuevo). */
+  onEditar?: (pieza: PiezaParaReemplazar) => void;
 }) {
   const clave = `${accountId}|${campaignId}`;
   const [lectura, setLectura] = useState<{ clave: string; datos: Respuesta | null } | null>(null);
@@ -64,6 +67,11 @@ export function QueReemplazar({
                     {p.conjunto ? <span className="font-normal text-foreground/45"> · {p.conjunto}</span> : null}
                   </p>
                   <p className="leading-5 text-foreground/70">{p.porQue}</p>
+                  {onEditar && (
+                    <button type="button" onClick={() => onEditar(p)} className="mt-0.5 text-[0.7rem] font-semibold text-brand hover:underline">
+                      Editar este anuncio →
+                    </button>
+                  )}
                 </div>
               </li>
             ))}

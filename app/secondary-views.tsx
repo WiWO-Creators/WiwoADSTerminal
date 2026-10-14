@@ -27,7 +27,7 @@ import type { PerformanceSnapshot } from "@/lib/performance-store";
 import type { HealthCheck, ViewKey } from "./data";
 import { TarjetaResumenSemanal } from "./resumen-semanal";
 import { SaludDeMedicion } from "./salud-medicion";
-import { CLIENTES_SOLO_PROYECTOS_ASIGNADOS, coincideConSegmento, enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
+import { CLIENTES_SOLO_PROYECTOS_ASIGNADOS, coincideConSegmento, conProyectosDeEstrategias, enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
 import { MejoresYPeores } from "./mejores-peores";
 import { TableroDeSalud } from "./tablero-salud";
 import {
@@ -360,7 +360,7 @@ export function HealthView({
   const monthLabel = etiquetaPeriodo(performance);
   // Proyectos o mercados del cliente (Valor: Ébano, Corotú…; SQM: México…): un filtro para ver cada uno por separado.
   const [segmentoElegido, setSegmentoElegido] = useState<{ cliente: string; id: string } | null>(null);
-  const segmentos = portfolio?.segmentos ?? [];
+  const segmentos = portfolio ? (portfolio.segmentos.length > 0 ? conProyectosDeEstrategias(portfolio.id, portfolio.segmentos) : []) : [];
   const segmento = segmentoElegido && segmentoElegido.cliente === portfolio?.id ? (segmentos.find((x) => x.id === segmentoElegido.id) ?? null) : null;
   // Grupo Valor: la cuenta trae proyectos de otros equipos; solo se ven los que llevamos.
   const soloAsignados = portfolio ? CLIENTES_SOLO_PROYECTOS_ASIGNADOS.has(portfolio.id) && segmentos.length > 0 : false;

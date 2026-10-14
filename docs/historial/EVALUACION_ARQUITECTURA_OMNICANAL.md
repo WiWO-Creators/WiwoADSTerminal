@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Su premisa central («no hay ningún cliente nativo de Google, Meta ni LinkedIn en el repo») dejó de ser cierta: hoy existen `lib/meta-nativo.ts`, `lib/google-ads-nativo.ts` y `lib/linkedin-nativo.ts`. No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Evaluación de la propuesta de arquitectura omnicanal
 
 Este documento responde a una propuesta técnica recibida ("Especificación
@@ -13,7 +15,7 @@ aplicar a cualquier proyecto del rubro, no a este. El objetivo de este
 documento es separar, sección por sección, qué es real hoy, qué es una buena
 idea con un camino de implementación concreto, y qué requiere primero una
 decisión de negocio (presupuesto, tiempo, revisión de plataformas) antes de
-que tenga sentido diseñarlo en código. Cita [`docs/ARQUITECTURA.md`](ARQUITECTURA.md)
+que tenga sentido diseñarlo en código. Cita [`docs/ARQUITECTURA.md`](../ARQUITECTURA.md)
 para el detalle de cómo funciona el sistema real hoy; no lo repite.
 
 ## 1. Punto de partida real (lo que la propuesta no ve)
@@ -22,7 +24,7 @@ para el detalle de cómo funciona el sistema real hoy; no lo repite.
   standalone — ver `vite.config.ts`. El estado del Constructor es `useState`
   de React normal, **no Zustand** — no hay ninguna dependencia de Zustand en
   `package.json`.
-- **Validación de datos**: `normalizeDraft` en [`lib/constructor.ts`](../lib/constructor.ts)
+- **Validación de datos**: `normalizeDraft` en [`lib/constructor.ts`](../../lib/constructor.ts)
   es una función a mano, campo por campo. El proyecto **no usa Zod** en
   ningún lado hoy.
 - **Todo el rendimiento y todas las escrituras reales pasan por Windsor.ai**
@@ -86,7 +88,7 @@ nada más de este documento.
 
 ### 2.3 Tabla `geo_targets_multiplatform`
 
-Ya existe una versión de esto para Google: [`drizzle/0014_geo_targets.sql`](../drizzle/0014_geo_targets.sql),
+Ya existe una versión de esto para Google: [`drizzle/0014_geo_targets.sql`](../../drizzle/0014_geo_targets.sql),
 sembrada desde la tabla oficial de geo targets de Google Ads (219 países +
 ~99.700 regiones y ciudades, verificado dato por dato contra esa fuente, no
 inventado). Se agregó esta sesión y ya está integrada en el Constructor

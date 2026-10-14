@@ -12,34 +12,33 @@ de **nombres y usos**: ningún valor está escrito aquí ni debe estarlo.
 | Si se filtra | Nada grave: sale en cualquier URL de login | Restablecer de inmediato (ver abajo) |
 
 Sin las dos, la app no puede conectar Meta por OAuth: la pantalla de Integraciones lo avisa como
-«credenciales de la app de Meta» faltantes ([lib/integration-store.ts:205](../lib/integration-store.ts#L205)).
+«credenciales de la app de Meta» faltantes (`lib/integration-store.ts`).
 
 ## Qué hace `META_APP_ID`
 Es el `client_id` con el que Meta identifica a la app.
 
 1. **Abrir el diálogo de permisos.** Se manda en la URL de autorización de Facebook
-   ([lib/integration-store.ts:500](../lib/integration-store.ts#L500)), junto con el permiso `ads_read`.
+   (`lib/integration-store.ts`, función que arma la URL de autorización), junto con el permiso `ads_read`.
 2. **Canjear el código por un token.** Se manda otra vez al volver el usuario de Meta
-   ([lib/integration-store.ts:945](../lib/integration-store.ts#L945)).
+   (`lib/integration-store.ts`, canje del código).
 3. **Ampliar la vida del token.** Se manda al cambiar el token corto por uno largo
-   ([lib/integration-store.ts:972](../lib/integration-store.ts#L972)).
+   (`lib/integration-store.ts`, cambio por token largo).
 4. **Formar el token de la propia app** (`ID|SECRETO`), ver abajo.
 
 ## Qué hace `META_APP_SECRET`
 Es la prueba de que quien habla es de verdad la app. Se usa en cuatro cosas:
 
 1. **Canjear el código OAuth** por un token de usuario, junto con el ID
-   ([lib/integration-store.ts:946](../lib/integration-store.ts#L946)).
+   (`lib/integration-store.ts`, canje del código).
 2. **Cambiar el token corto por uno largo** (`fb_exchange_token`)
-   ([lib/integration-store.ts:973](../lib/integration-store.ts#L973)).
+   (`lib/integration-store.ts`, cambio por token largo).
 3. **Firmar cada llamada con `appsecret_proof`**: un HMAC-SHA256 del token de acceso usando el secreto.
    Se usa al leer el perfil, al descubrir cuentas publicitarias y al leer métricas diarias
-   ([989](../lib/integration-store.ts#L989), [1167](../lib/integration-store.ts#L1167),
-   [1485](../lib/integration-store.ts#L1485)). Así, un token robado no sirve sin el secreto
+   (`lib/integration-store.ts`; busca `appsecret_proof`). Así, un token robado no sirve sin el secreto
    *si* se activa «Requerir clave secreta de la app» en Meta.
 4. **Token de la propia app** (`ID|SECRETO`): se usa para buscar lugares (`adgeolocation`), un catálogo
    público de Meta que no depende de que una cuenta personal esté libre de verificaciones de seguridad
-   ([lib/integration-store.ts:241](../lib/integration-store.ts#L241)).
+   (`lib/integration-store.ts`, búsqueda de ubicaciones).
 
 ## Qué NO hacen
 - **No leen datos de clientes por sí solas.** Eso lo hace un token de usuario (OAuth) o el

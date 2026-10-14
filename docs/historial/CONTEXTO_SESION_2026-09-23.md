@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Traspaso de una sesión de trabajo de septiembre. Varias afirmaciones ya no valen (por ejemplo «todo nace pausado» o «Windsor es el único punto de escritura»). No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Contexto de sesión — WiWO.ADS, 23-09-2026
 
 Documento de traspaso para retomar el trabajo en una conversación nueva. Escrito para Claude (o cualquiera que necesite ponerse al día rápido), no para presentar a un cliente.

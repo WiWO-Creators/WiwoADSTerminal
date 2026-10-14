@@ -614,7 +614,7 @@ function planPalabrasClave(
   if (existentes === null) {
     problema(
       "palabrasClave",
-      "No se pudieron leer las palabras clave de este grupo: Windsor no las entrega. Conecta tu cuenta de Google en Integraciones para verlas y editarlas.",
+      "No se pudieron leer las palabras clave de este grupo: Windsor no las entrega. Hace falta la conexión del equipo con Google (un administrador la conecta una sola vez).",
     );
     return;
   }

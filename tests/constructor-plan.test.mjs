@@ -572,3 +572,88 @@ test("normalizeDraft de retirarAnuncios descarta ids que no son numéricos y rep
   assert.deepEqual(d.retirarAnuncios, [{ id: "111", nombre: "A" }]);
   assert.deepEqual(normalizeDraft({}).retirarAnuncios, []);
 });
+
+// --- formulario instantáneo, tipo de ubicación, Advantage+ apagado y fecha de inicio (plan de Colombia) ---
+const CUENTA_META_SIN_PIXEL = { ...CUENTA_META, pixels: [] };
+function planForm(over = {}, cuentas = [CUENTA_META_SIN_PIXEL]) {
+  const draft = borrador({
+    platforms: ["meta"],
+    objective: "leads",
+    conversionLocation: "formulario",
+    metaLeadFormId: "1101256272415286",
+    metaBudgetLevel: "conjunto",
+    budgetMode: "total",
+    endDate: "2099-12-10",
+    dailyBudget: 950,
+    landingUrl: "https://valordevelopment.com/colombia",
+    ageMin: 35,
+    ...over,
+  });
+  return buildPlan(draft, null, cuentas, SNAPSHOT);
+}
+
+test("formulario instantáneo: conjunto y anuncio salen por la API directa, sin exigir píxel", () => {
+  const r = planForm();
+  assert.deepEqual(bloqueantes(r), []);
+  const pasos = ejecutables(r);
+  assert.deepEqual(pasos.map((s) => s.action), ["create_campaign", "meta:crear_conjunto_formulario", "meta:crear_anuncio_formulario"]);
+  assert.ok(pasos.slice(1).every((s) => s.via === "nativa"));
+  const [, conj, anuncio] = pasos;
+  assert.equal(conj.params.page_id, "555");
+  assert.deepEqual(conj.params.presupuesto.tipo, "total");
+  assert.equal(conj.params.fin, "2099-12-10");
+  assert.equal(anuncio.params.formulario_id, "1101256272415286");
+  assert.equal(anuncio.params.enlace, "https://valordevelopment.com/colombia");
+  assert.equal(anuncio.params.boton, "LEARN_MORE", "el botón elegido sirve con formulario");
+  assert.equal(ejecutables(planForm({ callToAction: "SHOP_NOW" }))[2].params.boton, "SIGN_UP", "un botón que no sirve con formulario cae en Registrarse");
+});
+
+test("formulario instantáneo sin URL de destino se bloquea: Meta no acepta la página de Facebook como enlace", () => {
+  assert.ok(bloqueantes(planForm({ landingUrl: "" })).some((i) => i.field === "landingUrl"));
+});
+
+test("formulario instantáneo sin elegir el formulario se bloquea", () => {
+  const r = planForm({ metaLeadFormId: "" });
+  assert.ok(bloqueantes(r).some((i) => i.field === "metaLeadFormId"));
+});
+
+test("«viven aquí» y «estuvieron recientemente» llegan al targeting, y Advantage+ va apagado y explícito", () => {
+  const casa = ejecutables(planForm({ metaLocationType: "home" }))[1].params.targeting;
+  assert.deepEqual(casa.geo_locations.location_types, ["home"]);
+  assert.deepEqual(casa.targeting_automation, { advantage_audience: 0 });
+  assert.deepEqual(casa.targeting_relaxation_types, { lookalike: 0, custom_audience: 0 });
+  const club = ejecutables(planForm({ metaLocationType: "recent" }))[1].params.targeting;
+  assert.deepEqual(club.geo_locations.location_types, ["recent"]);
+  const sin = ejecutables(planForm())[1].params.targeting;
+  assert.equal("location_types" in sin.geo_locations, false, "sin elegir, Meta decide");
+  const conAdv = ejecutables(planForm({ metaAdvantageAudience: true }))[1].params.targeting;
+  assert.deepEqual(conAdv.targeting_automation, { advantage_audience: 1 });
+  assert.equal("targeting_relaxation_types" in conAdv, false);
+});
+
+test("una fecha de inicio programa el conjunto (retargeting de la semana 5) y no puede ser posterior al fin", () => {
+  assert.equal(ejecutables(planForm({ metaStartDate: "2099-11-09" }))[1].params.inicio, "2099-11-09");
+  assert.ok(bloqueantes(planForm({ metaStartDate: "2099-12-31" })).some((i) => i.field === "metaStartDate"));
+});
+
+test("formulario sobre un conjunto que ya existe: solo se crea el anuncio con el formulario", () => {
+  const r = planForm({ existingCampaign: { platform: "meta", accountId: "999", campaignId: "5251", campaignName: "Camp" }, existingAdset: { adsetId: "9001", adsetName: "Conj" } });
+  assert.deepEqual(ejecutables(r).map((s) => s.action), ["meta:crear_anuncio_formulario"]);
+  assert.equal(ejecutables(r)[0].params.adset_id, "9001");
+});
+
+test("normalizeDraft del formulario y la ubicación descarta lo inválido", () => {
+  const d = normalizeDraft({ conversionLocation: "formulario", metaLeadFormId: "abc", metaLocationType: "otra", metaStartDate: "mañana" });
+  assert.equal(d.conversionLocation, "formulario");
+  assert.equal(d.metaLeadFormId, "");
+  assert.equal(d.metaLocationType, "");
+  assert.equal(d.metaStartDate, "");
+  assert.equal(normalizeDraft({}).metaAdvantageAudience, false);
+});
+
+test("un círculo de menos de 2 km en Meta avisa (no bloquea); con 2 km o más no avisa", () => {
+  const chico = planForm({ geoRadius: { lat: 4.7, lng: -74.05, radiusKm: 1 } });
+  assert.ok(chico.issues.some((i) => i.field === "geoRadius" && !i.blocking));
+  assert.equal(bloqueantes(chico).some((i) => i.field === "geoRadius"), false);
+  assert.equal(planForm({ geoRadius: { lat: 4.7, lng: -74.05, radiusKm: 2 } }).issues.some((i) => i.field === "geoRadius"), false);
+});

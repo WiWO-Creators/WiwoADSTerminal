@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Checklist del 2026-10-05, superado por `../ESTADO_POR_CLIENTE.md`. Su sección «cómo dar acceso a la cuenta de servicio» sigue siendo válida. No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Accesos pendientes para la lectura de medición (GA4 y GTM)
 
 Fecha: 2026-10-05. Qué cuenta agregar y dónde, para que WiWO.ADS pueda leer la medición de cada cliente.

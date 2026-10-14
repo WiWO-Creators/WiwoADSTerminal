@@ -264,17 +264,43 @@ async function tokenDeUsuarioMeta(user: Actor): Promise<string | null> {
 
 const CLAVE_EQUIPO_GOOGLE = "google_conexion_equipo_user";
 
-/** Quién conectó la cuenta de Google que usa todo el equipo (`null`: cada quien usa la suya). */
+/**
+ * Quién conectó la cuenta de Google que usa todo el equipo.
+ *
+ * Nadie más tiene que conectar nada: si un administrador conectó Google pero no marcó «para todo el equipo», su conexión pasa a ser la del
+ * equipo sola (solo un administrador puede conectar, así que cualquier conexión vigente es de administración). Se guarda para que no cambie
+ * de dueño sola si después otro administrador conecta la suya. `null`: nadie ha conectado Google.
+ */
 export async function usuarioDeConexionEquipo(): Promise<string | null> {
   try {
-    const fila = await getRawDb()
-      .prepare("SELECT value FROM app_meta WHERE key = ? LIMIT 1")
-      .bind(CLAVE_EQUIPO_GOOGLE)
-      .first<{ value: string }>();
-    return fila?.value || null;
+    const db = getRawDb();
+    const fila = await db.prepare("SELECT value FROM app_meta WHERE key = ? LIMIT 1").bind(CLAVE_EQUIPO_GOOGLE).first<{ value: string }>();
+    if (fila?.value) return fila.value;
+    const conectada = await db
+      .prepare("SELECT user_id FROM integration_connections WHERE provider = 'google' AND status = 'connected' ORDER BY updated_at DESC LIMIT 1")
+      .first<{ user_id: string }>();
+    if (!conectada?.user_id) return null;
+    await db
+      .prepare(
+        `INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO NOTHING`,
+      )
+      .bind(CLAVE_EQUIPO_GOOGLE, conectada.user_id, Date.now())
+      .run()
+      .catch(() => undefined);
+    return conectada.user_id;
   } catch {
     return null;
   }
+}
+
+/** Lo que hace falta saber de Google para avisar al equipo: si el servidor lo permite y si hay una conexión vigente. */
+export async function estadoDeGoogleDelEquipo(): Promise<{ habilitada: boolean; falta: string[]; conectada: boolean }> {
+  const falta = missingProviderConfig("google");
+  if (falta.length > 0) return { habilitada: false, falta, conectada: false };
+  const dueno = await usuarioDeConexionEquipo();
+  const conexion = dueno ? await findConnection(dueno, "google") : null;
+  return { habilitada: true, falta: [], conectada: Boolean(conexion && conexion.status === "connected") };
 }
 
 /**

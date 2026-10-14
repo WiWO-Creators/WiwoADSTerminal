@@ -123,12 +123,27 @@ export function conPresupuestos(
 export const CLIENTES_SOLO_PROYECTOS_ASIGNADOS = new Set(["valor"]);
 
 /**
+ * Proyectos que se suman a los de la ficha porque salen de una estrategia aprobada: Colombia (plan de octubre 2026) no es uno de
+ * los cuatro proyectos de Valor que ya se llevaban, pero sus campañas (`[LDS] Colombia | …`) son nuestras y no deben ocultarse.
+ */
+const PROYECTOS_DE_ESTRATEGIAS: Record<string, Segmento[]> = {
+  valor: [{ id: "colombia", nombre: "Colombia", coincide: ["colombia"], plataformas: [], cuentas: [], paises: ["CO"], presupuesto: null }],
+};
+
+/** Los segmentos de la ficha más los proyectos de las estrategias aprobadas (sin repetir los que ya estén). */
+export function conProyectosDeEstrategias(portfolioId: string | null | undefined, segmentos: Segmento[]): Segmento[] {
+  const extra = (portfolioId ? PROYECTOS_DE_ESTRATEGIAS[portfolioId] : undefined) ?? [];
+  const ids = new Set(segmentos.map((s) => s.id));
+  return [...segmentos, ...extra.filter((e) => !ids.has(e.id))];
+}
+
+/**
  * ¿Esto (una campaña, un conjunto, un anuncio) es de un proyecto que llevamos? Siempre sí para un cliente sin esta regla o sin
  * segmentos definidos. Con la regla, tiene que nombrar a alguno de sus segmentos.
  */
 export function enProyectosAsignados(portfolioId: string | null | undefined, segmentos: Segmento[], textos: Array<string | null | undefined>): boolean {
   if (!portfolioId || !CLIENTES_SOLO_PROYECTOS_ASIGNADOS.has(portfolioId) || segmentos.length === 0) return true;
-  return segmentos.some((s) => coincideConSegmento(textos, s));
+  return conProyectosDeEstrategias(portfolioId, segmentos).some((s) => coincideConSegmento(textos, s));
 }
 
 /** Nombres de los proyectos asignados, para decirlo en pantalla («Ébano, Corotú, Marea y Bijao»). */

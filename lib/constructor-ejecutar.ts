@@ -7,6 +7,8 @@ import {
 } from "@/lib/constructor";
 import { executeWindsorAction, idDeResultado, type WindsorProvider } from "@/lib/windsor";
 import { retirarPiezasMeta } from "@/lib/renovar-piezas";
+import { crearAnuncioConFormulario, crearConjuntoDeFormulario } from "@/lib/meta-lead-ads";
+import { ErrorDeMeta } from "@/lib/meta-nativo";
 import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
 import { diferenciasConLoEsperado, planDeCampana, planDeGrupo, rutaDeEntidad, type DatosDeCampana } from "@/lib/linkedin-escritura-pura";
 import { enviarPlanALinkedin, leerDeLinkedin } from "@/lib/linkedin-nativo";
@@ -54,6 +56,8 @@ const PADRE_REQUERIDO: Record<string, { campo: string; de: ClaveId }> = {
   update_campaign: { campo: "campaign_id", de: "campaign" },
   create_ad: { campo: "adset_id", de: "adset" },
   boost_post: { campo: "adset_id", de: "adset" },
+  "meta:crear_conjunto_formulario": { campo: "campaign_id", de: "campaign" },
+  "meta:crear_anuncio_formulario": { campo: "adset_id", de: "adset" },
   // LinkedIn: la campaña va DENTRO del grupo que se acaba de crear.
   "linkedin:create_campaign": { campo: "grupoId", de: "linkedinGroup" },
 };
@@ -69,6 +73,7 @@ const CLAVES_DE_ID: Record<string, { guarda: ClaveId; claves: string[] }> = {
     claves: ["ad_group_id", "adGroupId", "id"],
   },
   create_adset: { guarda: "adset", claves: ["adset_id", "adsetId", "id"] },
+  "meta:crear_conjunto_formulario": { guarda: "adset", claves: ["id", "adset_id"] },
   create_ad_video: { guarda: "video", claves: ["video_id", "videoId", "id"] },
 };
 
@@ -265,7 +270,41 @@ async function ejecutarPasoLinkedin(
 }
 
 /** Retira (pausa) un anuncio viejo de Meta con la conexión directa y lo lee de vuelta: solo es ok si Meta lo dejó pausado. */
-async function ejecutarPasoMeta(accion: string, params: Record<string, unknown>): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+async function ejecutarPasoMeta(accion: string, accountId: string, params: Record<string, unknown>): Promise<{ ok: boolean; error: string | null; raw: unknown }> {
+  if (accion === "meta:crear_conjunto_formulario" || accion === "meta:crear_anuncio_formulario") {
+    try {
+      if (accion === "meta:crear_conjunto_formulario") {
+        const r = await crearConjuntoDeFormulario(accountId, {
+          campaignId: String(params.campaign_id ?? ""),
+          nombre: String(params.nombre ?? ""),
+          pageId: String(params.page_id ?? ""),
+          presupuesto: (params.presupuesto as { tipo: "total" | "diario"; menor: number } | null) ?? null,
+          inicio: (params.inicio as string | null) ?? null,
+          fin: (params.fin as string | null) ?? null,
+          targeting: (params.targeting as Record<string, unknown>) ?? {},
+          estado: params.estado === "PAUSED" ? "PAUSED" : "ACTIVE",
+        });
+        return { ok: Boolean(r.id), error: r.id ? null : "Meta no devolvió el conjunto.", raw: { id: r.id } };
+      }
+      const r = await crearAnuncioConFormulario(accountId, {
+        conjuntoId: String(params.adset_id ?? ""),
+        nombre: String(params.nombre ?? ""),
+        pageId: String(params.page_id ?? ""),
+        formularioId: String(params.formulario_id ?? ""),
+        enlace: String(params.enlace ?? ""),
+        mensaje: String(params.mensaje ?? ""),
+        titulo: (params.titulo as string | undefined) || undefined,
+        descripcion: (params.descripcion as string | undefined) || undefined,
+        boton: (params.boton as string | undefined) || undefined,
+        imagenUrl: (params.imagen_url as string | undefined) || undefined,
+        videoId: params.video_id ? String(params.video_id) : undefined,
+        estado: params.estado === "PAUSED" ? "PAUSED" : "ACTIVE",
+      });
+      return { ok: Boolean(r.anuncioId), error: r.anuncioId ? null : "Meta no devolvió el anuncio.", raw: { id: r.anuncioId, creativeId: r.creativeId } };
+    } catch (e) {
+      return { ok: false, error: e instanceof ErrorDeMeta ? e.message : "No se pudo crear en Meta.", raw: null };
+    }
+  }
   if (accion !== "meta:retirar_anuncio") return { ok: false, error: `Acción de Meta desconocida: ${accion}`, raw: null };
   const [r] = await retirarPiezasMeta([{ id: String(params.ad_id ?? ""), nombre: String(params.nombre ?? params.ad_id ?? "") }]);
   return { ok: r?.ok === true, error: r?.error ?? null, raw: r ?? null };
@@ -345,7 +384,7 @@ export async function ejecutarPasosDelPlan(
       step.via === "nativa" && step.platform === "linkedin"
         ? await ejecutarPasoLinkedin(step.action, cuenta.externalId, params, credencialesLinkedin)
         : step.via === "nativa" && step.platform === "meta"
-          ? await ejecutarPasoMeta(step.action, params)
+          ? await ejecutarPasoMeta(step.action, cuenta.externalId, params)
           : step.via === "nativa"
           ? await ejecutarPasoNativo(step.action, cuenta.externalId, params, credencialesGoogle)
           : await executeWindsorAction(step.platform as WindsorProvider, cuenta.externalId, step.action, params);

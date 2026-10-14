@@ -739,8 +739,8 @@ export function EditarEntidad(props: Props) {
             <div className="space-y-2">
               {props.conjunto?.palabrasClave === null || props.conjunto?.palabrasClave === undefined ? (
                 <p className="rounded-lg border border-warn/25 bg-warn/8 p-2 text-xs text-foreground/70">
-                  No se pudieron leer las palabras clave: Windsor no las entrega. Conecta tu cuenta de
-                  Google en Integraciones para verlas y editarlas.
+                  No se pudieron leer las palabras clave: Windsor no las entrega. Hace falta la conexión del
+                  equipo con Google (un administrador la conecta una sola vez) para verlas y editarlas.
                 </p>
               ) : (
                 <>

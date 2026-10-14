@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Pasos de la primera puesta en marcha (2026-10-05). El procedimiento vigente está en `../OPERACION.md`; los pasos del token de Meta y del cron ya se hicieron. No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Paso a paso: lo que depende de ti
 
 ## 1. Token de Meta con un usuario del sistema (una cuenta de empresa, no personal)

@@ -473,7 +473,7 @@ test("una palabra clave que ya no existe se rechaza en vez de mandar un id ajeno
 test("sin poder leer las palabras clave no se edita a ciegas y se dice cómo arreglarlo", () => {
   const p = planKw({ agregar: ["luz"] }, { ...GRUPO_GOOGLE, palabrasClave: null });
   assert.equal(p.pasos.length, 0);
-  assert.match(bloqueantes(p)[0].mensaje, /Conecta tu cuenta de Google/);
+  assert.match(bloqueantes(p)[0].mensaje, /conexión del equipo con Google/);
 });
 
 test("dejar el grupo sin palabras clave activas avisa, sin bloquear", () => {

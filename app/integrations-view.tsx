@@ -1,5 +1,6 @@
 "use client";
 
+import type { EstadoDeConexion, ResumenDeConexiones } from "@/lib/conexiones-equipo-pura";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
@@ -63,6 +64,7 @@ type WindsorStatus = {
 };
 
 type IntegrationsResponse = {
+  equipo?: ResumenDeConexiones;
   integrations?: IntegrationSummary[];
   canManage?: boolean;
   windsor?: WindsorStatus;
@@ -102,6 +104,7 @@ export function IntegrationsView({
   const [integrations, setIntegrations] = useState<IntegrationSummary[]>([]);
   const [canManage, setCanManage] = useState(false);
   const [windsor, setWindsor] = useState<WindsorStatus | null>(null);
+  const [equipo, setEquipo] = useState<ResumenDeConexiones | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -145,6 +148,7 @@ export function IntegrationsView({
         setIntegrations(body.integrations);
         setCanManage(Boolean(body.canManage));
         setWindsor(body.windsor ?? null);
+        setEquipo(body.equipo ?? null);
 
         const params = new URLSearchParams(window.location.search);
         const connected = params.get("connected") as IntegrationProvider | null;
@@ -448,6 +452,7 @@ export function IntegrationsView({
                   windsor?.accounts?.[integration.provider] ?? []
                 }
                 canManage={canManage}
+                estadoEquipo={equipo?.conexiones.find((c) => c.proveedor === integration.provider) ?? null}
                 busy={busy?.provider === integration.provider ? busy.action : null}
                 onManage={() => openAccountManager(integration)}
                 onSync={() => void sync(integration.provider)}
@@ -897,6 +902,7 @@ function ProviderCard({
   integration,
   windsorAccounts,
   canManage,
+  estadoEquipo,
   busy,
   onManage,
   onSync,
@@ -906,6 +912,8 @@ function ProviderCard({
   integration: IntegrationSummary;
   windsorAccounts: WindsorAccount[];
   canManage: boolean;
+  /** La conexión DEL EQUIPO de este proveedor: la que usa todo el mundo sin conectar nada. */
+  estadoEquipo: EstadoDeConexion | null;
   busy: BusyKind | null;
   onManage: () => void;
   onSync: () => void;
@@ -933,6 +941,8 @@ function ProviderCard({
   // como una falla aunque el dato estuviera llegando sin problema. Solo dice
   // eso cuando de verdad no hay ni OAuth ni Windsor leyendo nada.
   const windsorActivo = windsorAccounts.length > 0;
+  // La conexión del equipo (de un administrador, o el usuario del sistema de Meta) ya sirve a todos: nadie tiene que conectar la suya.
+  const equipoActivo = estadoEquipo?.activa === true;
   const status = attention
     ? { label: "Atención requerida", className: "border-danger-deep/25 bg-danger-deep/10 text-danger" }
     : needsSelection
@@ -945,6 +955,8 @@ function ProviderCard({
         ? { label: "Datos actualizados", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : connected
           ? { label: "OAuth conectado", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
+        : equipoActivo
+          ? { label: integration.provider === "meta" ? "Edición directa activa" : "Conectado para el equipo", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
         : windsorActivo
           ? { label: "Lectura por Windsor", className: "border-ok-deep/25 bg-ok-deep/10 text-ok" }
           : { label: "Sin conexión", className: "border-foreground/10 bg-card/60 text-foreground/48" };
@@ -975,7 +987,7 @@ function ProviderCard({
         <Badge variant="outline" className={status.className}>
           {attention || needsSelection || metricsIssue || metricsStale ? (
             <AlertCircle />
-          ) : connected || windsorActivo ? (
+          ) : connected || windsorActivo || equipoActivo ? (
             <CheckCircle2 />
           ) : (
             <Link2 />
@@ -1014,6 +1026,18 @@ function ProviderCard({
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-foreground/14 bg-card/35 p-4">
+            {equipoActivo && (
+              <p className="mb-3 rounded-xl bg-ok-deep/10 px-3 py-2 text-xs leading-5 text-foreground/75">
+                {integration.provider === "meta"
+                  ? "Meta se crea y edita directo con el usuario del sistema «WiwoAds» del servidor: no hace falta que nadie conecte nada."
+                  : "Ya hay una conexión del equipo con esta plataforma: todos trabajan con ella según su rol, sin conectar nada."}
+              </p>
+            )}
+            {estadoEquipo && !estadoEquipo.activa && (
+              <p className="mb-3 rounded-xl bg-warn/10 px-3 py-2 text-xs leading-5 text-foreground/75">
+                {estadoEquipo.mensaje} {estadoEquipo.accion}
+              </p>
+            )}
             {windsorAccounts.length > 0 ? (
               <>
                 <div className="flex items-center justify-between gap-2">
@@ -1068,7 +1092,7 @@ function ProviderCard({
         ) : null}
 
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-5">
-          {!authorized ? (
+          {!authorized && equipoActivo ? null : !authorized ? (
             integration.configured && canManage ? (
               <Button asChild className="font-bold">
                 <a

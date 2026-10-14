@@ -1,6 +1,6 @@
 "use client";
 
-import { enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
+import { conProyectosDeEstrategias, enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
 import { summarizeObjectives } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
 import { DistribucionDelGasto } from "./distribucion-gasto";
@@ -74,7 +74,7 @@ export function InversionView({
       <PresupuestoDelMes key={`presupuesto-${cliente.id}`} portfolioId={cliente.id} />
       {ocultas > 0 && (
         <p className="rounded-xl border border-foreground/10 bg-foreground/4 px-4 py-2.5 text-xs leading-5 text-foreground/65">
-          Esta distribución cuenta solo los proyectos que llevamos ({nombresDeProyectos(cliente.segmentos ?? [])}); {ocultas} {ocultas === 1 ? "campaña de otro proyecto de la cuenta no se incluye" : "campañas de otros proyectos de la cuenta no se incluyen"}.
+          Esta distribución cuenta solo los proyectos que llevamos ({nombresDeProyectos(conProyectosDeEstrategias(cliente.id, cliente.segmentos ?? []))}); {ocultas} {ocultas === 1 ? "campaña de otro proyecto de la cuenta no se incluye" : "campañas de otros proyectos de la cuenta no se incluyen"}.
         </p>
       )}
       <DistribucionDelGasto campanas={campanas} objetivos={objetivos} periodo={periodo} />
