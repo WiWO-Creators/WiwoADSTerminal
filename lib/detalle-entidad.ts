@@ -275,6 +275,8 @@ export type DetalleConjunto = {
   estado: string | null;
   /** Google: tipo de grupo (`SEARCH_STANDARD`, `VIDEO_RESPONSIVE`…). */
   tipo: string | null;
+  /** Meta: la ventana de atribución actual en los términos del editor (se lee directo de Meta al abrir el editor). */
+  atribucion?: string | null;
   presupuesto: Presupuesto;
   puja: {
     estrategia: string | null;
@@ -342,6 +344,11 @@ export type ContenidoAnuncio = {
   vistaPreviaUrl: string | null;
   /** Google (Display, Video, Demand Gen): lo visual del anuncio, para dibujar sus vistas previas. */
   visual?: VisualGoogle | null;
+  /** Meta: la línea bajo el título y el dominio de conversión actuales (se leen directo de Meta al abrir el editor). */
+  descripcion?: string | null;
+  dominioConversion?: string | null;
+  /** Meta: proporción (ancho / alto) de la pieza real, para dimensionar su vista previa. */
+  aspecto?: number | null;
 };
 
 /** Forma de una imagen de Google: decide en qué vistas previas cabe. */

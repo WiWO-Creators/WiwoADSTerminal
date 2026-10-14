@@ -171,6 +171,13 @@ export function BotonDeSugerencias({
     };
   }, [clienteId, leer]);
 
+  // El Orb cierra solo las decisiones que, revisadas con datos reales, no necesitan ningún cambio: la cola se actualiza al terminar.
+  useEffect(() => {
+    const alActualizar = () => void leer().catch(() => undefined);
+    window.addEventListener("wiwo:decisiones-actualizar", alActualizar);
+    return () => window.removeEventListener("wiwo:decisiones-actualizar", alActualizar);
+  }, [leer]);
+
   // La lista se vuelve a leer cada minuto y al volver a la pestaña: lo que ya se resolvió (por ejemplo, contenido que se acaba de subir) sale solo.
   useEffect(() => {
     const refrescar = () => {
@@ -222,6 +229,11 @@ export function BotonDeSugerencias({
         idempotencyKey: idempotencia(),
         reason,
       });
+      // Una decisión que ya no está (el Orb la cerró, o se reevaluó al aplicar el cambio) no es un error: ya quedó resuelta.
+      if (!r.ok && /no encontrada/i.test(String(r.cuerpo.error ?? ""))) {
+        void leer().catch(() => undefined);
+        return true;
+      }
       if (!r.ok) throw new Error(String(r.cuerpo.error ?? "No se pudo completar"));
       setResueltas((n) => n + 1);
       return true;
@@ -236,7 +248,19 @@ export function BotonDeSugerencias({
 
   async function abrirEnEditor(s: SugerenciaVista, conCambio: boolean) {
     if (!s.provider || !s.accountId || !s.entityId) return;
-    // El árbol del editor necesita los anuncios del cliente: se piden solo ahora.
+    // El editor se abre al instante: antes esperaba a que cargara todo el tablero y el botón parecía no hacer nada.
+    setEditor({
+      provider: s.provider,
+      accountId: s.accountId,
+      nivel: "campana",
+      id: s.entityId,
+      nombre: s.entityName ?? s.title,
+      currency: null,
+      abrirEnEdicion: true,
+      rango,
+      sugerido: conCambio && s.accion?.tipo === "presupuesto" ? { presupuestoMonto: String(s.accion.monto) } : undefined,
+    });
+    // El árbol del editor necesita los anuncios del cliente: se piden en segundo plano y aparecen al llegar.
     if (s.clienteId) {
       try {
         const r = await fetch(
@@ -249,17 +273,6 @@ export function BotonDeSugerencias({
         // Sin el árbol, el editor abre igual la campaña pedida.
       }
     }
-    setEditor({
-      provider: s.provider,
-      accountId: s.accountId,
-      nivel: "campana",
-      id: s.entityId,
-      nombre: s.entityName ?? s.title,
-      currency: null,
-      abrirEnEdicion: true,
-      rango,
-      sugerido: conCambio && s.accion?.tipo === "presupuesto" ? { presupuestoMonto: String(s.accion.monto) } : undefined,
-    });
   }
 
   /**
@@ -340,7 +353,7 @@ export function BotonDeSugerencias({
   /** Le pide al Orb que resuelva esta decisión: él propone y una persona aprueba; la decisión se cierra cuando el cambio se aplica. */
   function resolverConOrb(s: SugerenciaVista) {
     const texto = [
-      `Resuelve esta decisión de ${s.clienteNombre} en ${s.platform}${s.cuentaNombre ? ` (cuenta ${s.cuentaNombre})` : ""}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
+      `Resuelve esta decisión (id: ${s.id}) de ${s.clienteNombre} en ${s.platform}${s.cuentaNombre ? ` (cuenta ${s.cuentaNombre})` : ""}${s.entityName ? ` sobre «${s.entityName}»` : ""}.`,
       `Diagnóstico: ${s.diagnosis}`,
       `Sugerencia: ${s.proposedAction}`,
       "Responde en máximo 3 líneas: qué pasa de verdad y UNA acción concreta como pregunta corta. Deja la propuesta lista; si digo «sí», se aplica. Si no hace falta ningún cambio, dímelo en una línea.",
@@ -730,6 +743,19 @@ export function BotonDeSugerencias({
                       className="rounded-full border border-brand/40 px-4 py-2 text-xs font-bold text-brand hover:bg-brand/10"
                     >
                       Renovar: reemplazar anuncios viejos
+                    </button>
+                  )}
+                  {/* Las decisiones de ficha o de medición se resuelven cargando un dato, no conversando: el botón lleva directo ahí. */}
+                  {(actual.rule.startsWith("ficha_") || actual.rule.startsWith("medicion_")) && actual.clienteId && (
+                    <button
+                      type="button"
+                      onPointerDown={(ev) => ev.stopPropagation()}
+                      onClick={() =>
+                        window.dispatchEvent(new CustomEvent("wiwo:abrir-vista", { detail: { view: actual.rule.startsWith("ficha_") ? "clients" : "medicion", clienteId: actual.clienteId } }))
+                      }
+                      className="rounded-full bg-brand px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
+                    >
+                      {actual.rule.startsWith("ficha_") ? "Ir a la ficha del cliente" : "Ir a Salud de medición"}
                     </button>
                   )}
                   {(

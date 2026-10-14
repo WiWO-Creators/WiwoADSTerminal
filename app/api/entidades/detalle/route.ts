@@ -7,6 +7,8 @@ import {
 } from "@/lib/detalle-entidad-store";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { accesoNativoLinkedin } from "@/lib/linkedin-conexion";
+import { graphJson, metaNativoConfigurado } from "@/lib/meta-nativo";
+import { aspectoDe, descripcionDeCreativo, medidaDeVideo, piezaDeCreativo, ventanaDeAtribucion } from "@/lib/meta-precarga-pura";
 import { can, enAlcance } from "@/lib/permisos";
 import { puedeAdministrar } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
@@ -58,6 +60,9 @@ export async function GET(request: Request) {
     const detalle = await lectura.datos;
     const entidad = entidadConAncestros(detalle, nivel as (typeof NIVELES)[number], id);
     const encontrada = entidad[nivel as (typeof NIVELES)[number]] !== null;
+    // Meta: lo que Windsor no entrega (descripción, dominio de conversión, ventana de atribución) se lee directo, para que el editor
+    // abra cada campo como está configurado en la plataforma y no vacío. Si falla, el editor abre igual con lo que ya hay.
+    if (provider === "meta" && encontrada && metaNativoConfigurado()) await precargarDeMeta(nivel, entidad).catch(() => undefined);
     return Response.json(
       {
         encontrada,
@@ -80,5 +85,39 @@ export async function GET(request: Request) {
     }
     console.error("WiWO.ADS detalle de entidad", error);
     return fail("No se pudo leer la configuración de la entidad", 500);
+  }
+}
+
+type Entidad = Awaited<ReturnType<typeof entidadConAncestros>>;
+
+async function precargarDeMeta(nivel: string, entidad: Entidad): Promise<void> {
+  if (nivel === "anuncio" && entidad.anuncio) {
+    const j = await graphJson<{ conversion_domain?: string; creative?: unknown }>(entidad.anuncio.id, "GET", {
+      fields: "conversion_domain,creative{object_story_spec,asset_feed_spec}",
+    });
+    // La proporción real de la pieza (video o imagen): la miniatura que entrega Windsor es un recorte y no sirve para esto.
+    let aspecto: number | null = null;
+    try {
+      const pieza = piezaDeCreativo(j.creative);
+      if (pieza.videoId) {
+        const v = await graphJson<{ format?: unknown }>(pieza.videoId, "GET", { fields: "format{width,height}" });
+        const m = medidaDeVideo(v.format);
+        aspecto = m ? aspectoDe(m.ancho, m.alto) : null;
+      } else if (pieza.imageHash) {
+        const im = await graphJson<{ data?: Array<{ width?: number; height?: number }> }>(`act_${entidad.anuncio.accountId.replace(/^act_/, "")}/adimages`, "GET", { hashes: [pieza.imageHash], fields: "width,height" });
+        aspecto = aspectoDe(im.data?.[0]?.width, im.data?.[0]?.height);
+      }
+    } catch {
+      aspecto = null;
+    }
+    entidad.anuncio.contenido = {
+      ...entidad.anuncio.contenido,
+      descripcion: descripcionDeCreativo(j.creative),
+      dominioConversion: typeof j.conversion_domain === "string" && j.conversion_domain ? j.conversion_domain : null,
+      aspecto,
+    };
+  } else if (nivel === "conjunto" && entidad.conjunto) {
+    const j = await graphJson<{ attribution_spec?: unknown }>(entidad.conjunto.id, "GET", { fields: "attribution_spec" });
+    entidad.conjunto = { ...entidad.conjunto, atribucion: ventanaDeAtribucion(j.attribution_spec) };
   }
 }

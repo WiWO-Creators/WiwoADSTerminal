@@ -24,6 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { etiquetaCta } from "@/lib/cta";
 import { enlaceDeCampana } from "@/lib/enlaces";
 import type {
   DetalleAnuncio,
@@ -37,6 +38,7 @@ import type { AdSummary } from "@/lib/performance-store";
 import { nombreDeNivel, platformLabel, type NivelEntidad, type Platform } from "@/lib/plataformas";
 import { cn } from "@/lib/utils";
 import { dominioDe, piezaDeAnuncioGoogle, piezaDeGrupoDeRecursos } from "@/lib/vista-previa-google-pura";
+import { medidasDeVista, type FormatoDeVista } from "@/lib/vista-previa-meta-pura";
 import { DesgloseEntidad } from "./desglose-entidad";
 import { EditarEntidad, type AccionesEditor } from "./editar-entidad";
 import { GestionarCampanaDialog } from "./gestionar-campana";
@@ -432,6 +434,8 @@ export function DetalleEntidadSheet({
   // "Sucio" queda ligado a la entidad y versión donde se editó: al cambiar de una
   // a otra (o tras aplicar) deja de contar sin tener que reiniciarlo a mano.
   const [sucio, setSucio] = useState<{ clave: string; valor: boolean } | null>(null);
+  /** Lo que se está escribiendo en el formulario del anuncio, para la vista previa «con tus cambios». */
+  const [enEdicion, setEnEdicion] = useState<{ clave: string; valores: Record<string, string> } | null>(null);
   // Lo que se quería hacer cuando había cambios sin aplicar.
   const [pendiente, setPendiente] = useState<{ tipo: "cerrar" } | { tipo: "ir"; a: EntidadParaDetalle } | null>(null);
   const acciones = useRef<AccionesEditor | null>(null);
@@ -808,7 +812,7 @@ export function DetalleEntidadSheet({
                       valoresIniciales={conSugerido ? actual.sugerido : undefined}
                       puedeAprobarPresupuesto={datos.verEnPlataforma === true}
                       crearVersion={
-                        puedeAprobar && onCrearVersion && actual.nivel === "anuncio" && actual.provider === "meta" && datos.anuncio && datos.conjunto && datos.campana && !datos.anuncio.edicionDeContenido.editable
+                        puedeAprobar && onCrearVersion && actual.nivel === "anuncio" && actual.provider === "meta" && datos.anuncio && datos.conjunto && datos.campana
                           ? (imagenUrl) => {
                               const a = datos.anuncio!;
                               onCrearVersion({
@@ -828,6 +832,7 @@ export function DetalleEntidadSheet({
                           : undefined
                       }
                       onSucio={(valor) => clave && setSucio({ clave, valor })}
+                      onValores={(valores) => clave && setEnEdicion({ clave, valores })}
                       onAplicado={() => {
                         setVersion((v) => v + 1);
                         onAplicado?.();
@@ -909,7 +914,7 @@ export function DetalleEntidadSheet({
             {/* Vista previa: así está hoy en la plataforma. */}
             <aside className="space-y-3 lg:sticky lg:top-0 lg:self-start">
               {datos?.encontrada && actual.nivel === "anuncio" && anuncioActual && (
-                <VistaPrevia d={anuncioActual} />
+                <VistaPrevia d={anuncioActual} enEdicion={enEdicion && enEdicion.clave === clave ? enEdicion.valores : null} />
               )}
               {datos?.encontrada && actual.nivel === "campana" && actual.provider === "google" && (datos.campana?.gruposDeRecursos?.length ?? 0) > 0 && (
                 <VistaDeGrupoDeRecursos campana={datos.campana!} grupoId={actual.grupoDeRecursosId} />
@@ -984,16 +989,6 @@ function Bloque({ titulo, subtitulo, children }: { titulo: string; subtitulo?: s
   );
 }
 
-/**
- * Lo mínimo de cada formato. El feed de Facebook crece con el contenido (un carrusel, un texto largo); el de Instagram lo recorta Meta
- * mismo a unos 565 px (verificado con un Reel): más altura solo deja espacio en blanco, así que ahí no se agranda.
- */
-const ALTO_MINIMO_POR_FORMATO: Record<string, number> = {
-  MOBILE_FEED_STANDARD: 600,
-  INSTAGRAM_STANDARD: 570,
-  INSTAGRAM_STORY: 640,
-  INSTAGRAM_REELS: 640,
-};
 const PASO_DE_ALTURA = 260;
 const ALTURA_MAXIMA_EXTRA = 780;
 
@@ -1005,10 +1000,10 @@ const FORMATOS_VISTA: Array<[string, string]> = [
 ];
 
 /** La vista previa real de Meta (la misma de Ads Manager), por formato. Si Meta no la entrega, queda la aproximación de abajo. */
-function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string; anuncioId: string; alFallar: () => void }) {
+function VistaRealDeMeta({ accountId, anuncioId, aspecto, conBoton, alFallar }: { accountId: string; anuncioId: string; aspecto: number | null; conBoton: boolean; alFallar: () => void }) {
   const [formato, setFormato] = useState("MOBILE_FEED_STANDARD");
   const [url, setUrl] = useState<string | null | undefined>(undefined);
-  const [medidas, setMedidas] = useState<{ ancho: number; alto: number }>({ ancho: 340, alto: 560 });
+  const medidas = medidasDeVista(formato as FormatoDeVista, aspecto, conBoton);
   const [disponible, setDisponible] = useState(0);
   /** Meta declara una altura que a veces no alcanza (un Reel, un carrusel): cada clic en «Ver más» suma altura. */
   const [extra, setExtra] = useState(0);
@@ -1028,10 +1023,8 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
     setExtra(0);
     fetch(`/api/entidades/vista-previa?accountId=${encodeURIComponent(accountId)}&id=${encodeURIComponent(anuncioId)}&formato=${formato}`)
       .then((r) => r.json().catch(() => null))
-      .then((j: { url?: string | null; ancho?: number | null; alto?: number | null } | null) => {
+      .then((j: { url?: string | null } | null) => {
         if (!vivo) return;
-        // Meta declara 450 de alto para el feed aunque un carrusel o un video con texto largo necesita más: se deja holgura para que no se corte.
-        if (j?.ancho && j?.alto) setMedidas({ ancho: j.ancho, alto: Math.max(j.alto, ALTO_MINIMO_POR_FORMATO[formato] ?? 640) });
         setUrl(j?.url ?? null);
         if (!j?.url) alFallar();
       })
@@ -1064,14 +1057,15 @@ function VistaRealDeMeta({ accountId, anuncioId, alFallar }: { accountId: string
           <div className="flex h-72 items-center justify-center text-xs text-foreground/45">Cargando la vista previa de Meta…</div>
         ) : url ? (
           (() => {
-            const escala = disponible > 0 ? Math.min(1, disponible / medidas.ancho) : 1;
+            const visible = medidas.ancho - medidas.recorteDerecho;
+            const escala = disponible > 0 ? Math.min(1, disponible / visible) : 1;
             const alto = medidas.alto + extra;
             return (
               <>
               {/* El marco recorta con esquinas redondeadas: la vista previa de Meta se ve limpia, sin barras ni bordes cuadrados. */}
               <div
                 className="mx-auto overflow-hidden rounded-3xl bg-white shadow-sm"
-                style={{ width: medidas.ancho * escala, height: alto * escala }}
+                style={{ width: visible * escala, height: alto * escala }}
               >
                 <iframe
                   key={url}
@@ -1130,10 +1124,65 @@ function VistaDeGrupoDeRecursos({ campana, grupoId }: { campana: DetalleCampana;
   );
 }
 
-function VistaPrevia({ d }: { d: DetalleAnuncio }) {
+/** Lo que cambió en el formulario del anuncio de Meta y se vería distinto en la vista previa (nada si no se tocó el contenido). */
+function cambiosDeContenido(c: DetalleAnuncio["contenido"], v: Record<string, string> | null) {
+  if (!v) return null;
+  const distinto = (nuevo: string | undefined, actual: string | null | undefined) => (nuevo ?? "") !== (actual ?? "");
+  const texto = distinto(v.textoPrincipal, c.textoPrincipal);
+  const titulo = distinto(v.titulo, c.titulo);
+  const descripcion = distinto(v.descripcion, c.descripcion);
+  const cta = distinto(v.cta, c.cta);
+  const destino = distinto(v.urlDestino, c.urlDestino);
+  const imagen = (v.imagenUrl ?? "").trim();
+  if (!(texto || titulo || descripcion || cta || destino || imagen)) return null;
+  return {
+    textoPrincipal: v.textoPrincipal ?? c.textoPrincipal ?? "",
+    titulo: v.titulo ?? c.titulo ?? "",
+    descripcion: v.descripcion ?? c.descripcion ?? "",
+    cta: v.cta || c.cta || null,
+    urlDestino: v.urlDestino ?? c.urlDestino ?? null,
+    imagen: imagen || null,
+  };
+}
+
+/** Maqueta del feed con lo que se escribió en el formulario: aproximada; la real de Meta se actualiza al aplicar el cambio. */
+function MaquetaConCambios({ c, nuevo }: { c: DetalleAnuncio["contenido"]; nuevo: NonNullable<ReturnType<typeof cambiosDeContenido>> }) {
+  const imagen = nuevo.imagen ?? c.imagenUrl ?? c.miniaturaUrl;
+  const esVideoNuevo = Boolean(nuevo.imagen && /\.(mp4|mov)(\?|$)/i.test(nuevo.imagen));
+  return (
+    <div className="mx-auto w-full max-w-[340px] overflow-hidden rounded-2xl bg-white text-[13px] leading-snug text-neutral-900 shadow-sm">
+      <div className="space-y-2 p-3">
+        <p className="text-xs font-semibold text-neutral-500">Anuncio · con tus cambios</p>
+        {nuevo.textoPrincipal && <p className="line-clamp-5 whitespace-pre-wrap">{nuevo.textoPrincipal}</p>}
+      </div>
+      {esVideoNuevo ? (
+        <video src={nuevo.imagen ?? undefined} muted playsInline controls className="max-h-[420px] w-full bg-black object-contain" />
+      ) : imagen ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={imagen} alt="Pieza con tus cambios" className="max-h-[420px] w-full object-cover" />
+      ) : (
+        <div className="flex h-40 items-center justify-center bg-neutral-100 text-neutral-300">
+          <ImageOff className="size-6" />
+        </div>
+      )}
+      <div className="flex items-center justify-between gap-2 bg-neutral-100 px-3 py-2.5">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] uppercase text-neutral-500">{dominioDe(nuevo.urlDestino) || "sitio web"}</p>
+          <p className="truncate font-semibold">{nuevo.titulo || " "}</p>
+          {nuevo.descripcion && <p className="truncate text-xs text-neutral-500">{nuevo.descripcion}</p>}
+        </div>
+        {nuevo.cta && nuevo.cta !== "NO_BUTTON" && <span className="shrink-0 rounded-md bg-neutral-300 px-2.5 py-1.5 text-xs font-semibold">{etiquetaCta(nuevo.cta)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function VistaPrevia({ d, enEdicion }: { d: DetalleAnuncio; enEdicion: Record<string, string> | null }) {
   const [sinReal, setSinReal] = useState(false);
+  const [verCambios, setVerCambios] = useState(true);
   const c = d.contenido;
   const imagen = c.imagenUrl ?? c.miniaturaUrl;
+  const nuevo = d.provider === "meta" ? cambiosDeContenido(c, enEdicion) : null;
   if (d.provider === "google") {
     return <VistaPreviaGoogle key={d.id} pieza={piezaDeAnuncioGoogle(d, negocioDeDominio(c.urlDestino))} />;
   }
@@ -1142,8 +1191,27 @@ function VistaPrevia({ d }: { d: DetalleAnuncio }) {
       <p className="border-b border-foreground/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-foreground/45">
         Vista previa · así se ve en {platformLabel(d.provider)}
       </p>
-      {d.provider === "meta" && !sinReal ? (
-        <VistaRealDeMeta accountId={d.accountId} anuncioId={d.id} alFallar={() => setSinReal(true)} />
+      {nuevo && (
+        <div className="flex gap-1 px-3 pt-3 text-[0.7rem]">
+          {([[true, "Con tus cambios"], [false, "Actual en Meta"]] as const).map(([valor, etiqueta]) => (
+            <button
+              key={etiqueta}
+              type="button"
+              onClick={() => setVerCambios(valor)}
+              className={cn("rounded-full px-2.5 py-1 font-semibold", verCambios === valor ? "bg-brand/15 text-brand" : "text-foreground/55 hover:bg-foreground/6")}
+            >
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+      {nuevo && verCambios ? (
+        <div className="space-y-2 p-3">
+          <MaquetaConCambios c={c} nuevo={nuevo} />
+          <p className="text-center text-[0.7rem] text-foreground/45">Aproximada: la vista real de Meta se actualiza al aplicar el cambio.</p>
+        </div>
+      ) : d.provider === "meta" && !sinReal ? (
+        <VistaRealDeMeta accountId={d.accountId} anuncioId={d.id} aspecto={c.aspecto ?? null} conBoton={Boolean(c.cta) && c.cta !== "NO_BUTTON"} alFallar={() => setSinReal(true)} />
       ) : (
         <div className="space-y-2 p-3 text-sm">
           {c.textoPrincipal && <p className="line-clamp-4 whitespace-pre-wrap">{c.textoPrincipal}</p>}

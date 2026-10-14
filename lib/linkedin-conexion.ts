@@ -13,6 +13,7 @@
  * volver a conectar al vencer, y `estadoDeLinkedin` avisa con tiempo. Nunca se devuelve ni se registra un token.
  */
 import { env } from "cloudflare:workers";
+import { origenPublico } from "@/lib/origen-publico";
 import { getRawDb } from "@/db";
 import { can, type Actor } from "@/lib/permisos";
 import {
@@ -50,10 +51,8 @@ function exigirPermiso(user: Actor) {
 }
 
 function origenDeLaApp(request: Request): string {
-  const origenDePeticion = new URL(request.url).origin;
-  const origen = (env.APP_ORIGIN ?? origenDePeticion).replace(/\/$/, "");
-  if (origenDePeticion !== origen) throw new ErrorDeLinkedin("El origen de la conexión no es válido.", 400);
-  return origen;
+  // El origen público configurado manda (detrás del proxy `request.url` puede no coincidir con el dominio real).
+  return origenPublico(new URL(request.url));
 }
 
 /** Prepara la sesión OAuth (estado de un solo uso, 10 minutos) y devuelve a dónde mandar a la persona. */
