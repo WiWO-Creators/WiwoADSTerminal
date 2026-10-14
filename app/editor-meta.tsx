@@ -392,7 +392,7 @@ export function EditorMetaConjunto({
 /* ----------------------------------- Anuncio ----------------------------------- */
 
 /** «Imagen nueva» del anuncio: pegar una URL, subir un archivo o usar una publicación ya publicada (esta última la prepara el Orb con vista previa). */
-function PiezaNueva({ accountId, conjuntoId, valores, poner, alSubir }: { accountId: string; conjuntoId: string | null; valores: Valores; poner: Poner; alSubir?: (url: string) => void }) {
+function PiezaNueva({ accountId, conjuntoId, valores, poner, alSubir, alSubirVideo }: { accountId: string; conjuntoId: string | null; valores: Valores; poner: Poner; alSubir?: (url: string) => void; alSubirVideo?: (url: string) => void }) {
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -409,8 +409,14 @@ function PiezaNueva({ accountId, conjuntoId, valores, poner, alSubir }: { accoun
 
   async function subir(archivo: File) {
     setError(null);
-    if (!archivo.type.startsWith("image/")) {
-      setError("Aquí se sube una imagen. Para un video, usa «Elegir una publicación existente» o el Constructor.");
+    const esVideo = archivo.type.startsWith("video/");
+    if (!esVideo && !archivo.type.startsWith("image/")) {
+      setError("Sube una imagen (JPG, PNG, WebP) o un video (MP4, MOV).");
+      return;
+    }
+    // Meta no cambia la imagen de un anuncio por un video: un video entra como anuncio nuevo en este mismo conjunto.
+    if (esVideo && !alSubirVideo && !alSubir) {
+      setError("Un video no reemplaza la imagen de este anuncio: usa «Crear una versión nueva con cambios» o el Constructor.");
       return;
     }
     setSubiendo(true);
@@ -425,7 +431,8 @@ function PiezaNueva({ accountId, conjuntoId, valores, poner, alSubir }: { accoun
         j = { error: r.status === 413 ? "El archivo pesa demasiado: sube uno más liviano o pega su URL." : `No se pudo subir (${r.status}).` };
       }
       if (!r.ok || !j.url) throw new Error(j.error ?? "No se pudo subir el archivo");
-      if (alSubir) alSubir(j.url);
+      if (esVideo && alSubirVideo) alSubirVideo(j.url);
+      else if (alSubir) alSubir(j.url);
       else poner("imagenUrl")(j.url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo subir el archivo");
@@ -459,7 +466,7 @@ function PiezaNueva({ accountId, conjuntoId, valores, poner, alSubir }: { accoun
           {subiendo ? "Subiendo…" : "Subir archivo"}
           <input
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime"
             className="hidden"
             disabled={subiendo}
             onChange={(e) => {
@@ -526,7 +533,7 @@ export function EditorMetaAnuncio({ anuncio, valores, poner, contenidoBloqueado,
           <Fila etiqueta="Título">
             <Input value={valores.titulo ?? ""} onChange={(e) => poner("titulo")(e.target.value)} />
           </Fila>
-          <Fila etiqueta="Descripción" ayuda="Meta no entrega la descripción actual: vacío = no cambiarla.">
+          <Fila etiqueta="Descripción" ayuda="La línea bajo el título. Vacío = el anuncio no la tiene (o no se cambia).">
             <Input value={valores.descripcion ?? ""} onChange={(e) => poner("descripcion")(e.target.value)} />
           </Fila>
           <Fila
@@ -535,6 +542,8 @@ export function EditorMetaAnuncio({ anuncio, valores, poner, contenidoBloqueado,
           >
             <NativeSelect value={valores.cta ?? ""} onChange={(e) => poner("cta")(e.target.value)}>
               <NativeSelectOption value="">Sin cambios</NativeSelectOption>
+              {/* El botón que ya tiene el anuncio, aunque Meta no deje elegirlo de nuevo (por ejemplo «Ver detalles»): se ve tal cual está. */}
+              {valores.cta && !(CTA_CODIGOS as readonly string[]).includes(valores.cta) && <NativeSelectOption value={valores.cta}>{etiquetaCta(valores.cta)} (actual)</NativeSelectOption>}
               <optgroup label="Más usados">
                 {CTA_COMUNES.map((clave) => (
                   <NativeSelectOption key={clave} value={clave}>{CTA_ETIQUETAS[clave]}</NativeSelectOption>
@@ -551,7 +560,7 @@ export function EditorMetaAnuncio({ anuncio, valores, poner, contenidoBloqueado,
             <Input value={valores.urlDestino ?? ""} onChange={(e) => poner("urlDestino")(e.target.value)} />
           </Fila>
           <Fila etiqueta="Imagen nueva" ayuda="Pega una URL pública, sube un archivo o elige una publicación ya publicada. Vacío = no cambiar. Las URLs de imagen de Meta caducan, por eso no se precarga la actual.">
-            <PiezaNueva accountId={accountId} conjuntoId={anuncio?.conjuntoId ?? null} valores={valores} poner={poner} />
+            <PiezaNueva accountId={accountId} conjuntoId={anuncio?.conjuntoId ?? null} valores={valores} poner={poner} alSubirVideo={crearVersion ? (url) => crearVersion(url) : undefined} />
           </Fila>
         </fieldset>
       </Tarjeta>

@@ -1,6 +1,6 @@
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
-import { mismoOrigen } from "@/lib/origen-publico";
+import { mismoOrigen, origenPublico } from "@/lib/origen-publico";
 import {
   AlmacenamientoError,
   subirCreativo,
@@ -58,7 +58,8 @@ export async function POST(request: Request) {
 
     const resultado = await subirCreativo(
       { type: contentType, data: await request.arrayBuffer() },
-      new URL(request.url).origin,
+      // El origen público (https://ads.wiwo.me), no el interno del proxy: Meta y Google bajan el archivo de esta URL y exigen https.
+      origenPublico(new URL(request.url)),
     );
     return Response.json(resultado, { headers: NO_STORE });
   } catch (error) {

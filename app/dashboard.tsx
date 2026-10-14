@@ -737,6 +737,18 @@ export default function WiwoDashboard({
     }
   }, []);
 
+  // Las decisiones llevan directo a donde se resuelven (ficha del cliente, salud de medición), con el cliente ya elegido.
+  useEffect(() => {
+    function alAbrir(e: Event) {
+      const d = (e as CustomEvent<{ view?: ViewKey; clienteId?: string | null }>).detail;
+      if (!d?.view) return;
+      if (d.clienteId) setClienteSeleccionado(d.clienteId);
+      setView(d.view);
+    }
+    window.addEventListener("wiwo:abrir-vista", alAbrir);
+    return () => window.removeEventListener("wiwo:abrir-vista", alAbrir);
+  }, []);
+
   // Se piden en cuanto hay un cliente elegido (no solo al abrir «Cliente»): cuando la persona llega a la tabla,
   // los anuncios ya están. Con datos recientes en memoria no se vuelve a pedir nada.
   const claveDeAnuncios = clienteSeleccionado ? `${clienteSeleccionado}|${rango}|${versionDeDatos}` : null;
@@ -903,7 +915,7 @@ export default function WiwoDashboard({
             margen (16px) y algo de aire, para que ninguna vista termine con
             un control importante (un botón, la última fila de una tabla)
             justo detrás del orbe flotante al hacer scroll hasta el final. */}
-        <AvisoDeConexiones onAbrirCuentas={initialSnapshot.user.role === "admin" ? abrirCuentas : undefined} />
+        <AvisoDeConexiones onAbrirCuentas={initialSnapshot.user.role === "admin" && view !== "integrations" ? abrirCuentas : undefined} />
         <div className="telemetry-grid min-h-[calc(100svh-4rem)] pb-24">
           {view === "decisiones" && <DecisionesView
               modo="pagina"

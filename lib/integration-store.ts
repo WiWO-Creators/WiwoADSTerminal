@@ -4,6 +4,7 @@ import { can, type Actor } from "@/lib/permisos";
 import type { CredencialesGoogle } from "@/lib/google-ads-nativo";
 import { CONECTABLES, isConectable, type PlataformaConectable } from "@/lib/plataformas";
 import { getRawDb } from "@/db";
+import { origenPublico } from "@/lib/origen-publico";
 import {
   fetchGoogleDailyAccountMetrics,
   fetchMetaDailyAccountMetrics,
@@ -460,11 +461,9 @@ export async function createAuthorizationUrl(
   assertConfigured(provider);
   const state = randomBase64Url(32);
   const stateHash = await sha256(state);
-  const requestOrigin = new URL(request.url).origin;
-  const appOrigin = (env.APP_ORIGIN ?? requestOrigin).replace(/\/$/, "");
-  if (requestOrigin !== appOrigin) {
-    throw new IntegrationError("El origen de la conexión no es válido", 400);
-  }
+  // Detrás del proxy `request.url` puede llegar como http://127.0.0.1:…; el origen que vale es el público configurado (APP_ORIGIN),
+  // el mismo que usa el inicio de sesión. Exigir que coincidan hacía fallar «Conectar» en producción.
+  const appOrigin = origenPublico(new URL(request.url));
   const redirectUri = `${appOrigin}/api/integrations/${provider}/callback`;
   const codeVerifier =
     provider === "google" ? randomBase64Url(64) : null;

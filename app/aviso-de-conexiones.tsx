@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
  */
 const CLAVE = "wiwo:aviso-conexiones-cerrado";
 const OCULTO_MS = 4 * 60 * 60 * 1000;
+const RUTA_DE_CONEXION = { google: "/api/integrations/google/authorize", linkedin: "/api/integrations/linkedin/authorize" } as const;
 
 function cerradoHace(): number | null {
   try {
@@ -47,6 +48,8 @@ export function AvisoDeConexiones({ onAbrirCuentas }: { onAbrirCuentas?: () => v
   if (!resumen || resumen.todoBien || cerrado) return null;
   const pendientes = resumen.conexiones.filter((c) => c.estado !== "ok");
   const graves = pendientes.some((c) => c.estado !== "por_vencer");
+  // Meta no se conecta por persona (token del servidor): solo Google y LinkedIn tienen un botón de conectar, y solo si el servidor las habilita.
+  const conectables = pendientes.filter((c) => (c.proveedor === "google" || c.proveedor === "linkedin") && c.estado !== "sin_habilitar");
 
   return (
     <div role="status" className={cn("mx-auto mt-3 flex w-full max-w-[1500px] items-start gap-3 rounded-2xl border px-4 py-3", graves ? "border-warn/30 bg-warn/8" : "border-brand/25 bg-brand/6")}>
@@ -62,10 +65,24 @@ export function AvisoDeConexiones({ onAbrirCuentas }: { onAbrirCuentas?: () => v
             </li>
           ))}
         </ul>
-        {resumen.puedeAdministrar && onAbrirCuentas && (
-          <button type="button" onClick={onAbrirCuentas} className="rounded-full bg-brand px-4 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90">
-            Ir a Cuentas y conectar
-          </button>
+        {resumen.puedeAdministrar && (
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {/* Conecta directo: un clic y se abre la autorización de la plataforma; no hace falta pasar por Cuentas. */}
+            {conectables.map((c) => (
+              <a
+                key={c.proveedor}
+                href={RUTA_DE_CONEXION[c.proveedor as "google" | "linkedin"]}
+                className="rounded-full bg-brand px-4 py-1.5 text-xs font-bold text-primary-foreground hover:opacity-90"
+              >
+                {c.estado === "por_vencer" ? `Reconectar ${c.nombre}` : `Conectar ${c.nombre}`}
+              </a>
+            ))}
+            {onAbrirCuentas && (
+              <button type="button" onClick={onAbrirCuentas} className="rounded-full border border-foreground/20 px-4 py-1.5 text-xs font-semibold text-foreground/80 hover:bg-foreground/8">
+                Ver Cuentas
+              </button>
+            )}
+          </div>
         )}
       </div>
       <button

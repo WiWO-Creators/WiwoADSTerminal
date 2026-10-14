@@ -56,6 +56,8 @@ type Props = {
   crearVersion?: (imagenUrl: string | null) => void;
   /** Avisa si hay algo cambiado sin aplicar, para preguntar antes de cerrar. */
   onSucio?: (sucio: boolean) => void;
+  /** Los valores del formulario en cada cambio (para dibujar la vista previa «con tus cambios»). */
+  onValores?: (valores: Record<string, string>) => void;
   provider: string;
   accountId: string;
   nivel: NivelEntidad;
@@ -138,7 +140,7 @@ function inicial(p: Props): Record<string, string> {
       v.interesesIds = ids(grupos[0]?.interests).join(",");
       v.audIncluir = ids(cruda.custom_audiences).join(",");
       v.audExcluir = ids(cruda.excluded_custom_audiences).join(",");
-      v.atribucion = "";
+      v.atribucion = c.atribucion ?? "";
     }
     // LinkedIn muestra la fecha de término actual (aaaa-mm-dd); Meta, la hora de la cuenta, como Ads Manager.
     if (p.provider === "meta") {
@@ -154,12 +156,12 @@ function inicial(p: Props): Record<string, string> {
     if (p.provider === "meta") {
       v.textoPrincipal = c.textoPrincipal ?? "";
       v.titulo = c.titulo ?? "";
-      v.descripcion = "";
+      v.descripcion = c.descripcion ?? "";
       v.urlDestino = c.urlDestino ?? "";
       v.imagenUrl = "";
       v.cta = c.cta ?? "";
       v.urlTags = c.urlTags ?? "";
-      v.dominioConversion = "";
+      v.dominioConversion = c.dominioConversion ?? "";
       v.mensajeBienvenida = "";
     } else {
       v.titulares = c.titulares.map((t) => t.texto).join("\n");
@@ -371,6 +373,7 @@ export function EditarEntidad(props: Props) {
   const poner = (clave: string) => (valor: string) => {
     const siguiente = { ...valores, [clave]: valor };
     setValores(siguiente);
+    props.onValores?.(siguiente);
     onSucio?.(Object.keys(armarCambios(props, siguiente, antes)).length > 0);
     // Cualquier cambio invalida lo simulado: lo que se aprueba es lo que se ve.
     setSimulacion(null);

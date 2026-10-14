@@ -356,6 +356,8 @@ export function AsistenteFlotante({
       setHerramienta(null);
       cancelar.current = null;
       if (decisionActiva.current && respuestaConPropuestas.current) avisarDecision("propuesta");
+      // El Orb puede haber cerrado la decisión él mismo (cuando no hacía falta ningún cambio): la cola se vuelve a leer.
+      if (decisionActiva.current) window.dispatchEvent(new CustomEvent("wiwo:decisiones-actualizar"));
       respuestaConPropuestas.current = false;
       // Una respuesta que quedó vacía (error o cancelación) no se deja como burbuja fantasma.
       setMensajes((actuales) =>
@@ -535,7 +537,7 @@ export function AsistenteFlotante({
           role="dialog"
           aria-label="Asistente de IA"
           className={cn(
-            "fixed right-4 bottom-24 z-40 flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)] transition-[height,width] duration-150",
+            "fixed right-4 bottom-24 z-[60] flex flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-2)] transition-[height,width] duration-150",
             grande
               ? "h-[min(880px,calc(100svh-6rem))] w-[min(680px,calc(100vw-2rem))]"
               : "h-[min(660px,calc(100svh-7.5rem))] w-[min(430px,calc(100vw-2rem))]",
@@ -810,7 +812,7 @@ export function AsistenteFlotante({
         onClick={() => setAbierto((estado) => !estado)}
         aria-label={abierto ? "Cerrar asistente" : "Abrir asistente de IA"}
         aria-expanded={abierto}
-        className="fixed right-4 bottom-4 z-40 size-16 overflow-hidden rounded-full shadow-[var(--shadow-2)] ring-1 ring-black/10 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        className="fixed right-4 bottom-4 z-[60] size-16 overflow-hidden rounded-full shadow-[var(--shadow-2)] ring-1 ring-black/10 transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <ThinkingOrb
           variant="stage"
