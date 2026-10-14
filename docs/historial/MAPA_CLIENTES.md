@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Inventario del 2026-10-02, superado por `../ESTADO_POR_CLIENTE.md`; varias de sus afirmaciones ya se corrigieron. No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Mapa de clientes — plataformas, medición y huecos (2026-10-02)
 
 Armado con: la lista de clientes que dio el equipo, el selector de cuentas de Google Ads (59), las cuentas de Meta que ve el Facebook del equipo (53) y las que lee Windsor (8), las propiedades de GA4 (73) y lo que ve la cuenta de servicio `wiwo-lectura-analytics` en GA4 y GTM. **Es un inventario de nombres e IDs, no de rendimiento.** Lo marcado «?» es inferencia por nombre y debe confirmarse.

@@ -1,12 +1,11 @@
 # WiWO.ADS — Guía para llevarlo a un VPS y a producción
 
-Documento para quien va a desplegar el proyecto. Cubre qué es, con qué está
-hecho, qué lo ata hoy a Cloudflare, qué configuración necesita, qué hay que
-arreglar antes de exponerlo a internet y en qué orden hacerlo.
+Documento para quien va a desplegar el proyecto. Cubre con qué está hecho, qué lo ata a Cloudflare y cómo se
+resuelve, qué configuración necesita y cómo ejecutarlo en el VPS. Las tareas manuales recurrentes (reconectar
+LinkedIn, tokens de Meta, cron, respaldos) están en [`OPERACION.md`](OPERACION.md).
 
 **No contiene valores de claves**, solo sus nombres. Los valores los tiene
-Amaro (o se generan; ver §5). Complementa a `docs/ARQUITECTURA.md`, que explica
-el flujo de lectura y escritura con las plataformas.
+Amaro (o se generan; ver §5). Complementa a `docs/ARQUITECTURA.md` (flujo de lectura y escritura con Windsor) y a `PROYECTO.md` (visión de conjunto).
 
 Rama de trabajo: `devAmaro`. El despliegue automático (`.github/workflows/deploy.yaml`)
 se dispara al integrar un PR a `main`, así que los cambios deben llegar a `main` para desplegarse.
@@ -15,15 +14,14 @@ se dispara al integrar un PR a `main`, así que los cambios deben llegar a `main
 
 ## 1. Qué es
 
-Sistema de medios pagados de la agencia. Unifica Google Ads y Meta Ads en un
-tablero, deja crear campañas reales desde una sola interfaz (todo nace
-**pausado**), gestiona las ya publicadas y tiene un asistente de IA (Claude)
-que lee campañas y analiza CSV. TikTok y LinkedIn están en el registro de
-plataformas pero **desactivados**.
+Sistema de medios pagados de las agencias MGC y WiWO. Unifica Google Ads, Meta Ads y LinkedIn Ads en un
+tablero (TikTok Ads solo en lectura), deja crear y editar campañas reales desde una sola interfaz, y tiene un
+asistente de IA (Claude) que lee campañas, analiza CSV y deja propuestas.
 
-Regla de producto que no hay que romper: **nada se activa ni gasta dinero sin
-que una persona lo apruebe.** El asistente de IA solo propone; los botones
-ejecutan.
+Reglas de producto que no hay que romper: **ningún cambio llega a una plataforma sin que una persona con permiso lo
+apruebe** (aplicar exige confirmar escribiendo `EDITAR` o `CREAR`), y **el asistente de IA solo propone**: los botones
+ejecutan. Lo nuevo nace **activo** (desde el 2026-10-06): la revisión es la aprobación previa, no una pausa posterior.
+Ver [`ROLES_Y_APROBACIONES.md`](ROLES_Y_APROBACIONES.md).
 
 ## 2. Stack
 
@@ -31,13 +29,13 @@ ejecutan.
 |---|---|
 | Framework | Next.js 16 (App Router, React 19), ejecutado con **vinext 0.0.50** sobre Vite 8 |
 | Runtime actual | **Cloudflare Worker** (`worker/index.ts`), pensado para ChatGPT Sites |
-| Base de datos | **D1** (SQLite de Cloudflare) con Drizzle ORM. Esquema en `db/schema.ts`, migraciones en `drizzle/` (0000 a 0013) |
+| Base de datos | **D1** (SQLite de Cloudflare) con Drizzle ORM. Esquema en `db/schema.ts`, migraciones en `drizzle/` (0000 a 0045) |
 | Archivos | **R2** (binding `MEDIA`): creativos subidos (imágenes/video), máx. 50 MB |
 | UI | Tailwind 4, shadcn/Radix, Sonner, Leaflet, Recharts |
-| Datos de plataformas | **Windsor.ai** (lectura y escritura). Ver `docs/ARQUITECTURA.md` |
+| Datos de plataformas | **Windsor.ai** (lectura y buena parte de la escritura) + APIs directas de Meta, Google Ads y LinkedIn. Ver `docs/PLATAFORMAS.md` |
 | Login | Google OAuth (única entrada), dominios `@mgcglobalgroup.com` y `@wiwo.me` |
 | IA | Anthropic SDK (`@anthropic-ai/sdk`), modelo `claude-sonnet-5` |
-| Tests | `node --test tests/*.test.mjs` (28 tests), `tsc`, `eslint` |
+| Tests | `node --test tests/*.test.mjs` (79 archivos de prueba), `tsc`, `eslint` |
 
 Requiere **Node >= 22.13**.
 
@@ -47,7 +45,7 @@ Requiere **Node >= 22.13**.
 app/                  pantallas (*.tsx) y rutas del servidor (app/api/*)
   api/acceso/         login con Google (start, callback, salida)
   api/anuncios/       pausar/activar y gestionar campañas ya publicadas
-  api/constructor/    ejecutor del plan (crea campañas; todo pausado)
+  api/constructor/    ejecutor del plan (crea campañas; nada nace pausado)
   api/asistente/      chat de IA en streaming (SSE)
   api/actualizar/     reconstruye el catálogo de campañas (manual y semanal)
   api/media/          sirve los creativos de R2 (SIN sesión, a propósito)
@@ -57,7 +55,7 @@ drizzle/              migraciones SQL
 config/portafolios.json   agrupa cuentas publicitarias en clientes (lo edita el equipo)
 worker/index.ts       entrada del Worker de Cloudflare
 docs/                 documentación
-thinking-orb.css, THINKING_ORB.md   kit del orbe de carga
+docs/THINKING_ORB.md, docs/thinking-orb.css   kit del orbe de carga
 ```
 
 ## 4. Correr en Node (VPS): resuelto con un puente
@@ -153,7 +151,7 @@ Sigue pendiente de tu lado:
   creativos desde sus servidores, sin cookies. Solo entrega objetos bajo el
   prefijo `creativos/`, con nombres UUID.
 - Las rutas que escriben comprueban `origin` y permisos por rol
-  (`lib/permisos.ts`: admin, lead, buyer, analyst, client).
+  (`lib/permisos.ts`: admin, supervisor, analyst, client; ver `ROLES_Y_APROBACIONES.md`).
 - El asistente de IA **no tiene límite de consultas por persona**. Añadir un
   límite (por usuario y por día) antes de abrirlo a todo el equipo: cada
   pregunta cuesta dinero.
@@ -166,9 +164,13 @@ Sigue pendiente de tu lado:
 - Pantalla de consentimiento: publicarla (o restringirla a usuarios internos del
   dominio) para que no caduquen los tokens.
 
-**Meta** (solo si se usa el OAuth directo): app en developers.facebook.com con
-las URIs de retorno del dominio real. La escritura de campañas hoy pasa por
-Windsor, no por Meta directo.
+**Meta**: app en developers.facebook.com con las URIs de retorno del dominio real, y un usuario del sistema cuyo token
+va en `META_SYSTEM_USER_TOKEN` (ver `OPERACION.md`). La escritura de campañas va por Windsor y, para formularios,
+eliminar y como respaldo, por Meta directo.
+
+**LinkedIn**: app «WiwoAds» en LinkedIn Developers con la URL de redirección
+`https://<dominio>/api/integrations/linkedin/callback` registrada en Auth, y las cuentas publicitarias agregadas en
+«View Ad Accounts». Variables `LINKEDIN_*` en el servidor. Un administrador conecta desde Gestión → Cuentas.
 
 **Windsor.ai**: las cuentas de Google y Meta deben estar conectadas en Windsor.
 Limitación conocida: el **número de WhatsApp** de los anuncios no se puede ver
@@ -180,7 +182,7 @@ pública. El VPS debe tener dominio público con HTTPS; el Constructor rechaza
 
 ## 8. Base de datos
 
-- Migraciones: `drizzle/0000` a `0013`. En Cloudflare se aplican con
+- Migraciones: `drizzle/0000` a `0045`. En Cloudflare se aplican con
   `wrangler d1 migrations apply` (`npm run db:migrate:local` en local).
   En el VPS hay que aplicarlas en orden sobre la base SQLite (por ejemplo, un
   script que ejecute los `.sql` y registre cuáles corrió).
@@ -221,9 +223,10 @@ module.exports = {
 };
 ```
 
-**Despliegue automático** (`.github/workflows/deploy.yaml`): agregar
-`node servidor/migrar.mjs` después de `npx vinext build` y antes del
-`pm2 restart`, para que las migraciones nuevas se apliquen solas.
+**Despliegue automático** (`.github/workflows/deploy.yaml`): al cerrar con merge un PR hacia `main`, entra por SSH al VPS y
+hace `git pull`, `npm ci`, `npx vinext build`, `node servidor/migrar.mjs` (con `WIWO_DB_PATH`) y `pm2 reload` o `pm2 start`,
+seguido de `pm2 save`. El archivo `ecosystem.config.cjs` vive en el VPS, no en el repo. Hay un solo proceso escritor de
+SQLite, así que **no se puede usar el modo cluster de PM2**.
 
 - Proxy inverso (Apache/Nginx/Caddy) con HTTPS hacia el puerto de la app,
   **sin buffering** en `/api/asistente` (es streaming SSE) y pasando
@@ -233,11 +236,13 @@ module.exports = {
 
 ## 10. Tareas de fondo
 
-No hay cron en el hosting actual. La actualización semanal del catálogo la
-dispara **la primera sesión admin/lead que abre la app pasados 7 días**
-(`app/api/actualizar/route.ts`). En un VPS se puede reemplazar por un cron real
-que llame a `POST /api/actualizar` (hoy exige sesión; habría que darle un token
-de servicio). No es bloqueante.
+**Reglas automáticas:** `servidor/evaluar-reglas.mjs` llama a `POST /api/reglas/programado` con la cabecera
+`x-cron-secret` (variable `CRON_SECRET`; `APP_URL` si el puerto no es 3030). Está pensado para un cron cada 5 minutos;
+pasos en [`OPERACION.md`](OPERACION.md#4-reglas-automáticas-247-cron).
+
+**Catálogo de campañas:** la actualización la dispara la primera sesión admin o supervisor que abre la app pasados 7
+días (`app/api/actualizar/route.ts`) y la app se autoactualiza cada 2 horas con la pestaña abierta. Un cron real para
+eso sigue pendiente y no es bloqueante.
 
 ## 11. Operación
 
@@ -261,16 +266,15 @@ de servicio). No es bloqueante.
 - [ ] Entrar con un correo `@mgcglobalgroup.com` invitado y con otro que no lo esté
       (debe rechazarlo).
 - [ ] Probar `/api/media/...` desde fuera (Meta/Google deben poder descargarlo).
-- [ ] Publicar una campaña de prueba en un cliente chico y confirmar que nace
-      **pausada**; borrar la de prueba a mano en la plataforma.
+- [ ] Publicar una campaña de prueba en un cliente chico, verificar en la plataforma real que quedó como se esperaba y
+      borrar la de prueba a mano.
 - [ ] Límite de consultas del asistente de IA.
 - [ ] `npx tsc --noEmit`, `npx eslint app lib components tests` y
       `node --test tests/*.test.mjs` en verde.
 
 ## 13. Pendiente de producto (no bloquea el despliegue)
 
-- TikTok y LinkedIn: apagados en `lib/plataformas.ts`; Windsor sí tiene acciones
-  de escritura para ambos.
-- El asistente no crea campañas por sí solo: deja una sugerencia que abre el
-  Constructor. Tampoco cambia presupuestos ni borra (Windsor no expone borrado).
-- Cron real para la actualización semanal.
+- TikTok: solo lectura; la integración directa está preparada y espera la aprobación de la app (ver `PLATAFORMAS.md`).
+- LinkedIn: faltan los anuncios (necesitan un rol en la página de empresa) y varias secciones de edición.
+- El asistente no escribe por sí solo en las plataformas: deja propuestas y solicitudes que una persona aprueba.
+- Cron real para la actualización del catálogo.

@@ -1,3 +1,5 @@
+> **DOCUMENTO HISTÓRICO (movido el 2026-10-14).** Análisis de alcance del 2026-10-05, de la fase «solo Windsor». Los pendientes de acceso a Meta directo ya se resolvieron (hay lectura y escritura nativa). No lo uses como referencia: ver el índice en [`../README.md`](../README.md).
+
 # Control total desde WiWO.ADS: qué se puede extraer y operar, y qué falta
 
 Estado al 2026-10-05. «Windsor» = el conector actual; «API directa» = Marketing API de Meta / Google Ads API con credenciales propias.

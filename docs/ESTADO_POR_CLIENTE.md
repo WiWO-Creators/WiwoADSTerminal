@@ -1,5 +1,7 @@
 # Estado por cliente: qué tenemos y qué falta
 
+> **Es una fotografía del 2026-10-05**, no un documento vivo: los accesos y las cuentas cambian en semanas. Absorbe el contenido útil de dos documentos más viejos (`historial/MAPA_CLIENTES.md` y `historial/ACCESOS_PENDIENTES.md`). La lista vigente de clientes está en `config/portafolios.json` y en la ficha de cada cliente dentro de la app. Desde esta fecha se agregó la lectura directa de Meta, la conexión de LinkedIn y la lista oficial de clientes del equipo; para ver qué hace la app hoy con cada plataforma, ver [`PLATAFORMAS.md`](PLATAFORMAS.md).
+
 Fecha: 2026-10-05. Cruza la lista que dio el equipo (MGC y WIWO) con lo que Windsor lee hoy (Google Ads, Meta, TikTok, LinkedIn y GA4) y con lo que ya está cargado en la ficha de cada cliente en WiWO.ADS.
 
 **Leyenda:** ✓ = lo traemos · ✗ = falta (con qué hacer) · — = no aplica o el equipo no lo pidió.

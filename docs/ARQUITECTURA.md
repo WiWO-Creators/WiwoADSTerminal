@@ -1,25 +1,27 @@
-# WiWO.ADS — Arquitectura técnica
+# WiWO.ADS — Arquitectura técnica de lectura y escritura
 
-Este documento explica cómo el sistema lee datos, cómo escribe cambios en las
-plataformas publicitarias, qué variables de entorno necesita y con qué
-tecnologías está construido. Está pensado para alguien del equipo que necesite
-entender el flujo completo sin tener que leer todo el código fuente.
+Este documento explica **cómo el sistema lee datos con Windsor.ai y cómo escribe cambios** en las plataformas
+publicitarias: el catálogo, la caché, las unidades, el flujo de publicación y el encadenado de pasos. Está pensado
+para alguien del equipo que necesite entender ese flujo sin leer todo el código.
 
-No incluye valores de credenciales ni claves — solo nombres de variables y el
-razonamiento detrás de cada decisión.
+> **Alcance.** Este documento nació en la fase «solo Windsor» y conserva el detalle técnico de esa vía, que sigue
+> vigente. Desde entonces se sumaron las **APIs directas** de Meta, Google Ads y LinkedIn, los roles, las solicitudes y
+> la auditoría. Para la visión de conjunto, ver [`../PROYECTO.md`](../PROYECTO.md); para qué hace cada vía en cada
+> plataforma, [`PLATAFORMAS.md`](PLATAFORMAS.md); para permisos y aprobaciones,
+> [`ROLES_Y_APROBACIONES.md`](ROLES_Y_APROBACIONES.md).
+
+No incluye valores de credenciales ni claves — solo nombres de variables y el razonamiento detrás de cada decisión.
 
 ## 1. Qué es
 
-WiWO.ADS es el sistema operativo de medios pagados de la agencia: unifica
-Google Ads y Meta Ads (con TikTok y LinkedIn ya soportados en el registro de
-plataformas pero desactivados) en un solo tablero, permite crear campañas
-reales desde una sola interfaz, y evalúa reglas de optimización que dejan
-recomendaciones para que una persona las apruebe — nunca ejecuta un cambio de
-presupuesto o una pausa por sí solo.
+WiWO.ADS es el sistema operativo de medios pagados de las agencias MGC y WiWO: unifica Google Ads, Meta Ads y
+LinkedIn Ads (TikTok Ads solo en lectura) en un solo tablero, permite crear y editar campañas reales desde una sola
+interfaz, y deja recomendaciones y reglas para que una persona las apruebe. Las reglas automáticas propias solo pausan:
+nunca suben presupuesto ni activan por sí solas.
 
 ## 2. Cómo se lee la información (Windsor.ai — lectura)
 
-Todo el dato de rendimiento (gasto, clics, conversiones, presupuestos,
+Casi todo el dato de rendimiento (gasto, clics, conversiones, presupuestos,
 catálogo de campañas y anuncios) se lee desde **Windsor.ai**, un
 normalizador que expone Google Ads, Meta, TikTok y LinkedIn bajo un único
 esquema de campos. Esto evita depender directamente de los trámites lentos de
@@ -142,8 +144,9 @@ Ruta: `POST /api/constructor/ejecutar` (`app/api/constructor/ejecutar/route.ts`)
 4. Ejecuta los pasos del plan **en orden y se detiene en el primer error**,
    devolviendo qué se llegó a crear, para que nadie tenga que adivinar en qué
    estado quedó la cuenta real.
-5. Todo lo creado nace **pausado** — lo pone `buildPlan` y Windsor lo respeta.
-   Activar la campaña es un paso manual, deliberadamente fuera de esta ruta.
+5. **Nada nace pausado** (decisión del equipo, 2026-10-06): lo creado nace activo, porque la revisión es la
+   aprobación previa y no una pausa posterior. Lo pone `buildPlan` (`status: "enabled"` / `"active"`). Si un paso
+   falla a mitad, la campaña incompleta se renombra con un prefijo y se pausa. LinkedIn nace en borrador.
 
 ### 3.3 Encadenar pasos (campaña → grupo de anuncios → anuncio → keywords)
 
@@ -180,10 +183,10 @@ volver a golpear la plataforma para saber qué se llegó a crear.
 
 ## 4. Motor de reglas (recomendaciones, fase 1)
 
-> **Estado actual:** el motor y sus endpoints (`/api/decisiones/evaluar`,
-> `lib/dashboard-store.ts`) siguen en el servidor, pero **la pantalla de cola
-> de decisiones se quitó** de la interfaz porque no tenía ninguna entrada de
-> menú. Las recomendaciones al usuario hoy las da el asistente de IA (§8).
+> **Estado actual (2026-10-14):** este motor (`lib/reglas.ts`) y su endpoint `/api/decisiones/evaluar` siguen
+> en el servidor pero **ninguna pantalla los llama**. La pantalla de entrada, **Decisiones**, se alimenta de otro
+> módulo (`lib/sugerencias.ts`, con las señales de `lib/contexto-cliente.ts`). Además hay reglas automáticas
+> propias y un cron. Ver [`FUNCIONES_DEL_PRODUCTO.md`](FUNCIONES_DEL_PRODUCTO.md) §4 y §7.
 
 `lib/reglas.ts` evalúa 4 reglas de optimización sobre las campañas activas de
 cada cliente, comparando contra metas (`targetCpaMicros` / `targetRoas`) que
@@ -220,25 +223,9 @@ recomendación, pero un día nuevo sí puede generar otra si el problema sigue.
 
 ## 5. Variables de entorno
 
-Definidas en `.dev.vars` en desarrollo local (nunca en el repo) y como variables
-del proceso en un servidor. Solo se listan los nombres — los valores viven fuera
-del control de versiones. La tabla con el detalle de cada una (obligatoriedad,
-cómo generarla) está en [`DESPLIEGUE_VPS.md`](DESPLIEGUE_VPS.md#5-variables-de-entorno).
-
-| Variable | Para qué |
-|---|---|
-| `APP_ORIGIN` | URL pública del sitio (redirecciones OAuth, flag `Secure` de la cookie) |
-| `OAUTH_ADMIN_EMAILS` | Lista de correos con acceso de administrador |
-| `DEV_LOGIN_ENABLED` | En local, fuerza la salida de sesión propia en vez de la del dispatch. Falso o ausente en producción |
-| `OAUTH_TOKEN_KEY` | Clave AES-GCM (32 bytes, base64url) para cifrar los tokens de plataformas guardados en la base. Sirve de secreto de sesión si falta `SESSION_SECRET` |
-| `SESSION_SECRET` | Secreto con el que se firma la cookie de sesión |
-| `WIWO_DB_PATH` / `WIWO_MEDIA_DIR` | Solo en Node/VPS: archivo SQLite y carpeta de creativos |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth2 de Google (login y OAuth directo) |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | Requerido por Google Ads para llamadas de API |
-| `META_APP_ID` / `META_APP_SECRET` | App de Meta for Developers |
-| `WINDSOR_API_KEY` | Autenticación contra todos los endpoints de Windsor.ai (lectura y escritura) |
-| `ANTHROPIC_API_KEY` | Clave de la API de Claude, para el asistente |
-| `ANTHROPIC_MODEL` | Modelo del asistente (por defecto `claude-sonnet-5`) |
+La lista completa —qué hace cada variable, dónde se lee, qué se expone si se filtra y cómo generarla— vive en un solo
+lugar: [`VARIABLES_DE_ENTORNO.md`](VARIABLES_DE_ENTORNO.md). Se definen en `.dev.vars` en local (nunca en el repo) y
+como variables del proceso en el servidor. Una tabla vieja que estaba aquí se retiró porque se desactualizaba.
 
 ## 6. Tecnologías
 
@@ -252,14 +239,17 @@ cómo generarla) está en [`DESPLIEGUE_VPS.md`](DESPLIEGUE_VPS.md#5-variables-de
 | Almacenamiento de archivos | Cloudflare R2 (binding `MEDIA`), o una carpeta en disco en Node (`servidor/r2.mjs`) — creativos subidos manualmente |
 | Autenticación | Google OAuth2 con PKCE; sesión en cookie **firmada con HMAC** y con vencimiento |
 | IA | Anthropic SDK (`@anthropic-ai/sdk`), Claude Sonnet, con streaming (SSE) |
-| Integración de datos de anuncios | Windsor.ai (normaliza Google Ads, Meta Ads, TikTok Ads, LinkedIn Ads) |
+| Integración de datos de anuncios | Windsor.ai (normaliza Google Ads, Meta Ads, TikTok Ads, LinkedIn Ads) más las APIs directas de Meta, Google Ads y LinkedIn |
 | Lenguaje | TypeScript |
 | Pruebas | `node --test tests/*.test.mjs`, `tsc`, ESLint 9 |
 
 ## 7. Esquema de base de datos (D1 / Drizzle)
 
 Definido en [`db/schema.ts`](../db/schema.ts), con migraciones versionadas en
-[`drizzle/`](../drizzle/). Tablas principales:
+[`drizzle/`](../drizzle/) (hoy de la 0000 a la 0045). **La lista de abajo es la de la primera fase y está
+incompleta**: faltan `solicitudes`, `auditoria`, `reglas_automaticas`, `asistente_memoria` y `account_pixels`,
+entre otras, que solo existen como SQL. La lista vigente está en [`../PROYECTO.md`](../PROYECTO.md#modelo-de-datos).
+Tablas principales de la primera fase:
 
 - **`users`** / **`user_portfolios`** — cuentas del equipo y qué cliente
   (portfolio) puede ver cada una. Vacío para un rol que ve todo; para el
@@ -289,7 +279,9 @@ Definido en [`db/schema.ts`](../db/schema.ts), con migraciones versionadas en
 `app/asistente.tsx` (orbe flotante y chat) habla con `POST /api/asistente`, que
 responde en streaming (SSE) y corre el agente de `lib/asistente.ts`.
 
-**Regla que ordena el diseño: el modelo nunca escribe en una plataforma.**
+**Regla que ordena el diseño: el modelo nunca escribe en una plataforma.** (Las herramientas de la primera fase se
+listan abajo; hoy hay más —detalle de campañas, desglose, impulsos, envío a revisión, memoria—, descritas en
+[`FUNCIONES_DEL_PRODUCTO.md`](FUNCIONES_DEL_PRODUCTO.md#10-el-asistente-de-ia).)
 
 - **Lectura** (herramientas que ejecuta el servidor): `listar_clientes` y
   `buscar_campanas`, sobre el mismo `getPerformanceSnapshot` de la app, que ya
