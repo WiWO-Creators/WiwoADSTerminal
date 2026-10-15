@@ -3,7 +3,8 @@ import { getSession } from "@/app/sesion";
 import { leerDetalleParaMostrar } from "@/lib/detalle-entidad-store";
 import { accesoNativoGoogle } from "@/lib/integration-store";
 import { enAlcance, puedeArmarCampanas } from "@/lib/permisos";
-import { isActivePlatform } from "@/lib/plataformas";
+import { lecturaNativaLinkedin } from "@/lib/linkedin-conexion";
+import { puedeAdministrar } from "@/lib/plataformas";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 import { WindsorError } from "@/lib/windsor";
 
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
   const portfolioId = params.get("portfolioId") ?? "";
   const accountId = (params.get("accountId") ?? "").trim();
   const provider = params.get("provider") ?? "meta";
-  if (!isActivePlatform(provider)) return fail("Plataforma no reconocida", 400);
+  if (!puedeAdministrar(provider)) return fail("Plataforma no reconocida", 400);
   if (!portfolioId || !accountId) return fail("Falta identificar el cliente o la cuenta", 400);
   if (!enAlcance(session.actor, portfolioId)) return fail("Ese cliente no está en tu alcance", 403);
   const duenio = (await accountIndex()).get(normalizeAccountId(accountId));
@@ -37,7 +38,8 @@ export async function GET(request: Request) {
 
   try {
     const credencialesGoogle = provider === "google" ? await accesoNativoGoogle(session.actor, accountId) : null;
-    const d = await leerDetalleParaMostrar(provider, accountId, { credencialesGoogle, permitirViejo: true }).datos;
+    const credencialesLinkedin = provider === "linkedin" ? await lecturaNativaLinkedin(session.actor, accountId) : null;
+    const d = await leerDetalleParaMostrar(provider, accountId, { credencialesGoogle, credencialesLinkedin, permitirViejo: true }).datos;
     return Response.json(
       {
         campanas: d.campanas.map((c) => ({ id: c.id, nombre: c.nombre, estado: c.estado, objetivo: c.objetivo })),

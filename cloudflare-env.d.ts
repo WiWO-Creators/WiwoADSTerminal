@@ -64,6 +64,9 @@ declare module "cloudflare:workers" {
     /** Token del usuario del sistema «WiwoAds» de Meta (API directa). */
     META_SYSTEM_USER_TOKEN?: string;
     /** App de LinkedIn «WiwoAds» (API directa, opcional: LinkedIn también se lee por Windsor). */
+    /** App «WiwoAds» de TikTok for Business (Marketing API): las entrega TikTok al aprobar la app. */
+    TIKTOK_APP_ID?: string;
+    TIKTOK_APP_SECRET?: string;
     LINKEDIN_CLIENT_ID?: string;
     LINKEDIN_CLIENT_SECRET?: string;
     /** Alias de LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET, por costumbre con META_APP_*. */

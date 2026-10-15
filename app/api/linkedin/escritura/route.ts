@@ -1,3 +1,4 @@
+import { registrarEscritura } from "@/lib/escrituras";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { getSession } from "@/app/sesion";
 import { registrarEventoDeIntegracion } from "@/lib/integration-store";
@@ -109,6 +110,8 @@ export async function POST(request: Request) {
     }
 
     const enviado = await enviarPlanALinkedin(plan, token);
+    // Lo recién escrito debe verse al instante: se invalida lo recordado del detalle de cuentas.
+    registrarEscritura();
     const idDeLaEntidad = plan.tipo === "crear" ? enviado.id : String(datos.nivel === "cuenta" ? cuentaId : datos.id);
     if (!idDeLaEntidad) {
       await registrarEventoDeIntegracion(user, "linkedin_write", `LinkedIn: ${plan.resumen}`, "Aceptado sin id devuelto: verificar en Campaign Manager");

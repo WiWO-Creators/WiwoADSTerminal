@@ -40,9 +40,12 @@ import { cn } from "@/lib/utils";
 import { dominioDe, piezaDeAnuncioGoogle, piezaDeGrupoDeRecursos } from "@/lib/vista-previa-google-pura";
 import { medidasDeVista, type FormatoDeVista } from "@/lib/vista-previa-meta-pura";
 import { DesgloseEntidad } from "./desglose-entidad";
+import { marcarTrabajoSinGuardar } from "./actualizacion";
 import { EditarEntidad, type AccionesEditor } from "./editar-entidad";
 import { GestionarCampanaDialog } from "./gestionar-campana";
+import { AnuncioNuevoLinkedin } from "./linkedin-anuncio-nuevo";
 import { OrbeDeBoton } from "./ui";
+import { VistaPreviaTiktok } from "./vista-previa-tiktok";
 import { VistaPreviaGoogle } from "./vista-previa-google";
 
 export type EntidadParaDetalle = {
@@ -542,6 +545,11 @@ export function DetalleEntidadSheet({
 
   // Esc y bloqueo de scroll de la página mientras el editor está abierto.
   const abierto = entidad !== null;
+  // Un aviso de actualización no debe pisar cambios sin aplicar: el editor los deja marcados mientras estén abiertos.
+  useEffect(() => {
+    marcarTrabajoSinGuardar(abierto && Boolean(hayCambios));
+    return () => marcarTrabajoSinGuardar(false);
+  }, [abierto, hayCambios]);
   const pedirCierreRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!abierto) return;
@@ -840,6 +848,19 @@ export function DetalleEntidadSheet({
                     />
                   </Bloque>
 
+                  {/* LinkedIn: la campaña («conjunto») admite anuncios nuevos con una publicación que ya existe. */}
+                  {puedeAprobar && actual.nivel === "conjunto" && actual.provider === "linkedin" && datos.conjunto && (
+                    <AnuncioNuevoLinkedin
+                      accountId={actual.accountId}
+                      campaignId={actual.id}
+                      campaignName={datos.conjunto.nombre ?? actual.nombre}
+                      alCrear={() => {
+                        setVersion((v) => v + 1);
+                        onAplicado?.();
+                      }}
+                    />
+                  )}
+
                   {puedeAprobar &&
                     onCrearVersion &&
                     actual.nivel === "anuncio" &&
@@ -1091,6 +1112,79 @@ function VistaRealDeMeta({ accountId, anuncioId, aspecto, conBoton, alFallar }: 
   );
 }
 
+/** La vista previa real de LinkedIn (la misma de Campaign Manager): feed de escritorio y de celular. Si no hay, queda el resumen. */
+function VistaRealDeLinkedin({ accountId, anuncioId, alFallar }: { accountId: string; anuncioId: string; alFallar: () => void }) {
+  const [vistas, setVistas] = useState<Array<{ formato: "escritorio" | "movil"; url: string; ancho: number; alto: number }> | undefined>(undefined);
+  const [formato, setFormato] = useState<"escritorio" | "movil">("escritorio");
+  const [disponible, setDisponible] = useState(0);
+  const caja = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = caja.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setDisponible(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [vistas]);
+  useEffect(() => {
+    let vivo = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- vuelve a pedir la vista previa al cambiar de anuncio
+    setVistas(undefined);
+    fetch(`/api/entidades/vista-previa?provider=linkedin&accountId=${encodeURIComponent(accountId)}&id=${encodeURIComponent(anuncioId)}`)
+      .then((r) => r.json().catch(() => null))
+      .then((j: { vistas?: Array<{ formato: "escritorio" | "movil"; url: string; ancho: number; alto: number }> } | null) => {
+        if (!vivo) return;
+        const lista = j?.vistas ?? [];
+        setVistas(lista);
+        if (lista.length === 0) alFallar();
+      })
+      .catch(() => {
+        if (!vivo) return;
+        setVistas([]);
+        alFallar();
+      });
+    return () => {
+      vivo = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- alFallar solo avisa; no debe volver a pedir
+  }, [accountId, anuncioId]);
+  const actual = vistas?.find((v) => v.formato === formato) ?? vistas?.[0];
+  return (
+    <div className="space-y-2 p-3">
+      {vistas && vistas.length > 1 && (
+        <div className="flex gap-1 text-[0.7rem]">
+          {([["escritorio", "Feed escritorio"], ["movil", "Feed celular"]] as const).map(([clave, etiqueta]) => (
+            <button key={clave} type="button" onClick={() => setFormato(clave)} className={cn("rounded-full px-2.5 py-1 font-semibold", actual?.formato === clave ? "bg-brand/15 text-brand" : "text-foreground/55 hover:bg-foreground/6")}>
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
+      <div ref={caja} className="w-full">
+        {vistas === undefined ? (
+          <div className="flex h-72 items-center justify-center text-xs text-foreground/45">Cargando la vista previa de LinkedIn…</div>
+        ) : actual ? (
+          (() => {
+            const escala = disponible > 0 ? Math.min(1, disponible / actual.ancho) : 1;
+            return (
+              <div className="mx-auto overflow-hidden rounded-2xl bg-white shadow-sm" style={{ width: actual.ancho * escala, height: actual.alto * escala }}>
+                <iframe
+                  key={actual.url}
+                  src={actual.url}
+                  title="Vista previa del anuncio en LinkedIn"
+                  scrolling="no"
+                  sandbox="allow-scripts allow-same-origin allow-popups"
+                  className="block border-0 bg-white"
+                  style={{ width: actual.ancho, height: actual.alto, transform: `scale(${escala})`, transformOrigin: "top left" }}
+                />
+              </div>
+            );
+          })()
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** Nombre del negocio cuando el anuncio no lo trae: el dominio del destino (sqm.com → «Sqm»). */
 function negocioDeDominio(url: string | null): string {
   const base = dominioDe(url).split(".")[0] ?? "";
@@ -1180,6 +1274,7 @@ function MaquetaConCambios({ c, nuevo }: { c: DetalleAnuncio["contenido"]; nuevo
 function VistaPrevia({ d, enEdicion }: { d: DetalleAnuncio; enEdicion: Record<string, string> | null }) {
   const [sinReal, setSinReal] = useState(false);
   const [verCambios, setVerCambios] = useState(true);
+  const [liReal, setLiReal] = useState(false);
   const c = d.contenido;
   const imagen = c.imagenUrl ?? c.miniaturaUrl;
   const nuevo = d.provider === "meta" ? cambiosDeContenido(c, enEdicion) : null;
@@ -1191,6 +1286,15 @@ function VistaPrevia({ d, enEdicion }: { d: DetalleAnuncio; enEdicion: Record<st
       <p className="border-b border-foreground/10 px-4 py-2 text-xs font-bold uppercase tracking-wide text-foreground/45">
         Vista previa · así se ve en {platformLabel(d.provider)}
       </p>
+      {d.provider === "linkedin" && (
+        <div className="flex gap-1 px-3 pt-3 text-[0.7rem]">
+          {([[false, "Resumen"], [true, "Vista real de LinkedIn"]] as const).map(([valor, etiqueta]) => (
+            <button key={etiqueta} type="button" onClick={() => setLiReal(valor)} className={cn("rounded-full px-2.5 py-1 font-semibold", liReal === valor ? "bg-brand/15 text-brand" : "text-foreground/55 hover:bg-foreground/6")}>
+              {etiqueta}
+            </button>
+          ))}
+        </div>
+      )}
       {nuevo && (
         <div className="flex gap-1 px-3 pt-3 text-[0.7rem]">
           {([[true, "Con tus cambios"], [false, "Actual en Meta"]] as const).map(([valor, etiqueta]) => (
@@ -1209,6 +1313,17 @@ function VistaPrevia({ d, enEdicion }: { d: DetalleAnuncio; enEdicion: Record<st
         <div className="space-y-2 p-3">
           <MaquetaConCambios c={c} nuevo={nuevo} />
           <p className="text-center text-[0.7rem] text-foreground/45">Aproximada: la vista real de Meta se actualiza al aplicar el cambio.</p>
+        </div>
+      ) : d.provider === "linkedin" && liReal ? (
+        <>
+          <VistaRealDeLinkedin accountId={d.accountId} anuncioId={d.id} alFallar={() => setLiReal(false)} />
+          <p className="px-3 pb-3 text-center text-[0.7rem] leading-4 text-foreground/45">
+            LinkedIn muestra esta vista solo con tu sesión de LinkedIn abierta y con acceso a la cuenta de anuncios. Si ves un error, inicia sesión en LinkedIn en otra pestaña y recarga.
+          </p>
+        </>
+      ) : d.provider === "tiktok" ? (
+        <div className="p-3">
+          <VistaPreviaTiktok usuario={d.nombre ?? "tu_marca"} texto={c.textoPrincipal} boton={c.cta} imagenUrl={imagen} />
         </div>
       ) : d.provider === "meta" && !sinReal ? (
         <VistaRealDeMeta accountId={d.accountId} anuncioId={d.id} aspecto={c.aspecto ?? null} conBoton={Boolean(c.cta) && c.cta !== "NO_BUTTON"} alFallar={() => setSinReal(true)} />

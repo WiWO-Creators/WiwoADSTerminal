@@ -1742,12 +1742,12 @@ function FaseCampana({
             {LECTURA_PLATFORMS.filter((value) => !CONSTRUCTOR_PLATFORMS.includes(value)).map((value) => (
               <span
                 key={value}
-                title={`${platformLabel(value)} se lee en la tabla de Cliente, pero no se pueden crear campañas desde acá: Windsor solo permite pausar, activar, cambiar presupuesto, nombre, fechas y público de las que ya existen.`}
+                title={value === "tiktok" ? "TikTok se lee en la tabla de Cliente. Crear y editar desde acá llega en cuanto se conecte la cuenta de TikTok del equipo (lo siguiente en construirse)." : `${platformLabel(value)} se lee en la tabla de Cliente, pero no se pueden crear campañas desde acá: Windsor solo permite pausar, activar, cambiar presupuesto, nombre, fechas y público de las que ya existen.`}
                 className="flex cursor-not-allowed items-center gap-1.5 rounded-full border border-dashed border-foreground/12 px-4 py-2 text-sm font-bold text-foreground/30"
               >
                 <Lock className="size-3.5" />
                 {platformLabel(value)}
-                <span className="text-[0.62rem] font-semibold text-foreground/35">solo lectura</span>
+                <span className="text-[0.62rem] font-semibold text-foreground/35">{value === "tiktok" ? "próximamente" : "solo lectura"}</span>
               </span>
             ))}
           </div>

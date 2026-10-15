@@ -61,13 +61,25 @@ export function planDePostPatrocinado(datos: { cuentaId: string; organizacion: s
   };
 }
 
-/** Creativo en borrador: enlaza una publicación a una campaña. Nace en `DRAFT`, así que no se revisa ni se sirve. */
-export function planDeCreativo(datos: { cuentaId: string; campanaId: string; postUrn: string; nombre?: string }): PlanDeAnuncio {
+/**
+ * Anuncio que enlaza una publicación existente a una campaña. Por defecto nace en `DRAFT` (no se revisa ni se sirve); con
+ * `estado: "ACTIVE"` empieza a servirse tras la revisión de LinkedIn. Un documento guarda la publicación en `documentAd`.
+ */
+export function planDeCreativo(datos: {
+  cuentaId: string;
+  campanaId: string;
+  postUrn: string;
+  nombre?: string;
+  estado?: "DRAFT" | "ACTIVE" | "PAUSED";
+  contenido?: "reference" | "documentAd";
+}): PlanDeAnuncio {
   const [cuenta] = soloIds([datos.cuentaId], "cuenta");
   const [campana] = soloIds([datos.campanaId], "campaña");
   const postUrn = String(datos.postUrn ?? "").trim();
   if (!URN_DE_POST.test(postUrn)) throw new ErrorDeLinkedin("La publicación debe ser urn:li:share:ID o urn:li:ugcPost:ID.", 400);
-  const cuerpo: Record<string, unknown> = { campaign: urnCampana(campana), content: { reference: postUrn }, intendedStatus: "DRAFT" };
+  const estado = datos.estado ?? "DRAFT";
+  const contenido = datos.contenido === "documentAd" ? { documentAd: { reference: postUrn } } : { reference: postUrn };
+  const cuerpo: Record<string, unknown> = { campaign: urnCampana(campana), content: contenido, intendedStatus: estado };
   if (datos.nombre !== undefined && datos.nombre.trim()) cuerpo.name = datos.nombre.trim().slice(0, 255);
   return {
     tipo: "crear",
@@ -76,8 +88,8 @@ export function planDeCreativo(datos: { cuentaId: string; campanaId: string; pos
     ruta: `/rest/adAccounts/${cuenta}/creatives`,
     cabeceras: {},
     cuerpo,
-    esperado: { intendedStatus: "DRAFT", "content.reference": postUrn },
-    resumen: `Crear un anuncio en borrador en la campaña ${campana} con la publicación ${postUrn}.`,
+    esperado: { intendedStatus: estado, ...(datos.contenido === "documentAd" ? { "content.documentAd.reference": postUrn } : { "content.reference": postUrn }) },
+    resumen: `Crear un anuncio (${estado === "DRAFT" ? "en borrador" : estado === "ACTIVE" ? "activo" : "pausado"}) en la campaña ${campana} con la publicación ${postUrn}.`,
   };
 }
 

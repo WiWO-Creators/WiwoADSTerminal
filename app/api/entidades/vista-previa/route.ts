@@ -1,6 +1,8 @@
 import { getSession } from "@/app/sesion";
 import { CODIGOS_ERROR, fail } from "@/lib/api-respuestas";
 import { FORMATOS_DE_VISTA_PREVIA, metaNativoConfigurado, vistaPreviaDeAnuncio, type FormatoDeVistaPrevia } from "@/lib/meta-nativo";
+import { lecturaNativaLinkedin } from "@/lib/linkedin-conexion";
+import { vistasPreviasDeLinkedin } from "@/lib/linkedin-nativo";
 import { enAlcance } from "@/lib/permisos";
 import { accountIndex, normalizeAccountId } from "@/lib/portafolios-store";
 
@@ -13,6 +15,18 @@ export async function GET(request: Request) {
   const p = new URL(request.url).searchParams;
   const accountId = (p.get("accountId") ?? "").trim();
   const id = (p.get("id") ?? "").trim();
+  if (p.get("provider") === "linkedin") {
+    if (!/^\d+$/.test(id) || !accountId) return fail("Faltan la cuenta o el anuncio", 400);
+    const duenioLi = (await accountIndex()).get(normalizeAccountId(accountId));
+    if (!duenioLi || !enAlcance(session.actor, duenioLi.id)) return fail("Esa cuenta no está en tu alcance", 403);
+    try {
+      const acceso = await lecturaNativaLinkedin(session.actor, accountId);
+      if (!acceso) return Response.json({ vistas: [] }, { headers: { "cache-control": "no-store" } });
+      return Response.json({ vistas: await vistasPreviasDeLinkedin(accountId, id, acceso.token) }, { headers: { "cache-control": "private, max-age=300" } });
+    } catch {
+      return Response.json({ vistas: [] }, { headers: { "cache-control": "no-store" } });
+    }
+  }
   const formato = (p.get("formato") ?? "MOBILE_FEED_STANDARD") as FormatoDeVistaPrevia;
   if (!accountId || !/^\d+$/.test(id)) return fail("Faltan la cuenta o el anuncio", 400);
   if (!(formato in FORMATOS_DE_VISTA_PREVIA)) return fail("Formato no válido", 400);

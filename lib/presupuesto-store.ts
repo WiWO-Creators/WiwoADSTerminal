@@ -4,7 +4,7 @@
  * entrega la plataforma (la misma lectura del editor) y el gasto, de los anuncios del mes y de los últimos 90
  * días. Solo lectura, acotado al alcance de quien pregunta.
  */
-import { fetchDetalleDeCuenta } from "@/lib/detalle-entidad-store";
+import { leerDetalleParaMostrar } from "@/lib/detalle-entidad-store";
 import type { Actor } from "@/lib/permisos";
 import { getPerformanceSnapshot } from "@/lib/performance-store";
 import { fetchWindsorDaily } from "@/lib/windsor";
@@ -117,7 +117,8 @@ export async function presupuestoDelCliente(
       .map(async (a) => {
         const accountId = a.id.split(":").slice(2).join(":");
         try {
-          return { cuenta: a, accountId, detalle: await fetchDetalleDeCuenta(a.provider, accountId) };
+          // Es para mostrar, no para escribir: lo ya leído sale al instante y se renueva por detrás (la lectura fría tarda minutos).
+          return { cuenta: a, accountId, detalle: await leerDetalleParaMostrar(a.provider, accountId, { permitirViejo: true }).datos };
         } catch (error) {
           console.error("WiWO.ADS presupuesto por campaña: no se pudo leer", a.provider, accountId, error instanceof Error ? error.message : "error");
           cuentasSinLeer.push(a.name);

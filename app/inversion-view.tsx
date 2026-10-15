@@ -3,6 +3,7 @@
 import { conProyectosDeEstrategias, enProyectosAsignados, nombresDeProyectos } from "@/lib/segmentos";
 import { summarizeObjectives } from "@/lib/objetivos";
 import type { PerformanceSnapshot } from "@/lib/performance-store";
+import { DisponibleAhora } from "./disponible-ahora";
 import { DistribucionDelGasto } from "./distribucion-gasto";
 import { PresupuestoDelMes } from "./presupuesto-mes";
 import { Surface } from "./ui";
@@ -71,6 +72,7 @@ export function InversionView({
         <h2 className="neo-section-title">Inversión · {cliente.name}</h2>
         <p className="mt-1 text-sm text-muted-foreground">Presupuesto del mes y adónde se fue el gasto de {periodo}.</p>
       </div>
+      <DisponibleAhora key={`disponible-${cliente.id}`} portfolioId={cliente.id} campanas={campanas} periodo={periodo} />
       <PresupuestoDelMes key={`presupuesto-${cliente.id}`} portfolioId={cliente.id} />
       {ocultas > 0 && (
         <p className="rounded-xl border border-foreground/10 bg-foreground/4 px-4 py-2.5 text-xs leading-5 text-foreground/65">

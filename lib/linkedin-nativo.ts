@@ -35,6 +35,7 @@ import {
   type TokensLinkedin,
 } from "@/lib/linkedin-nativo-pura";
 import type { FilaCruda } from "@/lib/linkedin";
+import { rutaDeCreativos, rutaDePublicaciones, rutaDeVistaPrevia, urnDeCreativo, vistasPreviasDe, type VistaPreviaDeLinkedin } from "@/lib/linkedin-anuncios-lectura-pura";
 
 const BASE = "https://api.linkedin.com";
 const TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken";
@@ -155,6 +156,39 @@ export async function gruposDeLinkedin(cuentaId: string, accessToken: string) {
 }
 export async function campanasDeLinkedin(cuentaId: string, accessToken: string) {
   return elementos(await leerDeLinkedin(rutaDeCampanas(cuentaId), accessToken));
+}
+
+/** Anuncios (creatives) de la cuenta tal como están en LinkedIn: todos, también los pausados o sin actividad. Hasta `maxPaginas` de 100. */
+export async function creativosDeLinkedin(cuentaId: string, accessToken: string, maxPaginas = 3): Promise<Array<Record<string, unknown>>> {
+  const salida: Array<Record<string, unknown>> = [];
+  let siguiente: string | null = null;
+  for (let i = 0; i < maxPaginas; i++) {
+    const cuerpo = (await leerDeLinkedin(rutaDeCreativos(cuentaId, siguiente), accessToken)) as { metadata?: { nextPageToken?: string } };
+    salida.push(...elementos(cuerpo));
+    siguiente = cuerpo.metadata?.nextPageToken ?? null;
+    if (!siguiente) break;
+  }
+  return salida;
+}
+
+/** Las publicaciones que muestran los anuncios (de a 20, en lote). Una que no se pueda leer simplemente no aparece. */
+export async function publicacionesDeLinkedin(urns: string[], accessToken: string): Promise<Map<string, Record<string, unknown>>> {
+  const salida = new Map<string, Record<string, unknown>>();
+  const unicos = [...new Set(urns)];
+  for (let i = 0; i < unicos.length; i += 20) {
+    try {
+      const cuerpo = (await leerDeLinkedin(rutaDePublicaciones(unicos.slice(i, i + 20)), accessToken)) as { results?: Record<string, Record<string, unknown>> };
+      for (const [urn, post] of Object.entries(cuerpo.results ?? {})) salida.set(urn, post);
+    } catch (error) {
+      console.error("WiWO.ADS LinkedIn: no se pudieron leer publicaciones", error instanceof Error ? error.message : "error");
+    }
+  }
+  return salida;
+}
+
+/** Las vistas previas reales de un anuncio (feed de escritorio y de celular). */
+export async function vistasPreviasDeLinkedin(cuentaId: string, creativoId: string, accessToken: string): Promise<VistaPreviaDeLinkedin[]> {
+  return vistasPreviasDe(await leerDeLinkedin(rutaDeVistaPrevia(cuentaId, urnDeCreativo(creativoId)), accessToken));
 }
 
 /** Métricas diarias por campaña en el vocabulario de Windsor, para pasarlas por `adaptarFilaLinkedin`. */

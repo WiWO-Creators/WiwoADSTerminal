@@ -6,6 +6,7 @@
  * crea de verdad, verificado): por eso `simular` aquí no llama a Meta, solo comprueba los datos y devuelve lo que se crearía. Nunca se registra ni se devuelve el token.
  */
 import { env } from "cloudflare:workers";
+import { CAMPOS_DE_ANUNCIO_META, filaDeAnuncioMeta } from "@/lib/meta-anuncios-pura";
 import { colocacionesDeConjunto, type Colocaciones } from "@/lib/anuncios-formato-pura";
 import { copiaDeReglaParaAnuncio, especificacionDeReglaDeGasto, type ReglaNativaCruda } from "@/lib/reglas-meta-pura";
 import type { OrganicPost } from "@/lib/windsor";
@@ -512,6 +513,21 @@ export async function vistaPreviaDeAnuncio(anuncioId: string, formato: FormatoDe
   const url = m[1].replace(/&amp;/g, "&");
   // Solo direcciones de Meta: el iframe nunca apunta a otro sitio.
   return /^https:\/\/([a-z0-9-]+\.)?(facebook|instagram)\.com\//i.test(url) ? { url, ancho, alto } : null;
+}
+
+/**
+ * Anuncios concretos de una cuenta tal como están en Meta (contenido incluido), en el formato de filas de Windsor. Sirve para
+ * editar lo recién creado, que Windsor tarda horas en entregar. Solo lectura.
+ */
+export async function leerAnunciosDeMeta(accountId: string, ids: string[]): Promise<Array<Record<string, unknown>>> {
+  const validos = ids.filter((id) => /^\d+$/.test(id)).slice(0, 50);
+  if (validos.length === 0) return [];
+  const j = await graph<{ data?: unknown[] }>(`${cuenta(accountId)}/ads`, "GET", {
+    fields: CAMPOS_DE_ANUNCIO_META,
+    filtering: [{ field: "id", operator: "IN", value: validos }],
+    limit: 50,
+  });
+  return (j.data ?? []).map((a) => filaDeAnuncioMeta(a, accountId)).filter((f): f is Record<string, unknown> => f !== null);
 }
 
 export type InteresMeta = { id: string; nombre: string; tamano: number | null; ruta: string | null };

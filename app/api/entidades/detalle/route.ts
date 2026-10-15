@@ -6,7 +6,7 @@ import {
   VENTANA_DETALLE_DIAS,
 } from "@/lib/detalle-entidad-store";
 import { accesoNativoGoogle } from "@/lib/integration-store";
-import { accesoNativoLinkedin } from "@/lib/linkedin-conexion";
+import { lecturaNativaLinkedin } from "@/lib/linkedin-conexion";
 import { graphJson, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { aspectoDe, descripcionDeCreativo, medidaDeVideo, piezaDeCreativo, ventanaDeAtribucion } from "@/lib/meta-precarga-pura";
 import { can, enAlcance } from "@/lib/permisos";
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
   try {
     const credencialesGoogle =
       provider === "google" ? await accesoNativoGoogle(session.actor, accountId) : null;
-    const credencialesLinkedin = provider === "linkedin" ? await accesoNativoLinkedin(session.actor, accountId) : null;
+    const credencialesLinkedin = provider === "linkedin" ? await lecturaNativaLinkedin(session.actor, accountId) : null;
     // Para mostrar: lo ya leído sale al instante (marcado `obsoleto`) y se renueva por detrás; `fresco=1` fuerza una lectura nueva.
     const lectura = leerDetalleParaMostrar(provider, accountId, { credencialesGoogle, credencialesLinkedin, permitirViejo: true, fresco: url.searchParams.get("fresco") === "1" });
     const detalle = await lectura.datos;

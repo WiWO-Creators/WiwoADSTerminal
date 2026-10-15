@@ -50,6 +50,7 @@ import type { PortfolioSummary } from "@/lib/portafolios";
 import { CONECTABLES, platformLabel } from "@/lib/plataformas";
 import { OrbeDeBoton, Surface } from "./ui";
 import { LinkedinCard } from "./linkedin-card";
+import { TiktokCard } from "./tiktok-card";
 
 type WindsorAccount = { name: string; currency: string | null };
 
@@ -466,6 +467,7 @@ export function IntegrationsView({
               />
             ))}
         {!loading && <LinkedinCard canManage={canManage} />}
+        {!loading && <TiktokCard canManage={canManage} />}
       </div>
 
       <CatalogoPanel canManage={canManage} />

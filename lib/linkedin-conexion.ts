@@ -267,3 +267,18 @@ export async function accesoNativoLinkedin(user: Actor, accountId: string): Prom
     return null;
   }
 }
+
+/**
+ * Acceso para LEER directo de LinkedIn (anuncios, publicaciones, vistas previas): vale con la conexión del equipo y que la cuenta sea
+ * visible para ella. No exige la guarda de escritura en clientes (`LINKEDIN_ESCRITURA_CLIENTES`): leer no cambia nada.
+ */
+export async function lecturaNativaLinkedin(user: Actor, accountId: string): Promise<CredencialesLinkedin | null> {
+  if (!linkedinNativoConfigurado()) return null;
+  try {
+    const token = await tokenDeLinkedin(user);
+    const cuenta = (await cuentasDeLinkedin(token)).find((c) => c.id === accountId);
+    return cuenta ? { token } : null;
+  } catch {
+    return null;
+  }
+}

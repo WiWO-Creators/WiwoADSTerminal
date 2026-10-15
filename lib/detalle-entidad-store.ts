@@ -30,8 +30,9 @@ import {
 } from "@/lib/detalle-entidad";
 import { versionDeEscrituras } from "@/lib/escrituras";
 import type { CredencialesLinkedin } from "@/lib/linkedin-conexion";
-import { campanasDeLinkedin, gruposDeLinkedin } from "@/lib/linkedin-nativo";
-import { graphJson, leerEstructuraMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
+import { detalleAnuncioNativoLinkedin, grupoPorCampana, referenciaDeCreativo } from "@/lib/linkedin-anuncios-lectura-pura";
+import { campanasDeLinkedin, creativosDeLinkedin, gruposDeLinkedin, publicacionesDeLinkedin } from "@/lib/linkedin-nativo";
+import { graphJson, leerAnunciosDeMeta, leerEstructuraMeta, metaNativoConfigurado } from "@/lib/meta-nativo";
 import { unidadesMenoresMeta } from "@/lib/monedas";
 import {
   consultarGaql,
@@ -213,12 +214,28 @@ async function completarConNativoLinkedin(detalle: DetalleDeCuenta, credenciales
     ]);
     const nativasG = nonNull(grupos.map((g) => detalleCampanaLinkedinNativa(g, detalle.accountId)));
     const nativasC = nonNull(campanas.map((c) => detalleConjuntoLinkedinNativo(c, detalle.accountId)));
+    // Los anuncios, también directo de LinkedIn: todos los de la cuenta, con el texto de su publicación. Si falla, quedan los de Windsor.
+    let anuncios = detalle.anuncios;
+    try {
+      const creativos = await creativosDeLinkedin(detalle.accountId, credenciales.token);
+      const publicaciones = await publicacionesDeLinkedin(creativos.map((c) => referenciaDeCreativo(c)).filter((u): u is string => Boolean(u)), credenciales.token);
+      const grupos2 = grupoPorCampana(campanas);
+      const nativos = nonNull(creativos.map((c) => {
+        const ref = referenciaDeCreativo(c);
+        return detalleAnuncioNativoLinkedin(c, ref ? (publicaciones.get(ref) ?? null) : null, detalle.accountId, grupos2);
+      }));
+      const idsNativos = new Set(nativos.map((a) => a.id));
+      anuncios = [...nativos, ...detalle.anuncios.filter((a) => !idsNativos.has(a.id))];
+    } catch (error) {
+      console.error("WiWO.ADS detalle LinkedIn: anuncios nativos", error instanceof Error ? error.message : "error");
+    }
     // Si la API no trae nada, se conserva lo de Windsor en vez de vaciar la pantalla.
-    if (nativasG.length + nativasC.length === 0) return detalle;
+    if (nativasG.length + nativasC.length === 0 && anuncios === detalle.anuncios) return detalle;
     return {
       ...detalle,
       campanas: nativasG.length ? nativasG : detalle.campanas,
       conjuntos: nativasC.length ? nativasC : detalle.conjuntos,
+      anuncios,
       fuente: "nativa",
       avisos: detalle.avisos.filter((a) => a !== AVISO_SOLO_ACTIVIDAD),
     };
@@ -262,6 +279,18 @@ async function completarConRecientes(detalle: DetalleDeCuenta): Promise<DetalleD
     const nuevosConjuntos = recientes.conjuntos.filter((c) => !conj.has(c.id));
     const nuevosAnuncios = recientes.anuncios.filter((a) => !anun.has(a.id));
     if (nuevasCampanas.length + nuevosConjuntos.length + nuevosAnuncios.length === 0) return detalle;
+    // Meta: el contenido de lo recién creado se lee directo, para poder editarlo sin esperar a Windsor. Si falla, queda el marcador.
+    const leidos = new Map<string, DetalleAnuncio>();
+    if (detalle.provider === "meta" && metaNativoConfigurado() && nuevosAnuncios.length > 0) {
+      try {
+        for (const fila of await leerAnunciosDeMeta(detalle.accountId, nuevosAnuncios.map((a) => a.id))) {
+          const d = detalleAnuncioMeta(fila);
+          if (d) leidos.set(d.id, { ...d, accountId: detalle.accountId });
+        }
+      } catch (error) {
+        console.error("WiWO.ADS detalle Meta: no se pudieron leer los anuncios recientes", error instanceof Error ? error.message : "error");
+      }
+    }
     const sinPresupuesto = { diario: null, total: null };
     const sinPuja = { estrategia: null, objetivoCpa: null, objetivoRoas: null };
     return {
@@ -284,7 +313,7 @@ async function completarConRecientes(detalle: DetalleDeCuenta): Promise<DetalleD
       ],
       anuncios: [
         ...detalle.anuncios,
-        ...nuevosAnuncios.map((a): DetalleAnuncio => ({
+        ...nuevosAnuncios.map((a): DetalleAnuncio => leidos.get(a.id) ?? ({
           provider: detalle.provider, accountId: detalle.accountId, campaignId: a.campaignId, conjuntoId: a.conjuntoId, id: a.id,
           nombre: a.nombre, estado: "PAUSED", tipo: null, contenido: SIN_CONTENIDO,
           edicionDeContenido: { editable: false, via: "ninguna", motivo: MOTIVO_RECIEN_CREADO },

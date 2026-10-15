@@ -66,15 +66,34 @@ function vence(ms: number): string {
   return dias <= 0 ? "Vence hoy" : dias === 1 ? "Vence mañana" : `Vence en ${dias} días`;
 }
 
+const MOTIVO_SIN_PERMISO = "Tu rol propone cambios; resolver decisiones lo hace un Digital Lead o superior.";
+
 const idempotencia = () => `SUG-${crypto.randomUUID()}`;
 
+/** Evaluar un cliente lee su rendimiento (puede tardar); resolver una decisión no debería pasar de unos segundos. */
+const ESPERA_RESOLVER_MS = 30_000;
+const ESPERA_EVALUAR_MS = 4 * 60_000;
+
 async function pedir(cuerpo: unknown): Promise<{ ok: boolean; cuerpo: Record<string, unknown> }> {
-  const respuesta = await fetch("/api/sugerencias", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(cuerpo),
-  });
-  return { ok: respuesta.ok, cuerpo: (await respuesta.json().catch(() => ({}))) as Record<string, unknown> };
+  // Con tope de espera: si el servidor se reinicia (por ejemplo, justo al desplegar) la petición no queda colgada para siempre
+  // dejando los botones de resolver apagados; se avisa y se puede volver a intentar.
+  const control = new AbortController();
+  const tipo = (cuerpo as { kind?: string } | null)?.kind;
+  const t = window.setTimeout(() => control.abort(), tipo === "evaluar" ? ESPERA_EVALUAR_MS : ESPERA_RESOLVER_MS);
+  try {
+    const respuesta = await fetch("/api/sugerencias", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(cuerpo),
+      signal: control.signal,
+    });
+    return { ok: respuesta.ok, cuerpo: (await respuesta.json().catch(() => ({}))) as Record<string, unknown> };
+  } catch (e) {
+    if ((e as Error).name === "AbortError") throw new Error("El servidor tardó demasiado en responder (puede estar actualizándose). Inténtalo de nuevo en un momento.");
+    throw e;
+  } finally {
+    window.clearTimeout(t);
+  }
 }
 
 /**
@@ -826,7 +845,7 @@ export function BotonDeSugerencias({
                   <button
                     type="button"
                     aria-label="Descartar"
-                    title="Descartar (←)"
+                    title={puede ? "Descartar (←)" : MOTIVO_SIN_PERMISO}
                     disabled={!puede || trabajando}
                     onClick={() => setEligiendoMotivo(true)}
                     className="grid size-14 place-items-center rounded-full border-2 border-danger/50 text-danger transition-transform hover:scale-105 hover:bg-danger/10 disabled:opacity-35"
@@ -836,7 +855,7 @@ export function BotonDeSugerencias({
                   <button
                     type="button"
                     aria-label="Posponer"
-                    title="Posponer (↓)"
+                    title={puede ? "Posponer (↓)" : MOTIVO_SIN_PERMISO}
                     disabled={!puede || trabajando}
                     onClick={() => void posponer(actual)}
                     className="grid size-11 place-items-center rounded-full border-2 border-foreground/25 text-foreground/70 transition-transform hover:scale-105 hover:bg-foreground/8 disabled:opacity-35"
@@ -846,7 +865,7 @@ export function BotonDeSugerencias({
                   <button
                     type="button"
                     aria-label="Aprobar"
-                    title="Aprobar (→)"
+                    title={puede ? "Aprobar (→)" : MOTIVO_SIN_PERMISO}
                     disabled={!puede || trabajando}
                     onClick={() => void aprobar(actual)}
                     className="grid size-14 place-items-center rounded-full border-2 border-ok/60 text-ok transition-transform hover:scale-105 hover:bg-ok/10 disabled:opacity-35"
@@ -854,6 +873,15 @@ export function BotonDeSugerencias({
                     <Check className="size-7" />
                   </button>
                 </div>
+              )}
+
+              {!puede && datos && (
+                <p className="text-center text-xs text-foreground/50">
+                  {MOTIVO_SIN_PERMISO}{" "}
+                  <button type="button" onClick={() => void leer().catch(() => undefined)} className="font-semibold text-brand hover:underline">
+                    Volver a comprobar
+                  </button>
+                </p>
               )}
 
               {total > 1 && (
